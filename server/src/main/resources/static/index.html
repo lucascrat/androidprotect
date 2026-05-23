@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AndroidProtect - Dashboard de Controle Anti-Roubo</title>
+    <!-- Google Fonts: Inter (modern) & JetBrains Mono (terminal) -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome for Premium Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Leaflet.js for interactive OpenStreetMap -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <div class="logo">
+                    <i class="fa-solid fa-shield-halved neon-text-blue"></i>
+                    <span>Android<span class="neon-text-pink">Protect</span></span>
+                </div>
+            </div>
+            
+            <div class="device-section">
+                <h3><i class="fa-solid fa-mobile-screen"></i> DISPOSITIVOS</h3>
+                <div id="no-devices" class="no-devices-msg">
+                    <i class="fa-solid fa-spinner fa-spin"></i>
+                    <p>Aguardando conexão de dispositivos...</p>
+                </div>
+                <ul id="device-list" class="device-list">
+                    <!-- Dynamic devices list will render here -->
+                </ul>
+            </div>
+
+            <div class="sidebar-footer">
+                <p><i class="fa-solid fa-circle-nodes green-dot"></i> Servidor Online</p>
+                <span class="version">v1.0.0</span>
+            </div>
+        </aside>
+
+        <!-- Main Workspace -->
+        <main class="main-content">
+            <!-- Top Status Bar -->
+            <header class="top-bar">
+                <div class="active-device-info">
+                    <h2 id="current-device-name">Selecione um dispositivo</h2>
+                    <span id="current-device-status" class="status-badge offline">OFFLINE</span>
+                </div>
+
+                <div class="device-telemetry" id="device-telemetry" style="display: none;">
+                    <div class="telemetry-item">
+                        <i id="battery-icon" class="fa-solid fa-battery-three-quarters"></i>
+                        <span id="battery-level">--%</span>
+                    </div>
+                    <div class="telemetry-item">
+                        <i class="fa-solid fa-wifi"></i>
+                        <span id="network-status">Conectado</span>
+                    </div>
+                </div>
+            </header>
+
+            <!-- Dashboard Grid Layout -->
+            <div class="dashboard-grid">
+                <!-- Row 1: Left Map, Right Commands & Screen -->
+                <div class="grid-card map-card">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-map-location-dot neon-text-blue"></i> Localização em Tempo Real</h3>
+                        <span class="card-subtitle" id="location-accuracy">Precisão: --m</span>
+                    </div>
+                    <div class="card-body map-container">
+                        <div id="map"></div>
+                    </div>
+                </div>
+
+                <!-- Remote Commands -->
+                <div class="grid-card commands-card">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-terminal neon-text-pink"></i> Comandos Remotos</h3>
+                    </div>
+                    <div class="card-body command-buttons-grid">
+                        <button class="btn btn-primary" onclick="sendCommand('TAKE_PHOTO', {camera: 'front'})">
+                            <i class="fa-solid fa-camera-rotate"></i>
+                            <span>Câmera Frontal</span>
+                        </button>
+                        <button class="btn btn-primary" onclick="sendCommand('TAKE_PHOTO', {camera: 'back'})">
+                            <i class="fa-solid fa-camera"></i>
+                            <span>Câmera Traseira</span>
+                        </button>
+                        <button class="btn btn-secondary" onclick="sendCommand('RECORD_AUDIO', {duration: 15})">
+                            <i class="fa-solid fa-microphone"></i>
+                            <span>Gravar Ambiente (15s)</span>
+                        </button>
+                        <button id="btn-screen" class="btn btn-secondary" onclick="toggleScreenStream()">
+                            <i id="screen-btn-icon" class="fa-solid fa-desktop"></i>
+                            <span id="screen-btn-text">Transmitir Tela</span>
+                        </button>
+                        <button class="btn btn-danger" onclick="sendCommand('PLAY_ALARM', {})">
+                            <i class="fa-solid fa-circle-exclamation fa-beat"></i>
+                            <span>Disparar Sirene</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Live Screen Stream -->
+                <div class="grid-card screen-card">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-tv neon-text-blue"></i> Tela ao Vivo</h3>
+                        <span id="screen-stream-badge" class="badge red-badge" style="display: none;"><span class="pulse-dot"></span> AO VIVO</span>
+                    </div>
+                    <div class="card-body screen-stream-container">
+                        <!-- Smartphone mockup frame -->
+                        <div class="phone-mockup">
+                            <div class="phone-speaker"></div>
+                            <div class="phone-screen">
+                                <div id="screen-placeholder" class="screen-placeholder">
+                                    <i class="fa-solid fa-desktop fa-3x"></i>
+                                    <p>Transmissão Desligada</p>
+                                    <button class="btn btn-sm btn-primary" onclick="toggleScreenStream()">Iniciar</button>
+                                </div>
+                                <img id="screen-stream-img" class="screen-stream-img" src="" alt="Live Stream" style="display: none;">
+                            </div>
+                            <div class="phone-home"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Captured Photos Gallery -->
+                <div class="grid-card gallery-card">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-images neon-text-blue"></i> Galeria de Câmera</h3>
+                    </div>
+                    <div class="card-body photo-gallery" id="photo-gallery">
+                        <div class="empty-gallery-msg">Nenhuma foto capturada ainda.</div>
+                    </div>
+                </div>
+
+                <!-- Ambient Audios Player -->
+                <div class="grid-card audio-card">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-volume-high neon-text-pink"></i> Gravações de Áudio</h3>
+                    </div>
+                    <div class="card-body audio-list" id="audio-list">
+                        <div class="empty-audio-msg">Nenhuma gravação de áudio encontrada.</div>
+                    </div>
+                </div>
+
+                <!-- Security Event Log (Terminal Console) -->
+                <div class="grid-card terminal-card">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-code neon-text-blue"></i> Console de Segurança</h3>
+                        <button class="btn btn-sm btn-clear-log" onclick="clearConsole()"><i class="fa-solid fa-trash-can"></i> Limpar</button>
+                    </div>
+                    <div class="card-body terminal-body" id="terminal-body">
+                        <div class="terminal-line system"><span class="timestamp">[00:00:00]</span> AndroidProtect console inicializado com sucesso. Aguardando comando...</div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Image Modal for Lightbox -->
+    <div id="image-modal" class="modal" onclick="closeImageModal()">
+        <span class="close-modal">&times;</span>
+        <img class="modal-content" id="img-modal-src">
+        <div id="caption-modal"></div>
+    </div>
+    
+    <script src="app.js"></script>
+</body>
+</html>
