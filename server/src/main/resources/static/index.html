@@ -8,9 +8,8 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
     <!-- FontAwesome for Premium Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Leaflet.js for interactive OpenStreetMap -->
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- Premium Google Maps JavaScript API (Mapas Real) -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyAmRX083M3ZhDiN7LBfhDiwEwRtf297hdE&libraries=geometry"></script>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -66,9 +65,16 @@
             <div class="dashboard-grid">
                 <!-- Row 1: Left Map, Right Commands & Screen -->
                 <div class="grid-card map-card">
-                    <div class="card-header">
-                        <h3><i class="fa-solid fa-map-location-dot neon-text-blue"></i> Localização em Tempo Real</h3>
-                        <span class="card-subtitle" id="location-accuracy">Precisão: --m</span>
+                    <div class="card-header flex-header">
+                        <div class="header-left">
+                            <h3><i class="fa-solid fa-map-location-dot neon-text-blue"></i> Localização em Tempo Real</h3>
+                            <span class="card-subtitle" id="location-accuracy">Precisão: --m</span>
+                        </div>
+                        <div class="map-controls">
+                            <button id="btn-map-dark" class="btn-map-type active" onclick="setMapType('roadmap')">🕶️ Dark</button>
+                            <button id="btn-map-satellite" class="btn-map-type" onclick="setMapType('hybrid')">🌌 Satélite</button>
+                            <button id="btn-map-hybrid" class="btn-map-type" onclick="setMapType('roadmap_cyber')">🛣️ Ruas</button>
+                        </div>
                     </div>
                     <div class="card-body map-container">
                         <div id="map"></div>

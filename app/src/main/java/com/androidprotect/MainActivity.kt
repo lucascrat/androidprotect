@@ -81,8 +81,13 @@ class MainActivity : ComponentActivity() {
             Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "Desconhecido" 
         }
         
+        val sharedPrefs = remember { context.getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE) }
+
         // Configuration States
-        var serverIp by remember { mutableStateOf(AntiTheftService.serverIpAddress) }
+        var serverIp by remember { 
+            val savedIp = sharedPrefs.getString("server_ip", "protect.appbr.pro") ?: "protect.appbr.pro"
+            mutableStateOf(savedIp)
+        }
         var isServiceActive by remember { mutableStateOf(AntiTheftService.isServiceRunning) }
         var testResult by remember { mutableStateOf<String?>(null) }
         var isTestingConnection by remember { mutableStateOf(false) }
@@ -96,8 +101,30 @@ class MainActivity : ComponentActivity() {
         
         val hasScreenCapturePerm = AntiTheftService.mediaProjectionData != null
 
-        // Trigger updates when screen starts or active
+        // Auto start service if not running
         LaunchedEffect(Unit) {
+            // Apply loaded configuration to service static variable
+            AntiTheftService.serverIpAddress = serverIp
+            
+            // Auto start if it was active or defaults to true on first run
+            val autoStart = sharedPrefs.getBoolean("auto_start", true)
+            if (autoStart && !AntiTheftService.isServiceRunning) {
+                val serviceIntent = Intent(context, AntiTheftService::class.java).apply {
+                    putExtra("SERVER_IP", serverIp)
+                }
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(serviceIntent)
+                    } else {
+                        context.startService(serviceIntent)
+                    }
+                    isServiceActive = true
+                    Toast.makeText(context, "Conectado automaticamente ao servidor!", Toast.LENGTH_SHORT).show()
+                } catch (e: Exception) {
+                    Log.e("MainActivity", "Auto-start service failed: ${e.message}")
+                }
+            }
+
             hasLocationPerm = hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)
             hasBgLocationPerm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                 hasPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
@@ -238,14 +265,21 @@ class MainActivity : ComponentActivity() {
                         Button(
                             onClick = {
                                 AntiTheftService.serverIpAddress = serverIp
+                                sharedPrefs.edit()
+                                    .putString("server_ip", serverIp)
+                                    .putBoolean("auto_start", true)
+                                    .apply()
+
                                 val serviceIntent = Intent(context, AntiTheftService::class.java).apply {
                                     putExtra("SERVER_IP", serverIp)
                                 }
                                 
                                 if (isServiceActive) {
                                     // Stop
+                                    sharedPrefs.edit().putBoolean("auto_start", false).apply()
                                     context.stopService(serviceIntent)
                                     isServiceActive = false
+                                    Toast.makeText(context, "Serviço parado.", Toast.LENGTH_SHORT).show()
                                 } else {
                                     // Start
                                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -254,6 +288,7 @@ class MainActivity : ComponentActivity() {
                                         context.startService(serviceIntent)
                                     }
                                     isServiceActive = true
+                                    Toast.makeText(context, "Serviço iniciado com sucesso!", Toast.LENGTH_SHORT).show()
                                 }
                             },
                             modifier = Modifier.weight(1f),
@@ -279,6 +314,136 @@ class MainActivity : ComponentActivity() {
                             fontWeight = FontWeight.Medium,
                             modifier = Modifier.align(Alignment.CenterHorizontally)
                         )
+                    }
+                }
+            }
+
+            // Quick Presets Card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 20.dp)
+                    .border(1.dp, Color(0xFF252630), RoundedCornerShape(16.dp)),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF12141D)),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text("ATALHOS DE CONEXÃO RÁPIDA", fontSize = 11.sp, color = Color(0xFF8E94A5), fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Conecte-se instantaneamente ao servidor de nuvem ou em ambiente de desenvolvimento local.",
+                        color = Color(0xFF8E94A5),
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+                    
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Button(
+                            onClick = {
+                                val officialIp = "protect.appbr.pro"
+                                serverIp = officialIp
+                                AntiTheftService.serverIpAddress = officialIp
+                                sharedPrefs.edit()
+                                    .putString("server_ip", officialIp)
+                                    .putBoolean("auto_start", true)
+                                    .apply()
+                                    
+                                val serviceIntent = Intent(context, AntiTheftService::class.java).apply {
+                                    putExtra("SERVER_IP", officialIp)
+                                }
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                    context.startForegroundService(serviceIntent)
+                                } else {
+                                    context.startService(serviceIntent)
+                                }
+                                isServiceActive = true
+                                Toast.makeText(context, "Conectado ao Servidor Oficial!", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00D2FF))
+                        ) {
+                            Text("Servidor Oficial", color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                        
+                        OutlinedButton(
+                            onClick = {
+                                val devIp = "10.0.2.2" // Emulator local loopback
+                                serverIp = devIp
+                                AntiTheftService.serverIpAddress = devIp
+                                sharedPrefs.edit()
+                                    .putString("server_ip", devIp)
+                                    .putBoolean("auto_start", true)
+                                    .apply()
+                                    
+                                val serviceIntent = Intent(context, AntiTheftService::class.java).apply {
+                                    putExtra("SERVER_IP", devIp)
+                                }
+                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                    context.startForegroundService(serviceIntent)
+                                } else {
+                                    context.startService(serviceIntent)
+                                }
+                                isServiceActive = true
+                                Toast.makeText(context, "Conectado ao Servidor Local (Dev)!", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF2A85))
+                        ) {
+                            Text("Servidor Local", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+                }
+            }
+
+            // App Hiding Card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 20.dp)
+                    .border(1.dp, Color(0xFF252630), RoundedCornerShape(16.dp)),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF12141D)),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(modifier = Modifier.padding(20.dp)) {
+                    Text("COMO ESCONDER O APLICATIVO", fontSize = 11.sp, color = Color(0xFF8E94A5), fontWeight = FontWeight.Bold, letterSpacing = 1.sp)
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Para garantir a segurança máxima contra roubos e evitar desinstalações, o ícone do aplicativo pode ser ocultado do inicializador usando o recurso nativo de ocultação de aplicativos do Android.",
+                        color = Color(0xFF8E94A5),
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                    Text(
+                        text = "Passos:\n1. Mantenha pressionada a tela inicial e abra Configurações da Tela Inicial.\n2. Procure pela opção \"Ocultar aplicativos\" (ou \"Ocultar apps na Tela inicial/de Aplicativos\").\n3. Selecione o \"AndroidProtect\" e clique em Aplicar.\nO aplicativo continuará rodando normalmente em segundo plano mesmo sem o ícone visível!",
+                        color = Color(0xFFE2E4E9),
+                        fontSize = 12.sp,
+                        lineHeight = 18.sp,
+                        modifier = Modifier.padding(bottom = 16.dp)
+                    )
+                    
+                    Button(
+                        onClick = {
+                            try {
+                                val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                    data = android.net.Uri.fromParts("package", context.packageName, null)
+                                }
+                                context.startActivity(intent)
+                            } catch (e: Exception) {
+                                Toast.makeText(context, "Erro ao abrir configurações: ${e.message}", Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF2A85))
+                    ) {
+                        Text("Configurações do Aplicativo no Sistema", color = Color.White, fontWeight = FontWeight.Bold)
                     }
                 }
             }

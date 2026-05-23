@@ -309,6 +309,43 @@ body {
     min-height: 520px;
 }
 
+.flex-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+}
+
+.map-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-map-type {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+    padding: 6px 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-map-type:hover {
+    background: rgba(0, 210, 255, 0.08);
+    color: var(--neon-blue);
+    border-color: rgba(0, 210, 255, 0.2);
+}
+
+.btn-map-type.active {
+    background: rgba(0, 210, 255, 0.15);
+    color: var(--neon-blue);
+    border-color: var(--neon-blue);
+    box-shadow: 0 0 8px rgba(0, 210, 255, 0.25);
+}
+
 .screen-card {
     grid-row: span 2;
     align-items: center;

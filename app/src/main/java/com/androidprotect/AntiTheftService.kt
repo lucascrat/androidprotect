@@ -110,6 +110,10 @@ class AntiTheftService : LifecycleService() {
         deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "android_dev"
         modelName = "${Build.MANUFACTURER} ${Build.MODEL}"
         
+        // Load saved server IP address from SharedPreferences if available
+        val sharedPrefs = getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+        serverIpAddress = sharedPrefs.getString("server_ip", "protect.appbr.pro") ?: "protect.appbr.pro"
+        
         // Init Helpers
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
         cameraHelper = CameraHelper(this)
@@ -127,10 +131,12 @@ class AntiTheftService : LifecycleService() {
         super.onStartCommand(intent, flags, startId)
         Log.d("AntiTheftService", "Service onStartCommand")
         
-        // In case IP was updated, reconnect
+        // In case IP was updated, reconnect and save it
         val ipFromIntent = intent?.getStringExtra("SERVER_IP")
         if (ipFromIntent != null && ipFromIntent != serverIpAddress) {
             serverIpAddress = ipFromIntent
+            val sharedPrefs = getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+            sharedPrefs.edit().putString("server_ip", ipFromIntent).apply()
             connectToServer()
         }
         
@@ -175,15 +181,42 @@ class AntiTheftService : LifecycleService() {
         startForeground(NOTIFICATION_ID, notification)
     }
 
+    // Build the dynamic WebSocket connection URL
+    private fun getWebSocketUrl(): String {
+        val cleanHost = serverIpAddress.trim()
+        val isSecureDomain = !cleanHost.contains(":") && (cleanHost.contains(".") && !cleanHost.first().isDigit())
+        
+        val baseUrl = if (isSecureDomain) {
+            "wss://$cleanHost/ws/device/$deviceId"
+        } else {
+            val hostWithPort = if (cleanHost.contains(":")) cleanHost else "$cleanHost:8080"
+            "ws://$hostWithPort/ws/device/$deviceId"
+        }
+        
+        return baseUrl +
+                "?model=${UriEncoder.encode(modelName)}" +
+                "&battery=${getBatteryPercentage()}" +
+                "&charging=${isDeviceCharging()}"
+    }
+
+    // Build the dynamic HTTP file upload URL
+    private fun getUploadUrl(path: String): String {
+        val cleanHost = serverIpAddress.trim()
+        val isSecureDomain = !cleanHost.contains(":") && (cleanHost.contains(".") && !cleanHost.first().isDigit())
+        
+        return if (isSecureDomain) {
+            "https://$cleanHost$path"
+        } else {
+            val hostWithPort = if (cleanHost.contains(":")) cleanHost else "$cleanHost:8080"
+            "http://$hostWithPort$path"
+        }
+    }
+
     // Connect to WebSocket Server
     private fun connectToServer() {
         webSocket?.close(1000, "Reconnecting")
         
-        val url = "ws://$serverIpAddress:8080/ws/device/$deviceId" +
-                "?model=${UriEncoder.encode(modelName)}" +
-                "&battery=${getBatteryPercentage()}" +
-                "&charging=${isDeviceCharging()}"
-        
+        val url = getWebSocketUrl()
         Log.d("AntiTheftService", "Connecting to WebSocket: $url")
         
         val request = Request.Builder()
@@ -344,7 +377,8 @@ class AntiTheftService : LifecycleService() {
 
     // HTTP Multipart Uploader
     private fun uploadFile(file: File, path: String, fileFieldName: String) {
-        val serverUrl = "http://$serverIpAddress:8080$path"
+        val serverUrl = getUploadUrl(path)
+        Log.d("AntiTheftService", "Uploading file to: $serverUrl")
         
         val requestBody = MultipartBody.Builder()
             .setType(MultipartBody.FORM)

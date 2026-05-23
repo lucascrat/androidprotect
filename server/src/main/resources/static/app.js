@@ -9,27 +9,116 @@ let devicesMap = new Map();
 let isScreenStreaming = false;
 let currentStreamObjectUrl = null;
 
+// Premium custom cyber-dark theme styling for Google Maps (neon style matching our dashboard)
+const darkMapStyle = [
+    { elementType: "geometry", stylers: [{ color: "#0a0b10" }] },
+    { elementType: "labels.text.stroke", stylers: [{ color: "#0a0b10" }] },
+    { elementType: "labels.text.fill", stylers: [{ color: "#8e94a5" }] },
+    {
+        featureType: "administrative.locality",
+        elementType: "labels.text.fill",
+        stylers: [{ color: "#00d2ff" }],
+    },
+    {
+        featureType: "poi",
+        elementType: "labels.text.fill",
+        stylers: [{ color: "#ff2a85", opacity: 0.5 }],
+    },
+    {
+        featureType: "poi.park",
+        elementType: "geometry",
+        stylers: [{ color: "#12141d" }],
+    },
+    {
+        featureType: "road",
+        elementType: "geometry",
+        stylers: [{ color: "#1b1d28" }],
+    },
+    {
+        featureType: "road",
+        elementType: "geometry.stroke",
+        stylers: [{ color: "#252630" }],
+    },
+    {
+        featureType: "road",
+        elementType: "labels.text.fill",
+        stylers: [{ color: "#8e94a5" }],
+    },
+    {
+        featureType: "road.highway",
+        elementType: "geometry",
+        stylers: [{ color: "#252630" }],
+    },
+    {
+        featureType: "road.highway",
+        elementType: "geometry.stroke",
+        stylers: [{ color: "#00d2ff", weight: 0.5 }],
+    },
+    {
+        featureType: "water",
+        elementType: "geometry",
+        stylers: [{ color: "#050608" }],
+    },
+    {
+        featureType: "water",
+        elementType: "labels.text.fill",
+        stylers: [{ color: "#00d2ff" }],
+    },
+];
+
 // Initialize Dashboard
 window.addEventListener('DOMContentLoaded', () => {
     initMap();
     connectWebSocket();
 });
 
-// Initialize Leaflet Map
+// Initialize Google Maps Map (Mapas Real)
 function initMap() {
     // Default location (São Paulo, Brazil)
     const defaultLat = -23.55052;
     const defaultLng = -46.633308;
     
-    map = L.map('map', {
-        zoomControl: true,
-        attributionControl: false
-    }).setView([defaultLat, defaultLng], 13);
+    try {
+        map = new google.maps.Map(document.getElementById('map'), {
+            center: { lat: defaultLat, lng: defaultLng },
+            zoom: 13,
+            disableDefaultUI: false,
+            zoomControl: true,
+            mapTypeControl: false,
+            streetViewControl: false,
+            fullscreenControl: true,
+            styles: darkMapStyle
+        });
+        console.log('Google Maps initialized successfully.');
+    } catch (e) {
+        console.error('Failed to initialize Google Maps:', e);
+        // Fallback placeholder display
+        document.getElementById('map').innerHTML = `<div style="padding: 40px; text-align: center; color: var(--neon-pink);"><i class="fa-solid fa-triangle-exclamation fa-2x"></i><p style="margin-top: 10px;">Erro ao carregar o Google Maps. Verifique a chave de API.</p></div>`;
+    }
+}
+
+// Switch Google Maps Layer Type dynamically
+function setMapType(type) {
+    if (!map) return;
     
-    // Sleek dark-mode map tiles from CartoDB (perfect for our premium UI)
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-        maxZoom: 20
-    }).addTo(map);
+    // Update active button state
+    document.querySelectorAll('.btn-map-type').forEach(btn => btn.classList.remove('active'));
+    
+    if (type === 'roadmap') {
+        document.getElementById('btn-map-dark').classList.add('active');
+        map.setMapTypeId(google.maps.MapTypeId.ROADMAP);
+        map.setOptions({ styles: darkMapStyle });
+        logToConsole('Mapa alterado para Cyber-Dark.', 'system');
+    } else if (type === 'hybrid') {
+        document.getElementById('btn-map-satellite').classList.add('active');
+        map.setMapTypeId(google.maps.MapTypeId.HYBRID);
+        logToConsole('Mapa alterado para Satélite Real + Legendas.', 'system');
+    } else if (type === 'roadmap_cyber') {
+        document.getElementById('btn-map-hybrid').classList.add('active');
+        map.setMapTypeId(google.maps.MapTypeId.ROADMAP);
+        map.setOptions({ styles: [] }); // default Google Roads styling
+        logToConsole('Mapa alterado para Visualização de Ruas Padrão.', 'system');
+    }
 }
 
 // Connect to Ktor WebSocket
@@ -289,15 +378,15 @@ function fetchDeviceHistory(deviceId) {
         .then(points => {
             // Clean route line
             if (routeLine) {
-                map.removeLayer(routeLine);
+                routeLine.setMap(null);
                 routeLine = null;
             }
             if (deviceMarker) {
-                map.removeLayer(deviceMarker);
+                deviceMarker.setMap(null);
                 deviceMarker = null;
             }
             if (deviceAccuracyCircle) {
-                map.removeLayer(deviceAccuracyCircle);
+                deviceAccuracyCircle.setMap(null);
                 deviceAccuracyCircle = null;
             }
 
@@ -309,44 +398,64 @@ function fetchDeviceHistory(deviceId) {
             logToConsole(`Histórico de rota carregado (${points.length} coordenadas).`, 'system');
 
             // Draw historical trail line (Polyline)
-            const latlngs = points.map(p => [p.lat, p.lng]);
-            routeLine = L.polyline(latlngs, {
-                color: '#00d2ff',
-                weight: 4,
-                opacity: 0.75,
-                dashArray: '8, 8', // elegant dashed path
-                lineJoin: 'round'
-            }).addTo(map);
+            const pathCoordinates = points.map(p => ({ lat: p.lat, lng: p.lng }));
+            
+            const lineSymbol = {
+                path: 'M 0,-1 0,1',
+                strokeOpacity: 1,
+                scale: 3
+            };
+            
+            routeLine = new google.maps.Polyline({
+                path: pathCoordinates,
+                strokeColor: '#00d2ff',
+                strokeOpacity: 0,
+                icons: [{
+                    icon: lineSymbol,
+                    offset: '0',
+                    repeat: '15px'
+                }],
+                map: map
+            });
 
             // Draw last known point
             const lastPt = points[points.length - 1];
             document.getElementById('location-accuracy').textContent = `Precisão: ${lastPt.accuracy.toFixed(1)}m`;
             
-            const neonIcon = L.divIcon({
-                className: 'custom-div-icon',
-                html: `<div style="
-                    width: 16px; 
-                    height: 16px; 
-                    background: #00d2ff; 
-                    border: 3px solid #fff; 
-                    border-radius: 50%;
-                    box-shadow: 0 0 10px #00d2ff, 0 0 20px #00d2ff;
-                "></div>`,
-                iconSize: [16, 16],
-                iconAnchor: [8, 8]
+            const neonMarkerSvg = {
+                path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z",
+                fillColor: "#00d2ff",
+                fillOpacity: 1,
+                strokeColor: "#ffffff",
+                strokeWeight: 2.5,
+                scale: 1.5,
+                anchor: new google.maps.Point(12, 22)
+            };
+
+            deviceMarker = new google.maps.Marker({
+                position: { lat: lastPt.lat, lng: lastPt.lng },
+                map: map,
+                icon: neonMarkerSvg,
+                title: "Localização Atual"
+            });
+            
+            deviceAccuracyCircle = new google.maps.Circle({
+                map: map,
+                center: { lat: lastPt.lat, lng: lastPt.lng },
+                radius: lastPt.accuracy,
+                strokeColor: '#00d2ff',
+                strokeOpacity: 0.5,
+                strokeWeight: 1.5,
+                fillColor: '#00d2ff',
+                fillOpacity: 0.12
             });
 
-            deviceMarker = L.marker([lastPt.lat, lastPt.lng], { icon: neonIcon }).addTo(map);
-            deviceAccuracyCircle = L.circle([lastPt.lat, lastPt.lng], {
-                radius: lastPt.accuracy,
-                color: '#00d2ff',
-                fillColor: '#00d2ff',
-                fillOpacity: 0.15,
-                weight: 1
-            }).addTo(map);
-
-            // Fit map bound to show full path history
-            map.fitBounds(routeLine.getBounds(), { padding: [50, 50] });
+            // Fit map bounds to show full path history
+            if (map) {
+                const bounds = new google.maps.LatLngBounds();
+                pathCoordinates.forEach(coord => bounds.extend(coord));
+                map.fitBounds(bounds);
+            }
         })
         .catch(err => console.error('Error fetching telemetry history:', err));
 }
@@ -370,51 +479,71 @@ function handleTelemetry(data) {
         
         logToConsole(`GPS Atualizado: Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)} (Precisão: ${accuracy.toFixed(1)}m)`, 'system');
         
-        const neonIcon = L.divIcon({
-            className: 'custom-div-icon',
-            html: `<div style="
-                width: 16px; 
-                height: 16px; 
-                background: #00d2ff; 
-                border: 3px solid #fff; 
-                border-radius: 50%;
-                box-shadow: 0 0 10px #00d2ff, 0 0 20px #00d2ff;
-            "></div>`,
-            iconSize: [16, 16],
-            iconAnchor: [8, 8]
-        });
-
+        const pos = { lat: lat, lng: lng };
+        
         // 1. Update Marker & Circle
         if (deviceMarker) {
-            deviceMarker.setLatLng([lat, lng]);
-            deviceAccuracyCircle.setLatLng([lat, lng]);
+            deviceMarker.setPosition(pos);
+            deviceAccuracyCircle.setCenter(pos);
             deviceAccuracyCircle.setRadius(accuracy);
-        } else {
-            deviceMarker = L.marker([lat, lng], { icon: neonIcon }).addTo(map);
-            deviceAccuracyCircle = L.circle([lat, lng], {
+        } else if (map) {
+            const neonMarkerSvg = {
+                path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z",
+                fillColor: "#00d2ff",
+                fillOpacity: 1,
+                strokeColor: "#ffffff",
+                strokeWeight: 2.5,
+                scale: 1.5,
+                anchor: new google.maps.Point(12, 22)
+            };
+
+            deviceMarker = new google.maps.Marker({
+                position: pos,
+                map: map,
+                icon: neonMarkerSvg,
+                title: "Localização Atual"
+            });
+            
+            deviceAccuracyCircle = new google.maps.Circle({
+                map: map,
+                center: pos,
                 radius: accuracy,
-                color: '#00d2ff',
+                strokeColor: '#00d2ff',
+                strokeOpacity: 0.5,
+                strokeWeight: 1.5,
                 fillColor: '#00d2ff',
-                fillOpacity: 0.15,
-                weight: 1
-            }).addTo(map);
+                fillOpacity: 0.12
+            });
         }
 
         // 2. Append point to Polyline dynamically in real-time
         if (routeLine) {
-            routeLine.addLatLng([lat, lng]);
-        } else {
-            routeLine = L.polyline([[lat, lng]], {
-                color: '#00d2ff',
-                weight: 4,
-                opacity: 0.75,
-                dashArray: '8, 8',
-                lineJoin: 'round'
-            }).addTo(map);
+            const path = routeLine.getPath();
+            path.push(new google.maps.LatLng(lat, lng));
+        } else if (map) {
+            const lineSymbol = {
+                path: 'M 0,-1 0,1',
+                strokeOpacity: 1,
+                scale: 3
+            };
+            
+            routeLine = new google.maps.Polyline({
+                path: [pos],
+                strokeColor: '#00d2ff',
+                strokeOpacity: 0,
+                icons: [{
+                    icon: lineSymbol,
+                    offset: '0',
+                    repeat: '15px'
+                }],
+                map: map
+            });
         }
         
         // Pan map smoothly to the coordinates
-        map.setView([lat, lng], 17, { animate: true });
+        if (map) {
+            map.panTo(pos);
+        }
     }
 }
 
@@ -611,6 +740,7 @@ function logToConsole(message, type = 'system') {
     consoleBody.scrollTop = consoleBody.scrollHeight; // Auto scroll down
 }
 
+// Clear Terminal body
 function clearConsole() {
     const consoleBody = document.getElementById('terminal-body');
     if (consoleBody) {
@@ -629,6 +759,7 @@ function openImageModal(src, caption) {
     captionText.textContent = caption;
 }
 
+// Close Lightbox modal
 function closeImageModal() {
     document.getElementById('image-modal').style.display = 'none';
 }
