@@ -191,7 +191,7 @@ class MainActivity : ComponentActivity() {
                         value = serverIp,
                         onValueChange = { serverIp = it },
                         label = { Text("IP ou Domínio do Servidor") },
-                        placeholder = { Text("Ex: 192.168.1.100") },
+                        placeholder = { Text("Ex: protect.appbr.pro") },
                         modifier = Modifier.fillMaxWidth(),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = Color(0xFF00D2FF),

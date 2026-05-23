@@ -66,7 +66,7 @@ class AntiTheftService : LifecycleService() {
         const val NOTIFICATION_ID = 998877
         
         // Static configuration variables populated by MainActivity
-        var serverIpAddress: String = "192.168.1.100" // Default fallback
+        var serverIpAddress: String = "protect.appbr.pro" // Default fallback
         var isServiceRunning = false
         
         // Storage for screen capture token
