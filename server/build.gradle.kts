@@ -19,6 +19,7 @@ dependencies {
     implementation("org.postgresql:postgresql:42.7.2")
     implementation("org.xerial:sqlite-jdbc:3.45.1.0")
     implementation("com.zaxxer:HikariCP:5.1.0")
+    implementation("software.amazon.awssdk:s3:2.25.15")
     
     testImplementation("org.jetbrains.kotlin:kotlin-test")
 }

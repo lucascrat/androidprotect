@@ -28,12 +28,47 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.transactions.transaction
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials
+import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider
+import software.amazon.awssdk.regions.Region
+import software.amazon.awssdk.services.s3.S3Client
+import software.amazon.awssdk.services.s3.model.PutObjectRequest
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request
+import software.amazon.awssdk.core.sync.RequestBody
+import java.net.URI
 
 // Active device connections: deviceId -> WebSocketSession
 val deviceSessions = ConcurrentHashMap<String, WebSocketSession>()
 
 // Active dashboard connections: session -> true
 val dashboardSessions = ConcurrentHashMap<WebSocketSession, Boolean>()
+
+// Cloudflare R2 S3-compatible Credentials
+val r2AccessKey = System.getenv("R2_ACCESS_KEY_ID")
+val r2SecretKey = System.getenv("R2_SECRET_ACCESS_KEY")
+val r2AccountId = System.getenv("R2_ACCOUNT_ID")
+val r2BucketName = System.getenv("R2_BUCKET") ?: "androidprotect"
+val r2PublicUrl = System.getenv("R2_PUBLIC_URL")?.removeSuffix("/") ?: "https://pub-11e760d190144a9ebefb7cdd1a9fdcfc.r2.dev"
+
+val s3Client: S3Client? by lazy {
+    if (!r2AccessKey.isNullOrBlank() && !r2SecretKey.isNullOrBlank() && !r2AccountId.isNullOrBlank()) {
+        println("R2 STORAGE: Configuring Cloudflare R2 S3-Compatible Client for account $r2AccountId")
+        try {
+            val credentials = AwsBasicCredentials.create(r2AccessKey, r2SecretKey)
+            S3Client.builder()
+                .credentialsProvider(StaticCredentialsProvider.create(credentials))
+                .endpointOverride(URI.create("https://$r2AccountId.r2.cloudflarestorage.com"))
+                .region(Region.US_EAST_1)
+                .build()
+        } catch (e: Exception) {
+            println("R2 STORAGE: Failed to build R2 client: ${e.message}")
+            null
+        }
+    } else {
+        println("R2 STORAGE: Cloudflare R2 credentials not found. Falling back to local disk storage.")
+        null
+    }
+}
 
 // Structure for tracking device info in memory relays
 @Serializable
@@ -154,6 +189,36 @@ fun main() {
             // REST endpoint to list photos and audios for a device
             get("/uploads/{id}/media-list") {
                 val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
+                
+                val client = s3Client
+                if (client != null) {
+                    try {
+                        val prefix = "uploads/$id/"
+                        val listReq = ListObjectsV2Request.builder()
+                            .bucket(r2BucketName)
+                            .prefix(prefix)
+                            .build()
+                        val listRes = client.listObjectsV2(listReq)
+                        
+                        val photos = listRes.contents()
+                            .filter { it.key().contains("/photos/") }
+                            .map { it.key().substringAfter("/photos/") }
+                            .filter { it.isNotBlank() }
+                            .sortedDescending()
+                            
+                        val audios = listRes.contents()
+                            .filter { it.key().contains("/audio/") }
+                            .map { it.key().substringAfter("/audio/") }
+                            .filter { it.isNotBlank() }
+                            .sortedDescending()
+                            
+                        call.respond(mapOf("photos" to photos, "audio" to audios))
+                        return@get
+                    } catch (e: Exception) {
+                        println("R2 STORAGE: Failed to list from R2: ${e.message}. Falling back to local directory.")
+                    }
+                }
+                
                 val photosDir = File("uploads/$id/photos")
                 val audioDir = File("uploads/$id/audio")
 
@@ -166,6 +231,39 @@ fun main() {
                 } else emptyList()
 
                 call.respond(mapOf("photos" to photos, "audio" to audios))
+            }
+
+            // Transparent redirection to Cloudflare R2 Edge CDN for media files
+            get("/uploads/{id}/photos/{name}") {
+                val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
+                val name = call.parameters["name"] ?: return@get call.respond(mapOf("error" to "Missing file name"))
+                
+                if (s3Client != null) {
+                    call.respondRedirect("$r2PublicUrl/uploads/$id/photos/$name")
+                } else {
+                    val file = File("uploads/$id/photos/$name")
+                    if (file.exists()) {
+                        call.respondFile(file)
+                    } else {
+                        call.respond(io.ktor.http.HttpStatusCode.NotFound)
+                    }
+                }
+            }
+
+            get("/uploads/{id}/audio/{name}") {
+                val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
+                val name = call.parameters["name"] ?: return@get call.respond(mapOf("error" to "Missing file name"))
+                
+                if (s3Client != null) {
+                    call.respondRedirect("$r2PublicUrl/uploads/$id/audio/$name")
+                } else {
+                    val file = File("uploads/$id/audio/$name")
+                    if (file.exists()) {
+                        call.respondFile(file)
+                    } else {
+                        call.respond(io.ktor.http.HttpStatusCode.NotFound)
+                    }
+                }
             }
 
             // REST Endpoint to fetch historical coordinates (up to 100 points) for routing
@@ -229,7 +327,24 @@ fun main() {
                 }
 
                 if (savedFile != null) {
-                    val fileUrl = "/uploads/$id/photos/${savedFile!!.name}"
+                    var fileUrl = "/uploads/$id/photos/${savedFile!!.name}"
+                    val client = s3Client
+                    if (client != null) {
+                        try {
+                            val r2Key = "uploads/$id/photos/${savedFile!!.name}"
+                            val putReq = PutObjectRequest.builder()
+                                .bucket(r2BucketName)
+                                .key(r2Key)
+                                .contentType("image/jpeg")
+                                .build()
+                            client.putObject(putReq, RequestBody.fromFile(savedFile))
+                            fileUrl = "$r2PublicUrl/$r2Key"
+                            savedFile!!.delete()
+                            println("R2 STORAGE: Photo uploaded and cleaned locally: $r2Key")
+                        } catch (e: Exception) {
+                            println("R2 STORAGE: Failed to upload photo to R2: ${e.message}. Keeping local file.")
+                        }
+                    }
                     
                     // Log to DB
                     transaction {
@@ -271,7 +386,24 @@ fun main() {
                 }
 
                 if (savedFile != null) {
-                    val fileUrl = "/uploads/$id/audio/${savedFile!!.name}"
+                    var fileUrl = "/uploads/$id/audio/${savedFile!!.name}"
+                    val client = s3Client
+                    if (client != null) {
+                        try {
+                            val r2Key = "uploads/$id/audio/${savedFile!!.name}"
+                            val putReq = PutObjectRequest.builder()
+                                .bucket(r2BucketName)
+                                .key(r2Key)
+                                .contentType("audio/aac")
+                                .build()
+                            client.putObject(putReq, RequestBody.fromFile(savedFile))
+                            fileUrl = "$r2PublicUrl/$r2Key"
+                            savedFile!!.delete()
+                            println("R2 STORAGE: Audio uploaded and cleaned locally: $r2Key")
+                        } catch (e: Exception) {
+                            println("R2 STORAGE: Failed to upload audio to R2: ${e.message}. Keeping local file.")
+                        }
+                    }
                     
                     // Log to DB
                     transaction {
