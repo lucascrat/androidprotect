@@ -80,6 +80,30 @@ data class DeviceInfo(
     val isOnline: Boolean = true
 )
 
+@Serializable
+data class DeviceConnectedPacket(
+    val type: String = "DEVICE_CONNECTED",
+    val device: DeviceInfo
+)
+
+@Serializable
+data class DeviceDisconnectedPacket(
+    val type: String = "DEVICE_DISCONNECTED",
+    val deviceId: String
+)
+
+@Serializable
+data class DeviceListPacket(
+    val type: String = "DEVICE_LIST",
+    val devices: List<DeviceInfo>
+)
+
+@Serializable
+data class ErrorPacket(
+    val type: String = "ERROR",
+    val message: String
+)
+
 // SQL Tables Definitions using Exposed
 object DevicesTable : Table("devices") {
     val id = varchar("id", 50)
@@ -468,10 +492,7 @@ fun main() {
                 }
 
                 // Notify dashboards
-                broadcastToDashboards(Json.encodeToString(mapOf(
-                    "type" to "DEVICE_CONNECTED",
-                    "device" to info
-                )))
+                broadcastToDashboards(Json.encodeToString(DeviceConnectedPacket(device = info)))
 
                 try {
                     for (frame in incoming) {
@@ -565,10 +586,7 @@ fun main() {
                         }
                     }
 
-                    broadcastToDashboards(Json.encodeToString(mapOf(
-                        "type" to "DEVICE_DISCONNECTED",
-                        "deviceId" to deviceId
-                    )))
+                    broadcastToDashboards(Json.encodeToString(DeviceDisconnectedPacket(deviceId = deviceId)))
                 }
             }
 
@@ -590,10 +608,7 @@ fun main() {
                     }
                 }
                 
-                send(Json.encodeToString(mapOf(
-                    "type" to "DEVICE_LIST",
-                    "devices" to list
-                )))
+                send(Json.encodeToString(DeviceListPacket(devices = list)))
 
                 try {
                     for (frame in incoming) {
@@ -608,10 +623,7 @@ fun main() {
                                         // Relay command over WebSocket to targeted Android device
                                         devSession.send(Frame.Text(text))
                                     } else {
-                                        send(Json.encodeToString(mapOf(
-                                            "type" to "ERROR",
-                                            "message" to "Device $destDeviceId is offline"
-                                        )))
+                                        send(Json.encodeToString(ErrorPacket(message = "Device $destDeviceId is offline")))
                                     }
                                 }
                             } catch (e: Exception) {
