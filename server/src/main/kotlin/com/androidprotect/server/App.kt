@@ -107,6 +107,21 @@ data class ErrorPacket(
     val message: String
 )
 
+@Serializable
+data class TelemetryPoint(
+    val lat: Double,
+    val lng: Double,
+    val accuracy: Double,
+    val timestamp: Long
+)
+
+@Serializable
+data class LogItem(
+    val message: String,
+    val type: String,
+    val timestamp: Long
+)
+
 // SQL Tables Definitions using Exposed
 object DevicesTable : Table("devices") {
     val id = varchar("id", 50)
@@ -301,11 +316,11 @@ fun main() {
                         .orderBy(TelemetryTable.timestamp to SortOrder.DESC)
                         .limit(100)
                         .map {
-                            mapOf(
-                                "lat" to it[TelemetryTable.lat],
-                                "lng" to it[TelemetryTable.lng],
-                                "accuracy" to it[TelemetryTable.accuracy],
-                                "timestamp" to it[TelemetryTable.timestamp]
+                            TelemetryPoint(
+                                lat = it[TelemetryTable.lat],
+                                lng = it[TelemetryTable.lng],
+                                accuracy = it[TelemetryTable.accuracy],
+                                timestamp = it[TelemetryTable.timestamp]
                             )
                         }
                         .reversed()
@@ -321,10 +336,10 @@ fun main() {
                         .orderBy(LogsTable.timestamp to SortOrder.DESC)
                         .limit(150)
                         .map {
-                            mapOf(
-                                "message" to it[LogsTable.message],
-                                "type" to it[LogsTable.logType],
-                                "timestamp" to it[LogsTable.timestamp]
+                            LogItem(
+                                message = it[LogsTable.message],
+                                type = it[LogsTable.logType],
+                                timestamp = it[LogsTable.timestamp]
                             )
                         }
                         .reversed()
