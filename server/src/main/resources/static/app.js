@@ -773,3 +773,101 @@ function escapeHtml(unsafe) {
          .replace(/"/g, "&quot;")
          .replace(/'/g, "&#039;");
 }
+
+// AI Chat Assistant message dispatch and API invocation
+async function sendAiMessage() {
+    const inputField = document.getElementById('ai-chat-input');
+    const chatContainer = document.getElementById('ai-chat-messages');
+    if (!inputField || !chatContainer) return;
+    
+    const message = inputField.value.trim();
+    if (!message) return;
+    
+    // Clear input
+    inputField.value = '';
+    
+    // Append User message
+    appendAiMessage(message, 'user');
+    
+    // Append loader placeholder
+    const loaderId = 'ai-loader-' + Date.now();
+    const loaderDiv = document.createElement('div');
+    loaderDiv.id = loaderId;
+    loaderDiv.className = 'ai-message assistant';
+    loaderDiv.innerHTML = '<i class="fa-solid fa-ellipsis fa-bounce"></i> Analisando status do aparelho e processando...';
+    chatContainer.appendChild(loaderDiv);
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+    
+    try {
+        const response = await fetch('/api/ai/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                message: message,
+                deviceId: currentDeviceId
+            })
+        });
+        
+        // Remove loader
+        const loader = document.getElementById(loaderId);
+        if (loader) loader.remove();
+        
+        if (response.ok) {
+            const data = await response.json();
+            if (data.reply) {
+                // Formatting markdown-like text to html safely
+                const replyHtml = formatMarkdown(data.reply);
+                appendAiMessage(replyHtml, 'assistant', true);
+            } else {
+                appendAiMessage('Não foi possível obter uma resposta do assistente.', 'assistant');
+            }
+        } else {
+            const errData = await response.json().catch(() => ({}));
+            appendAiMessage(`Erro no servidor: ${errData.error || response.statusText}`, 'assistant');
+        }
+    } catch (err) {
+        // Remove loader
+        const loader = document.getElementById(loaderId);
+        if (loader) loader.remove();
+        
+        appendAiMessage(`Erro de rede ao conectar com a IA: ${err.message}`, 'assistant');
+    }
+}
+
+// Append message element to AI panel chat container
+function appendAiMessage(content, sender, isHtml = false) {
+    const chatContainer = document.getElementById('ai-chat-messages');
+    if (!chatContainer) return;
+    
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `ai-message ${sender}`;
+    if (isHtml) {
+        msgDiv.innerHTML = content;
+    } else {
+        msgDiv.textContent = content;
+    }
+    
+    chatContainer.appendChild(msgDiv);
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+}
+
+// Simple markdown formatter helper for bold, bullet points, and code blocks
+function formatMarkdown(text) {
+    let html = escapeHtml(text);
+    
+    // Bold: **text**
+    html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    
+    // Bullet points: * text or - text
+    html = html.replace(/^\s*[\*\-]\s+(.*?)$/gm, '<li>$1</li>');
+    html = html.replace(/(<li>.*?<\/li>)/gs, '<ul>$1</ul>');
+    // Remove duplicate consecutive <ul> tags
+    html = html.replace(/<\/ul>\s*<ul>/g, '');
+    
+    // Newlines
+    html = html.replace(/\n/g, '<br>');
+    
+    return html;
+}

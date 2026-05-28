@@ -122,6 +122,27 @@ data class LogItem(
     val timestamp: Long
 )
 
+@Serializable
+data class GeminiPart(val text: String)
+
+@Serializable
+data class GeminiContent(val parts: List<GeminiPart>)
+
+@Serializable
+data class GeminiRequest(val contents: List<GeminiContent>)
+
+@Serializable
+data class GeminiResponsePart(val text: String? = null)
+
+@Serializable
+data class GeminiResponseContent(val parts: List<GeminiResponsePart>? = null)
+
+@Serializable
+data class GeminiCandidate(val content: GeminiResponseContent? = null)
+
+@Serializable
+data class GeminiResponse(val candidates: List<GeminiCandidate>? = null)
+
 // SQL Tables Definitions using Exposed
 object DevicesTable : Table("devices") {
     val id = varchar("id", 50)
@@ -153,6 +174,49 @@ object LogsTable : Table("security_logs") {
     val timestamp = long("timestamp")
 
     override val primaryKey = PrimaryKey(id)
+}
+
+// Call Gemini API using Java HttpClient securely loading GEMINI_API_KEY from environment
+fun callGeminiApi(prompt: String): String {
+    val apiKey = System.getenv("GEMINI_API_KEY")
+    if (apiKey.isNullOrBlank()) {
+        return "Erro: A chave de API do Gemini não foi configurada no servidor (variável de ambiente GEMINI_API_KEY)."
+    }
+
+    try {
+        val client = java.net.http.HttpClient.newHttpClient()
+        val requestBody = packetJson.encodeToString(
+            GeminiRequest(
+                contents = listOf(
+                    GeminiContent(
+                        parts = listOf(
+                            GeminiPart(text = prompt)
+                        )
+                    )
+                )
+            )
+        )
+
+        val request = java.net.http.HttpRequest.newBuilder()
+            .uri(java.net.URI.create("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"))
+            .header("Content-Type", "application/json")
+            .POST(java.net.http.HttpRequest.BodyPublishers.ofString(requestBody))
+            .build()
+
+        val response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString())
+        if (response.statusCode() == 200) {
+            val resObj = packetJson.decodeFromString<GeminiResponse>(response.body())
+            val replyText = resObj.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
+            if (!replyText.isNullOrBlank()) {
+                return replyText
+            }
+        }
+        println("GEMINI AI ERROR: Status ${response.statusCode()} | Body: ${response.body()}")
+        return "Erro: Falha ao obter resposta do Gemini AI (Status: ${response.statusCode()})."
+    } catch (e: Exception) {
+        println("GEMINI AI EXCEPTION: ${e.message}")
+        return "Erro: Ocorreu uma exceção ao conectar com a IA: ${e.message}"
+    }
 }
 
 // Database Connection Manager (PostgreSQL with HikariCP, falling back to local SQLite)
@@ -345,6 +409,89 @@ fun main() {
                         .reversed()
                 }
                 call.respond(history)
+            }
+
+            // REST Endpoint for AI chat assistant contextualized with device status
+            post("/api/ai/chat") {
+                try {
+                    val params = call.receive<Map<String, String>>()
+                    val userMsg = params["message"] ?: return@post call.respond(mapOf("error" to "Missing message"))
+                    val deviceId = params["deviceId"]
+                    
+                    // Construct contextual information about the device
+                    val contextBuilder = StringBuilder()
+                    contextBuilder.append("Você é o 'ProtegeAI', o Assistente de Inteligência Artificial Anti-Furto integrado ao AndroidProtect.\n")
+                    contextBuilder.append("Você ajuda o dono do celular a rastreá-lo, monitorá-lo e analisar o status de segurança do dispositivo.\n")
+                    contextBuilder.append("Responda sempre de forma prestativa, direta, profissional, em português brasileiro.\n")
+                    contextBuilder.append("Mantenha as respostas concisas e foque na segurança física do usuário (ex: alertar para não tentar recuperar o celular pessoalmente face ao risco de agressão, orientar a registrar um Boletim de Ocorrência).\n\n")
+                    
+                    if (!deviceId.isNullOrBlank()) {
+                        val device = transaction {
+                            DevicesTable.select { DevicesTable.id eq deviceId }.map {
+                                DeviceInfo(
+                                    deviceId = it[DevicesTable.id],
+                                    model = it[DevicesTable.model],
+                                    battery = it[DevicesTable.battery],
+                                    isCharging = it[DevicesTable.isCharging],
+                                    isOnline = it[DevicesTable.isOnline]
+                                )
+                            }.firstOrNull()
+                        }
+                        
+                        if (device != null) {
+                            contextBuilder.append("DADOS DO APARELHO MONITORADO:\n")
+                            contextBuilder.append("- ID: ${device.deviceId}\n")
+                            contextBuilder.append("- Modelo: ${device.model}\n")
+                            contextBuilder.append("- Estado: ${if (device.isOnline) "ONLINE (Conectado ao painel)" else "OFFLINE (Desconectado)"}\n")
+                            contextBuilder.append("- Bateria: ${device.battery}% (${if (device.isCharging) "Carregando" else "Descarregando"})\n")
+                            
+                            // Get latest telemetry coordinates
+                            val telemetry = transaction {
+                                TelemetryTable.select { TelemetryTable.deviceId eq deviceId }
+                                    .orderBy(TelemetryTable.timestamp to SortOrder.DESC)
+                                    .limit(1)
+                                    .map {
+                                        mapOf(
+                                            "lat" to it[TelemetryTable.lat],
+                                            "lng" to it[TelemetryTable.lng],
+                                            "accuracy" to it[TelemetryTable.accuracy]
+                                        )
+                                    }.firstOrNull()
+                            }
+                            if (telemetry != null) {
+                                contextBuilder.append("- Última Localização: Latitude ${telemetry["lat"]}, Longitude ${telemetry["lng"]} (Precisão: ${telemetry["accuracy"]}m)\n")
+                            } else {
+                                contextBuilder.append("- Última Localização: Nenhuma coordenada recebida ainda.\n")
+                            }
+                            
+                            // Get latest 10 security logs
+                            val logs = transaction {
+                                LogsTable.select { LogsTable.deviceId eq deviceId }
+                                    .orderBy(LogsTable.timestamp to SortOrder.DESC)
+                                    .limit(10)
+                                    .map { it[LogsTable.message] }
+                                    .reversed()
+                            }
+                            if (logs.isNotEmpty()) {
+                                contextBuilder.append("\nÚLTIMOS EVENTOS DE SEGURANÇA REGISTRADOS:\n")
+                                logs.forEach { logMsg ->
+                                    contextBuilder.append("* $logMsg\n")
+                                }
+                            }
+                        }
+                    } else {
+                        contextBuilder.append("Nenhum aparelho foi selecionado ainda pelo usuário no painel.\n")
+                    }
+                    
+                    contextBuilder.append("\nMENSAGEM DO USUÁRIO: $userMsg\n")
+                    contextBuilder.append("PROTEGEAI:")
+                    
+                    val aiReply = callGeminiApi(contextBuilder.toString())
+                    call.respond(mapOf("reply" to aiReply))
+                } catch (e: Exception) {
+                    println("API AI CHAT EXCEPTION: ${e.message}")
+                    call.respond(io.ktor.http.HttpStatusCode.InternalServerError, mapOf("error" to "Failed to process request: ${e.message}"))
+                }
             }
 
             // REST Endpoint for Photo Upload from Android

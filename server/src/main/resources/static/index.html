@@ -163,6 +163,26 @@
                         <div class="terminal-line system"><span class="timestamp">[00:00:00]</span> AndroidProtect console inicializado com sucesso. Aguardando comando...</div>
                     </div>
                 </div>
+
+                <!-- AI Assistant Card (ProtegeAI) -->
+                <div class="grid-card ai-card">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-brain neon-text-pink"></i> ProtegeAI - Assistente de Segurança</h3>
+                        <span class="card-subtitle">Gemini AI</span>
+                    </div>
+                    <div class="card-body ai-assistant-body">
+                        <div class="ai-chat-messages" id="ai-chat-messages">
+                            <div class="ai-message assistant">
+                                Olá! Sou o **ProtegeAI**, o assistente inteligente do seu AndroidProtect. 
+                                Posso ajudar você a analisar a situação do seu aparelho conectado, explicar os logs de segurança e dar dicas para recuperá-lo em segurança. Como posso ajudar você agora?
+                            </div>
+                        </div>
+                        <div class="ai-chat-input-container">
+                            <input type="text" id="ai-chat-input" placeholder="Pergunte ao ProtegeAI sobre o aparelho..." onkeydown="if(event.key === 'Enter') sendAiMessage()">
+                            <button id="btn-send-ai" onclick="sendAiMessage()"><i class="fa-solid fa-paper-plane"></i></button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </main>
     </div>
