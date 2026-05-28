@@ -43,6 +43,9 @@ val deviceSessions = ConcurrentHashMap<String, WebSocketSession>()
 // Active dashboard connections: session -> true
 val dashboardSessions = ConcurrentHashMap<WebSocketSession, Boolean>()
 
+// JSON configuration for packets ensuring defaults like packet type are always serialized
+val packetJson = Json { encodeDefaults = true }
+
 // Cloudflare R2 S3-compatible Credentials
 val r2AccessKey = System.getenv("R2_ACCESS_KEY_ID")
 val r2SecretKey = System.getenv("R2_SECRET_ACCESS_KEY")
@@ -492,7 +495,7 @@ fun main() {
                 }
 
                 // Notify dashboards
-                broadcastToDashboards(Json.encodeToString(DeviceConnectedPacket(device = info)))
+                broadcastToDashboards(packetJson.encodeToString(DeviceConnectedPacket(device = info)))
 
                 try {
                     for (frame in incoming) {
@@ -586,7 +589,7 @@ fun main() {
                         }
                     }
 
-                    broadcastToDashboards(Json.encodeToString(DeviceDisconnectedPacket(deviceId = deviceId)))
+                    broadcastToDashboards(packetJson.encodeToString(DeviceDisconnectedPacket(deviceId = deviceId)))
                 }
             }
 
@@ -608,7 +611,7 @@ fun main() {
                     }
                 }
                 
-                send(Json.encodeToString(DeviceListPacket(devices = list)))
+                send(packetJson.encodeToString(DeviceListPacket(devices = list)))
 
                 try {
                     for (frame in incoming) {
@@ -623,7 +626,7 @@ fun main() {
                                         // Relay command over WebSocket to targeted Android device
                                         devSession.send(Frame.Text(text))
                                     } else {
-                                        send(Json.encodeToString(ErrorPacket(message = "Device $destDeviceId is offline")))
+                                        send(packetJson.encodeToString(ErrorPacket(message = "Device $destDeviceId is offline")))
                                     }
                                 }
                             } catch (e: Exception) {
