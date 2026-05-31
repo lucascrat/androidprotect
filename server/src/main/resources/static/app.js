@@ -72,6 +72,26 @@ window.addEventListener('DOMContentLoaded', () => {
     connectWebSocket();
 });
 
+// ─── Mobile Sidebar Drawer ────────────────────────────────────────────────────
+function toggleSidebar() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    const isOpen  = sidebar.classList.contains('open');
+    isOpen ? closeSidebar() : openSidebar();
+}
+
+function openSidebar() {
+    document.getElementById('sidebar').classList.add('open');
+    document.getElementById('sidebar-overlay').classList.add('visible');
+    document.body.style.overflow = 'hidden'; // prevent background scroll
+}
+
+function closeSidebar() {
+    document.getElementById('sidebar').classList.remove('open');
+    document.getElementById('sidebar-overlay').classList.remove('visible');
+    document.body.style.overflow = '';
+}
+
 // Called automatically by Google Maps script after async load (callback=initMap)
 window.initMap = function() {
     const defaultLat = -23.55052;
@@ -294,24 +314,20 @@ function renderDeviceList() {
 // Select a device to control
 function selectDevice(deviceId) {
     currentDeviceId = deviceId;
-    
+
     // Update sidebar selection styling
-    document.querySelectorAll('.device-item').forEach(item => {
-        item.classList.remove('active');
-    });
-    renderDeviceList(); // Recalculate selections
-    
+    renderDeviceList();
+
     const device = devicesMap.get(deviceId);
     if (device) {
         updateActiveDeviceUI(device);
         fetchMediaList(deviceId);
-        
-        // Reset screen share UI when changing devices
         stopLocalScreenUI();
-        
-        // Load Database logs history and telemetry history
         fetchDeviceHistory(deviceId);
     }
+
+    // Close sidebar drawer on mobile after selection
+    if (window.innerWidth <= 767) closeSidebar();
 }
 
 // Update Top Bar & Status of selected device

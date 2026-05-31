@@ -17,17 +17,23 @@
         document.head.appendChild(s);
       });
     </script>
-    <link rel="stylesheet" href="style.css?v=4">
+    <link rel="stylesheet" href="style.css?v=5">
 </head>
 <body>
     <div class="app-container">
+        <!-- Sidebar overlay (mobile only) -->
+        <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
+
         <!-- Sidebar -->
-        <aside class="sidebar">
+        <aside class="sidebar" id="sidebar">
             <div class="sidebar-header">
                 <div class="logo">
                     <i class="fa-solid fa-shield-halved neon-text-blue"></i>
                     <span>Android<span class="neon-text-pink">Protect</span></span>
                 </div>
+                <button class="sidebar-close-btn" onclick="closeSidebar()" aria-label="Fechar menu">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
             </div>
             
             <div class="device-section">
@@ -51,9 +57,14 @@
         <main class="main-content">
             <!-- Top Status Bar -->
             <header class="top-bar">
-                <div class="active-device-info">
-                    <h2 id="current-device-name">Selecione um dispositivo</h2>
-                    <span id="current-device-status" class="status-badge offline">OFFLINE</span>
+                <div class="top-bar-left">
+                    <button class="hamburger-btn" id="hamburger-btn" onclick="toggleSidebar()" aria-label="Menu">
+                        <i class="fa-solid fa-bars"></i>
+                    </button>
+                    <div class="active-device-info">
+                        <h2 id="current-device-name">Selecione um dispositivo</h2>
+                        <span id="current-device-status" class="status-badge offline">OFFLINE</span>
+                    </div>
                 </div>
 
                 <div class="device-telemetry" id="device-telemetry" style="display: none;">
@@ -63,7 +74,7 @@
                     </div>
                     <div class="telemetry-item">
                         <i class="fa-solid fa-wifi"></i>
-                        <span id="network-status">Conectado</span>
+                        <span id="network-status" class="hide-xs">Conectado</span>
                     </div>
                 </div>
             </header>
@@ -227,6 +238,6 @@
         <div id="caption-modal"></div>
     </div>
     
-    <script src="app.js?v=5"></script>
+    <script src="app.js?v=6"></script>
 </body>
 </html>

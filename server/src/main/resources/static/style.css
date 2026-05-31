@@ -1044,17 +1044,236 @@ body {
     box-shadow: var(--shadow-blue);
 }
 
-/* Responsiveness overrides */
-@media (max-width: 1024px) {
+/* ═══════════════════════════════════════════════════
+   HAMBURGER & SIDEBAR DRAWER (all sizes — hidden on desktop)
+   ═══════════════════════════════════════════════════ */
+
+.hamburger-btn {
+    display: none;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid var(--border-color);
+    border-radius: 10px;
+    color: var(--text-primary);
+    width: 40px;
+    height: 40px;
+    font-size: 1.1rem;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.2s;
+}
+.hamburger-btn:hover { background: rgba(0,210,255,0.1); color: var(--neon-blue); }
+
+.sidebar-close-btn {
+    display: none;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 1.3rem;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 8px;
+    transition: color 0.2s;
+}
+.sidebar-close-btn:hover { color: var(--neon-pink); }
+
+.sidebar-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    z-index: 998;
+    background: rgba(0,0,0,0.7);
+    backdrop-filter: blur(2px);
+}
+.sidebar-overlay.visible { display: block; }
+
+.top-bar-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.hide-xs { /* hidden only on very small screens */ }
+
+/* ═══════════════════════════════════════════════════
+   TABLET  (768px – 1023px)
+   ═══════════════════════════════════════════════════ */
+@media (max-width: 1023px) {
+    /* Sidebar shrinks */
+    .sidebar {
+        width: 240px;
+        padding: 20px 16px;
+    }
+
+    /* Grid: 2 cols but equal */
+    .dashboard-grid {
+        grid-template-columns: 1fr 1fr;
+        padding: 20px;
+        gap: 16px;
+    }
+
+    /* Map & screen no longer span 2 rows */
+    .map-card  { grid-row: span 1; grid-column: span 2; min-height: 340px; }
+    .screen-card { grid-row: span 1; }
+    .terminal-card { grid-column: span 2; }
+
+    /* Map controls wrap */
+    .flex-header { flex-wrap: wrap; gap: 8px; }
+    .map-controls { flex-wrap: wrap; gap: 6px; }
+
+    /* Phone mockup smaller */
+    .phone-mockup { width: 180px; height: 360px; }
+}
+
+/* ═══════════════════════════════════════════════════
+   MOBILE  (≤ 767px) — full mobile experience
+   ═══════════════════════════════════════════════════ */
+@media (max-width: 767px) {
+
+    /* ── App layout ── */
+    .app-container { flex-direction: column; }
+
+    /* ── Sidebar: becomes a fixed drawer ── */
+    .sidebar {
+        position: fixed;
+        top: 0; left: 0;
+        height: 100%;
+        width: 280px;
+        z-index: 999;
+        transform: translateX(-100%);
+        transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        padding: 20px 16px;
+        padding-bottom: calc(20px + env(safe-area-inset-bottom));
+    }
+    .sidebar.open { transform: translateX(0); }
+
+    .sidebar-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 28px;
+    }
+
+    .sidebar-close-btn { display: flex; }
+
+    /* ── Hamburger visible ── */
+    .hamburger-btn { display: flex; }
+
+    /* ── Main content fills full width ── */
+    .main-content {
+        width: 100%;
+        height: 100vh;
+    }
+
+    /* ── Top bar compact ── */
+    .top-bar {
+        height: 60px;
+        padding: 0 12px;
+        gap: 8px;
+    }
+    .active-device-info h2 {
+        font-size: 1rem;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 140px;
+    }
+    .device-telemetry { gap: 12px; }
+    .telemetry-item { font-size: 0.8rem; gap: 5px; }
+    .hide-xs { display: none; }
+
+    /* ── Grid: single column ── */
     .dashboard-grid {
         grid-template-columns: 1fr;
+        padding: 12px;
+        gap: 12px;
+        padding-bottom: calc(12px + env(safe-area-inset-bottom));
     }
-    
-    .map-card, .screen-card {
-        grid-row: span 1;
+
+    /* ── Cards ── */
+    .grid-card { border-radius: 16px; padding: 16px; }
+    .card-header { margin-bottom: 14px; }
+    .card-header h3 { font-size: 0.95rem; gap: 8px; }
+
+    /* ── Map card ── */
+    .map-card { grid-column: span 1; grid-row: span 1; min-height: 0; }
+    #map { min-height: 280px; }
+
+    /* ── Map controls: scrollable row ── */
+    .flex-header { flex-wrap: wrap; gap: 6px; }
+    .header-left h3 { font-size: 0.9rem; }
+    .map-controls {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+        width: 100%;
     }
-    
-    .terminal-card {
-        grid-column: span 1;
+    .btn-map-type { font-size: 0.7rem; padding: 5px 8px; }
+    .trail-days-select { font-size: 0.7rem; padding: 5px 6px; }
+
+    /* ── Command buttons: 2 cols, taller tap targets ── */
+    .command-buttons-grid { grid-template-columns: 1fr 1fr; grid-gap: 10px; }
+    .btn { padding: 14px 8px; font-size: 0.82rem; gap: 8px; border-radius: 12px; }
+    .btn i { font-size: 1.25rem; }
+    .btn-danger { grid-column: span 2; }
+
+    /* ── Screen card ── */
+    .screen-card { grid-row: span 1; }
+    .screen-stream-container { display: flex; justify-content: center; }
+    .phone-mockup { width: 160px; height: 300px; border-radius: 28px; }
+    .phone-screen { margin: 24px 8px 32px 8px; border-radius: 16px; }
+
+    /* ── Gallery ── */
+    .photo-gallery {
+        grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+        max-height: 220px;
     }
+
+    /* ── Audio list ── */
+    .audio-list { max-height: 250px; }
+    .audio-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 10px 12px;
+    }
+    .audio-player-control { width: 100%; }
+    .audio-player-control audio { width: 100%; height: 40px; }
+
+    /* ── Terminal ── */
+    .terminal-card { grid-column: span 1; }
+    .terminal-body { max-height: 200px; font-size: 0.75rem; }
+
+    /* ── Messages ── */
+    .messages-card { grid-column: span 1; }
+    .messages-body { height: auto; min-height: 280px; }
+    .messages-list { min-height: 180px; }
+    .messages-input { font-size: 0.9rem; padding: 10px 12px; }
+    /* Prevent iOS zoom on input focus (font-size must be ≥ 16px) */
+    .messages-input, #ai-chat-input { font-size: 16px; }
+
+    /* ── AI card ── */
+    .ai-card { grid-column: span 1; }
+    .ai-assistant-body { height: auto; min-height: 320px; }
+    .ai-chat-messages { max-height: 220px; }
+
+    /* ── Modal ── */
+    .modal-content { max-width: 95%; max-height: 70vh; }
+    .close-modal { top: 10px; right: 20px; font-size: 32px; }
+
+    /* ── Lightbox caption ── */
+    #caption-modal { width: 95%; font-size: 0.8rem; }
+}
+
+/* ═══════════════════════════════════════════════════
+   EXTRA SMALL  (≤ 380px) — very small phones
+   ═══════════════════════════════════════════════════ */
+@media (max-width: 380px) {
+    .dashboard-grid { padding: 8px; gap: 8px; }
+    .btn { padding: 12px 6px; font-size: 0.78rem; }
+    .btn i { font-size: 1.1rem; }
+    #map { min-height: 240px; }
+    .active-device-info h2 { max-width: 110px; font-size: 0.9rem; }
+    .phone-mockup { width: 130px; height: 250px; }
 }
