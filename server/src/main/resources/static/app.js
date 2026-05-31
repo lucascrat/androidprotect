@@ -66,18 +66,16 @@ const darkMapStyle = [
     },
 ];
 
-// Initialize Dashboard
+// Initialize Dashboard — WebSocket starts on DOM ready; Maps loads async via callback
 window.addEventListener('DOMContentLoaded', () => {
-    initMap();
     connectWebSocket();
 });
 
-// Initialize Google Maps Map (Mapas Real)
-function initMap() {
-    // Default location (São Paulo, Brazil)
+// Called automatically by Google Maps script after async load (callback=initMap)
+window.initMap = function() {
     const defaultLat = -23.55052;
     const defaultLng = -46.633308;
-    
+
     try {
         map = new google.maps.Map(document.getElementById('map'), {
             center: { lat: defaultLat, lng: defaultLng },
@@ -92,10 +90,9 @@ function initMap() {
         console.log('Google Maps initialized successfully.');
     } catch (e) {
         console.error('Failed to initialize Google Maps:', e);
-        // Fallback placeholder display
         document.getElementById('map').innerHTML = `<div style="padding: 40px; text-align: center; color: var(--neon-pink);"><i class="fa-solid fa-triangle-exclamation fa-2x"></i><p style="margin-top: 10px;">Erro ao carregar o Google Maps. Verifique a chave de API.</p></div>`;
     }
-}
+};
 
 // Switch Google Maps Layer Type dynamically
 function setMapType(type) {

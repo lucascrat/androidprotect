@@ -289,6 +289,12 @@ fun main() {
             // Serve static dashboard files
             staticFiles("/", File("server/src/main/resources/static"), index = "index.html")
 
+            // Serve frontend config (API keys from env vars — never hardcoded in source)
+            get("/api/config") {
+                val mapsKey = System.getenv("GOOGLE_MAPS_API_KEY") ?: ""
+                call.respond(mapOf("mapsKey" to mapsKey))
+            }
+
             // REST endpoint to list photos and audios for a device (returns full URLs)
             get("/uploads/{id}/media-list") {
                 val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
