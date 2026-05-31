@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
+import android.hardware.camera2.CameraManager
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.location.Location
@@ -19,6 +20,7 @@ import android.media.MediaPlayer
 import android.media.RingtoneManager
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
+import android.net.wifi.WifiManager
 import android.os.BatteryManager
 import android.os.Build
 import android.os.Handler
@@ -26,7 +28,11 @@ import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.provider.Settings
+import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
@@ -92,6 +98,9 @@ class AntiTheftService : LifecycleService() {
     private var locationCallback: LocationCallback? = null
     private var mediaPlayer: MediaPlayer? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var flashHandler: Handler? = null
+    private var flashRunnable: Runnable? = null
+    private var isFlashing = false
 
     // Reconnect backoff
     private var reconnectDelay = 5000L
@@ -133,6 +142,9 @@ class AntiTheftService : LifecycleService() {
         // Start Foreground Notification
         startForegroundNotification()
 
+        // Detect SIM card change (potential theft indicator)
+        checkSimChange()
+
         // Establish Server WebSocket connection
         connectToServer()
     }
@@ -141,15 +153,24 @@ class AntiTheftService : LifecycleService() {
         super.onStartCommand(intent, flags, startId)
         Log.d("AntiTheftService", "Service onStartCommand")
         
-        // In case IP was updated, reconnect and save it
+        // Handle server IP update
         val ipFromIntent = intent?.getStringExtra("SERVER_IP")
         if (ipFromIntent != null && ipFromIntent != serverIpAddress) {
             serverIpAddress = ipFromIntent
-            val sharedPrefs = getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
-            sharedPrefs.edit().putString("server_ip", ipFromIntent).apply()
+            getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+                .edit().putString("server_ip", ipFromIntent).apply()
             connectToServer()
         }
-        
+
+        // Handle SMS command (from SmsCommandReceiver backup channel)
+        val smsCommand = intent?.getStringExtra("SMS_COMMAND")
+        if (!smsCommand.isNullOrBlank()) {
+            Log.i("AntiTheftService", "Executing SMS command: $smsCommand")
+            sendConsoleLog("📱 Comando SMS recebido: $smsCommand")
+            // Wrap in fake JSON to reuse existing handler
+            handleRemoteCommand("""{"command":"$smsCommand"}""")
+        }
+
         return START_STICKY
     }
 
@@ -317,22 +338,55 @@ class AntiTheftService : LifecycleService() {
     private fun sendTelemetry(lat: Double? = null, lng: Double? = null, accuracy: Float? = null) {
         try {
             val telemetryMap = mutableMapOf<String, String>()
-            telemetryMap["type"] = "TELEMETRY"
-            telemetryMap["deviceId"] = deviceId
-            telemetryMap["battery"] = getBatteryPercentage().toString()
-            telemetryMap["isCharging"] = isDeviceCharging().toString()
-            
+            telemetryMap["type"]      = "TELEMETRY"
+            telemetryMap["deviceId"]  = deviceId
+            telemetryMap["battery"]   = getBatteryPercentage().toString()
+            telemetryMap["isCharging"]= isDeviceCharging().toString()
+            telemetryMap["wifi"]      = getWifiSsid()
+
             if (lat != null && lng != null) {
-                telemetryMap["lat"] = lat.toString()
-                telemetryMap["lng"] = lng.toString()
+                telemetryMap["lat"]      = lat.toString()
+                telemetryMap["lng"]      = lng.toString()
                 telemetryMap["accuracy"] = accuracy.toString()
             }
-            
-            val jsonStr = Json.encodeToString(telemetryMap)
-            webSocket?.send(jsonStr)
-            Log.d("AntiTheftService", "Telemetry sent: $jsonStr")
+
+            webSocket?.send(Json.encodeToString(telemetryMap))
         } catch (e: Exception) {
             Log.e("AntiTheftService", "Failed to send telemetry: ${e.message}")
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun getWifiSsid(): String {
+        return try {
+            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+            val ssid = wm.connectionInfo?.ssid ?: "Desconectado"
+            ssid.removeSurrounding("\"") // Remove aspas que o Android adiciona
+        } catch (e: Exception) { "N/A" }
+    }
+
+    @SuppressLint("MissingPermission", "HardwareIds")
+    private fun checkSimChange() {
+        try {
+            val tm = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+            val currentSim = tm.simSerialNumber ?: return
+            val saved = getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+                .getString("last_sim_serial", null)
+
+            if (saved == null) {
+                // First time — save current SIM
+                getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+                    .edit().putString("last_sim_serial", currentSim).apply()
+            } else if (saved != currentSim) {
+                // SIM was changed! Alert server
+                getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+                    .edit().putString("last_sim_serial", currentSim).apply()
+                Handler(Looper.getMainLooper()).postDelayed({
+                    sendConsoleLog("⚠️ ALERTA: Chip SIM foi trocado! Novo SIM detectado no aparelho.")
+                }, 3000)
+            }
+        } catch (e: Exception) {
+            Log.w("AntiTheftService", "Could not check SIM: ${e.message}")
         }
     }
 
@@ -585,12 +639,12 @@ class AntiTheftService : LifecycleService() {
         }
     }
 
-    // Play Security Siren Alarm (bypassing silent mode)
+    // Play Security Siren Alarm with sound + vibration + flash
     private fun playLoudAlarm() {
-        if (mediaPlayer?.isPlaying == true) {
-            mediaPlayer?.stop()
-            mediaPlayer?.release()
-            mediaPlayer = null
+        val alarmActive = mediaPlayer?.isPlaying == true
+        if (alarmActive) {
+            mediaPlayer?.stop(); mediaPlayer?.release(); mediaPlayer = null
+            stopVibration(); stopFlash()
             sendConsoleLog("Sirene de segurança desligada.")
             return
         }
@@ -598,33 +652,90 @@ class AntiTheftService : LifecycleService() {
         try {
             val alarmUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM)
                 ?: RingtoneManager.getDefaultUri(RingtoneManager.TYPE_RINGTONE)
-                
+
             mediaPlayer = MediaPlayer().apply {
                 setDataSource(this@AntiTheftService, alarmUri)
                 setAudioAttributes(
                     AudioAttributes.Builder()
                         .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
-                        .setUsage(AudioAttributes.USAGE_ALARM)
-                        .build()
+                        .setUsage(AudioAttributes.USAGE_ALARM).build()
                 )
                 isLooping = true
                 prepare()
             }
-            
-            // Set alarm volume to MAX in manager
             val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
             audioManager.setStreamVolume(
                 AudioManager.STREAM_ALARM,
-                audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM),
-                0
+                audioManager.getStreamMaxVolume(AudioManager.STREAM_ALARM), 0
             )
-            
             mediaPlayer?.start()
-            sendConsoleLog("ALERTA SONORO DISPARADO! Emitindo sirene em volume MÁXIMO.")
+            startVibration()
+            startFlash()
+            sendConsoleLog("🚨 ALERTA DISPARADO! Sirene + vibração + flash ativados em volume MÁXIMO.")
         } catch (e: Exception) {
-            Log.e("AntiTheftService", "Alarm playback error: ${e.message}", e)
+            Log.e("AntiTheftService", "Alarm error: ${e.message}", e)
             sendConsoleLog("Erro ao disparar alarme: ${e.message}")
         }
+    }
+
+    private fun startVibration() {
+        try {
+            val pattern = longArrayOf(0, 500, 300, 500, 300)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vm = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                vm.defaultVibrator.vibrate(VibrationEffect.createWaveform(pattern, 0))
+            } else {
+                @Suppress("DEPRECATION")
+                val v = getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    v.vibrate(VibrationEffect.createWaveform(pattern, 0))
+                } else {
+                    @Suppress("DEPRECATION")
+                    v.vibrate(pattern, 0)
+                }
+            }
+        } catch (e: Exception) { Log.w("AntiTheftService", "Vibration failed: ${e.message}") }
+    }
+
+    private fun stopVibration() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                (getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager).defaultVibrator.cancel()
+            } else {
+                @Suppress("DEPRECATION")
+                (getSystemService(Context.VIBRATOR_SERVICE) as Vibrator).cancel()
+            }
+        } catch (e: Exception) { /* ignore */ }
+    }
+
+    private fun startFlash() {
+        try {
+            val cm = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            val cameraId = cm.cameraIdList.firstOrNull() ?: return
+            isFlashing = true
+            flashHandler = Handler(Looper.getMainLooper())
+            var on = true
+            flashRunnable = object : Runnable {
+                override fun run() {
+                    if (!isFlashing) { cm.setTorchMode(cameraId, false); return }
+                    cm.setTorchMode(cameraId, on)
+                    on = !on
+                    flashHandler?.postDelayed(this, 250)
+                }
+            }
+            flashHandler?.post(flashRunnable!!)
+        } catch (e: Exception) { Log.w("AntiTheftService", "Flash failed: ${e.message}") }
+    }
+
+    private fun stopFlash() {
+        isFlashing = false
+        flashRunnable?.let { flashHandler?.removeCallbacks(it) }
+        flashHandler = null; flashRunnable = null
+        try {
+            val cm = getSystemService(Context.CAMERA_SERVICE) as CameraManager
+            val cameraId = cm.cameraIdList.firstOrNull() ?: return
+            cm.setTorchMode(cameraId, false)
+        } catch (e: Exception) { /* ignore */ }
     }
 
     private fun notifyReactivateScreenCapture() {
@@ -705,7 +816,8 @@ class AntiTheftService : LifecycleService() {
         mediaPlayer = null
         
         webSocket?.close(1000, "Service destroyed")
-
+        stopVibration()
+        stopFlash()
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
     }

@@ -2,6 +2,8 @@ package com.androidprotect
 
 import android.Manifest
 import android.app.Activity
+import android.app.admin.DevicePolicyManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -41,6 +43,8 @@ import kotlin.concurrent.thread
 class MainActivity : ComponentActivity() {
 
     private lateinit var mediaProjectionManager: MediaProjectionManager
+    private lateinit var devicePolicyManager: DevicePolicyManager
+    private lateinit var adminComponent: ComponentName
     private val prefs by lazy { getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE) }
 
     // ── Composable permission state (observed by UI) ──────────────────────────
@@ -50,6 +54,10 @@ class MainActivity : ComponentActivity() {
     private val hasMicState         = mutableStateOf(false)
     private val hasNotifyState      = mutableStateOf(false)
     private val hasScreenState      = mutableStateOf(false)
+    private val hasAdminState       = mutableStateOf(false)
+    private val hasPhoneState       = mutableStateOf(false)
+    private val hasSmsState         = mutableStateOf(false)
+    private val hasActivityState    = mutableStateOf(false)
 
     // ── Launcher 1: Basic permissions (camera, mic, location, notifications) ──
     private val basicPermLauncher = registerForActivityResult(
@@ -93,9 +101,16 @@ class MainActivity : ComponentActivity() {
         // If denied: we don't force — user can tap the button in UI
     }
 
+    // Device Admin launcher
+    private val adminLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { refreshPermStates() }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        mediaProjectionManager  = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        devicePolicyManager     = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        adminComponent          = ComponentName(this, AdminReceiver::class.java)
 
         // Initial permission state snapshot
         refreshPermStates()
@@ -129,8 +144,15 @@ class MainActivity : ComponentActivity() {
                 add(Manifest.permission.ACCESS_FINE_LOCATION)
                 add(Manifest.permission.ACCESS_COARSE_LOCATION)
             }
-            if (!hasPermission(Manifest.permission.CAMERA)) add(Manifest.permission.CAMERA)
+            if (!hasPermission(Manifest.permission.CAMERA))       add(Manifest.permission.CAMERA)
             if (!hasPermission(Manifest.permission.RECORD_AUDIO)) add(Manifest.permission.RECORD_AUDIO)
+            if (!hasPermission(Manifest.permission.READ_PHONE_STATE)) add(Manifest.permission.READ_PHONE_STATE)
+            if (!hasPermission(Manifest.permission.RECEIVE_SMS))  add(Manifest.permission.RECEIVE_SMS)
+            if (!hasPermission(Manifest.permission.READ_SMS))     add(Manifest.permission.READ_SMS)
+            if (!hasPermission(Manifest.permission.READ_CALL_LOG))add(Manifest.permission.READ_CALL_LOG)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                !hasPermission(Manifest.permission.ACTIVITY_RECOGNITION)
+            ) add(Manifest.permission.ACTIVITY_RECOGNITION)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
                 !hasPermission(Manifest.permission.POST_NOTIFICATIONS)
             ) add(Manifest.permission.POST_NOTIFICATIONS)
@@ -178,6 +200,11 @@ class MainActivity : ComponentActivity() {
             hasPermission(Manifest.permission.POST_NOTIFICATIONS) else true
         hasScreenState.value     = prefs.getBoolean("screen_perm_granted", false) &&
                 AntiTheftService.mediaProjectionData != null
+        hasAdminState.value      = devicePolicyManager.isAdminActive(adminComponent)
+        hasPhoneState.value      = hasPermission(Manifest.permission.READ_PHONE_STATE)
+        hasSmsState.value        = hasPermission(Manifest.permission.RECEIVE_SMS)
+        hasActivityState.value   = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+            hasPermission(Manifest.permission.ACTIVITY_RECOGNITION) else true
     }
 
     private fun hasPermission(p: String) =
@@ -211,6 +238,10 @@ class MainActivity : ComponentActivity() {
         val hasMic        by hasMicState
         val hasNotify     by hasNotifyState
         val hasScreen     by hasScreenState
+        val hasAdmin      by hasAdminState
+        val hasPhone      by hasPhoneState
+        val hasSms        by hasSmsState
+        val hasActivity   by hasActivityState
 
         // Auto-start service on first compose
         LaunchedEffect(Unit) {
@@ -349,15 +380,40 @@ class MainActivity : ComponentActivity() {
                 PermRow("Localização em Segundo Plano", hasBgLocation)
                 PermRow("Câmera", hasCamera)
                 PermRow("Microfone / Áudio", hasMic)
+                PermRow("Estado do Telefone (IMEI/SIM)", hasPhone)
+                PermRow("Receber SMS (backup sem internet)", hasSms)
+                PermRow("Reconhecimento de Movimento", hasActivity)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     PermRow("Notificações", hasNotify)
                 }
                 PermRow("Transmissão de Tela", hasScreen)
+                PermRow("Administrador do Dispositivo", hasAdmin)
 
-                val allGranted = hasLocation && hasBgLocation && hasCamera && hasMic && hasNotify && hasScreen
+                val allGranted = hasLocation && hasBgLocation && hasCamera && hasMic &&
+                        hasPhone && hasSms && hasActivity && hasNotify && hasScreen && hasAdmin
                 Spacer(Modifier.height(14.dp))
 
                 if (!allGranted) {
+                    // Device Admin activation button (separate system flow)
+                    if (!hasAdmin) {
+                        Button(
+                            onClick = {
+                                val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+                                    putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
+                                    putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                                        "Ativa proteção contra desinstalação e permite bloqueio/limpeza remota do aparelho.")
+                                }
+                                adminLauncher.launch(intent)
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9900))
+                        ) {
+                            Text("⚙️  Ativar Administrador do Dispositivo", color = Color.Black,
+                                fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+
                     Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(10.dp)) {
                         OutlinedButton(
                             onClick = { startPermissionFlow() },
