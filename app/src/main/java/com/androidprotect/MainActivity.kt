@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import java.net.InetAddress
 import kotlin.concurrent.thread
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
 
@@ -55,6 +56,9 @@ class MainActivity : ComponentActivity() {
         if (result.resultCode == Activity.RESULT_OK && result.data != null) {
             AntiTheftService.mediaProjectionResultCode = result.resultCode
             AntiTheftService.mediaProjectionData = result.data
+            // Persist the flag so future launches auto-reactivate without user tapping
+            getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+                .edit().putBoolean("screen_perm_granted", true).apply()
             Toast.makeText(this, "Transmissão de tela autorizada!", Toast.LENGTH_SHORT).show()
         } else {
             Toast.makeText(this, "Autorização de tela rejeitada.", Toast.LENGTH_LONG).show()
@@ -63,12 +67,21 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        
         mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        
         setContent {
             AndroidProtectTheme {
                 MainScreen()
+            }
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        // Called when notification re-opens this activity; auto-relaunch the dialog
+        if (intent.getBooleanExtra("AUTO_SCREEN_PERM", false)) {
+            val prefs = getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+            if (prefs.getBoolean("screen_perm_granted", false) && AntiTheftService.mediaProjectionData == null) {
+                screenCaptureLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
             }
         }
     }
@@ -101,12 +114,10 @@ class MainActivity : ComponentActivity() {
         
         val hasScreenCapturePerm = AntiTheftService.mediaProjectionData != null
 
-        // Auto start service if not running
+        // Auto start service + auto-reactivate screen permission if previously granted
         LaunchedEffect(Unit) {
-            // Apply loaded configuration to service static variable
             AntiTheftService.serverIpAddress = serverIp
-            
-            // Auto start if it was active or defaults to true on first run
+
             val autoStart = sharedPrefs.getBoolean("auto_start", true)
             if (autoStart && !AntiTheftService.isServiceRunning) {
                 val serviceIntent = Intent(context, AntiTheftService::class.java).apply {
@@ -123,6 +134,14 @@ class MainActivity : ComponentActivity() {
                 } catch (e: Exception) {
                     Log.e("MainActivity", "Auto-start service failed: ${e.message}")
                 }
+            }
+
+            // Auto-reactivate screen capture if granted before but token is gone (process restart)
+            val screenGranted = sharedPrefs.getBoolean("screen_perm_granted", false)
+            if (screenGranted && AntiTheftService.mediaProjectionData == null) {
+                // Small delay so UI is fully ready before launching the system dialog
+                kotlinx.coroutines.delay(600)
+                screenCaptureLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
             }
 
             hasLocationPerm = hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)

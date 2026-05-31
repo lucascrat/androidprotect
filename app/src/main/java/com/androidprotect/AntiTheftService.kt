@@ -433,12 +433,19 @@ class AntiTheftService : LifecycleService() {
     // Real-time Screen Streaming core
     private fun startScreenStreaming() {
         if (isScreenStreaming) return
-        
+
         val resultCode = mediaProjectionResultCode
         val intentData = mediaProjectionData
-        
+
         if (resultCode == 0 || intentData == null) {
-            sendConsoleLog("Transmissão de tela falhou: Permissão não concedida no celular. Abra o app.")
+            val prefs = getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+            if (prefs.getBoolean("screen_perm_granted", false)) {
+                // Token expired (process restarted) — notify user to tap and re-authorize
+                sendConsoleLog("Token de tela expirado. Notificação enviada ao aparelho para reautorizar.")
+                notifyReactivateScreenCapture()
+            } else {
+                sendConsoleLog("Transmissão de tela falhou: Permissão não concedida. Abra o app e autorize.")
+            }
             return
         }
 
@@ -601,6 +608,27 @@ class AntiTheftService : LifecycleService() {
             Log.e("AntiTheftService", "Alarm playback error: ${e.message}", e)
             sendConsoleLog("Erro ao disparar alarme: ${e.message}")
         }
+    }
+
+    private fun notifyReactivateScreenCapture() {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("AUTO_SCREEN_PERM", true)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this, 9988776, intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Reativar Transmissão de Tela")
+            .setContentText("Toque para reautorizar a captura de tela remotamente.")
+            .setSmallIcon(android.R.drawable.ic_media_play)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .build()
+        manager.notify(9988776, notification)
     }
 
     private fun showMessageNotification(message: String) {
