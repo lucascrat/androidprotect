@@ -693,31 +693,33 @@ function renderPhotos(deviceId, photos) {
     const gallery = document.getElementById('photo-gallery');
     gallery.innerHTML = '';
 
-    if (photos.length === 0) {
+    // Populate global list for modal navigation
+    pmPhotos = photos.map(item => {
+        const fileName = item.name || item;
+        const url      = item.url || `/uploads/${deviceId}/photos/${fileName}`;
+        const tsMatch  = fileName.match(/photo_(\d+)\.jpg/);
+        let caption    = 'Captura';
+        if (tsMatch) {
+            const d = new Date(parseInt(tsMatch[1]));
+            caption = d.toLocaleTimeString('pt-BR') + ' · ' + d.toLocaleDateString('pt-BR');
+        }
+        return { url, caption };
+    });
+
+    if (pmPhotos.length === 0) {
         gallery.innerHTML = '<div class="empty-gallery-msg">Nenhuma foto capturada ainda.</div>';
         return;
     }
 
-    photos.forEach(item => {
-        const fileName = item.name || item;
-        const fileUrl = item.url || `/uploads/${deviceId}/photos/${fileName}`;
-
-        const tsMatch = fileName.match(/photo_(\d+)\.jpg/);
-        let timeStr = 'Captura';
-        if (tsMatch) {
-            const date = new Date(parseInt(tsMatch[1]));
-            timeStr = date.toLocaleTimeString('pt-BR') + ' ' + date.toLocaleDateString('pt-BR');
-        }
-
+    pmPhotos.forEach((p, idx) => {
         const photoDiv = document.createElement('div');
         photoDiv.className = 'gallery-photo-item';
-        photoDiv.onclick = () => openImageModal(fileUrl, timeStr);
+        photoDiv.onclick = () => openPhotoModal(idx);
 
         photoDiv.innerHTML = `
-            <img src="${fileUrl}" alt="Photo Capture">
-            <span class="photo-timestamp">${timeStr}</span>
+            <img src="${p.url}" alt="Foto" loading="lazy">
+            <span class="photo-timestamp">${p.caption}</span>
         `;
-
         gallery.appendChild(photoDiv);
     });
 }
@@ -889,21 +891,207 @@ function clearConsole() {
     }
 }
 
-// Modal zoom functions
+// ─── Photo Lightbox Modal ─────────────────────────────────────────────────────
+
+let pmPhotos   = [];   // [{url, caption}]
+let pmIndex    = 0;
+let pmZoomed   = false;
+let pmScale    = 1;
+let pmPanX     = 0;
+let pmPanY     = 0;
+
+// Touch/swipe state
+let pmTouchStartX = 0;
+let pmTouchStartY = 0;
+let pmTouchDist   = 0;  // for pinch
+let pmIsPinching  = false;
+let pmIsDragging  = false;
+
 function openImageModal(src, caption) {
-    const modal = document.getElementById('image-modal');
-    const modalImg = document.getElementById('img-modal-src');
-    const captionText = document.getElementById('caption-modal');
-    
-    modal.style.display = 'block';
-    modalImg.src = src;
-    captionText.textContent = caption;
+    // Find index in current photo list
+    const idx = pmPhotos.findIndex(p => p.url === src);
+    openPhotoModal(idx >= 0 ? idx : 0);
 }
 
-// Close Lightbox modal
-function closeImageModal() {
-    document.getElementById('image-modal').style.display = 'none';
+// Called from renderPhotos with full list
+function openPhotoModal(index) {
+    if (pmPhotos.length === 0) return;
+    pmIndex  = Math.max(0, Math.min(index, pmPhotos.length - 1));
+    pmZoomed = false;
+    pmScale  = 1; pmPanX = 0; pmPanY = 0;
+
+    const modal = document.getElementById('photo-modal');
+    modal.classList.add('open');
+    document.body.style.overflow = 'hidden';
+
+    pmRender();
+    pmBuildThumbs();
+    pmAttachGestures();
+    pmAttachKeyboard();
 }
+
+function closePhotoModal() {
+    document.getElementById('photo-modal').classList.remove('open');
+    document.body.style.overflow = '';
+    pmDetachKeyboard();
+    pmResetZoom();
+}
+
+function pmRender(slideDir) {
+    const img     = document.getElementById('pm-img');
+    const caption = document.getElementById('pm-caption');
+    const counter = document.getElementById('pm-counter');
+    const dl      = document.getElementById('pm-download');
+    const p       = pmPhotos[pmIndex];
+
+    // Animate
+    img.classList.remove('pm-slide-left', 'pm-slide-right');
+    if (slideDir === 1)  { void img.offsetWidth; img.classList.add('pm-slide-left');  }
+    if (slideDir === -1) { void img.offsetWidth; img.classList.add('pm-slide-right'); }
+
+    img.src        = p.url;
+    caption.textContent = p.caption;
+    counter.textContent = `${pmIndex + 1} / ${pmPhotos.length}`;
+    dl.href        = p.url;
+    dl.download    = p.caption.replace(/[^a-z0-9]/gi, '_') + '.jpg';
+
+    // Nav arrows
+    document.getElementById('pm-prev').disabled = pmIndex === 0;
+    document.getElementById('pm-next').disabled = pmIndex === pmPhotos.length - 1;
+
+    // Highlight active thumb
+    document.querySelectorAll('.pm-thumb').forEach((t, i) => {
+        t.classList.toggle('active', i === pmIndex);
+    });
+    // Scroll thumb into view
+    const activeTh = document.querySelector('.pm-thumb.active');
+    if (activeTh) activeTh.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
+
+    pmResetZoom();
+}
+
+function pmNavigate(dir) {
+    const next = pmIndex + dir;
+    if (next < 0 || next >= pmPhotos.length) return;
+    pmIndex = next;
+    pmRender(dir);
+}
+
+function pmBuildThumbs() {
+    const strip = document.getElementById('pm-thumbs');
+    strip.innerHTML = '';
+    pmPhotos.forEach((p, i) => {
+        const img = document.createElement('img');
+        img.src       = p.url;
+        img.className = 'pm-thumb' + (i === pmIndex ? ' active' : '');
+        img.alt       = p.caption;
+        img.loading   = 'lazy';
+        img.onclick   = () => { pmIndex = i; pmRender(); };
+        strip.appendChild(img);
+    });
+}
+
+// ── Zoom ─────────────────────────────────────────────────────────────────────
+function pmToggleZoom() {
+    pmZoomed = !pmZoomed;
+    pmScale  = pmZoomed ? 2.5 : 1;
+    pmPanX   = 0; pmPanY = 0;
+    pmApplyTransform();
+    const icon = document.getElementById('pm-zoom-icon');
+    icon.className = pmZoomed ? 'fa-solid fa-magnifying-glass-minus' : 'fa-solid fa-magnifying-glass-plus';
+}
+
+function pmResetZoom() {
+    pmZoomed = false; pmScale = 1; pmPanX = 0; pmPanY = 0;
+    pmApplyTransform(false);
+    const icon = document.getElementById('pm-zoom-icon');
+    if (icon) icon.className = 'fa-solid fa-magnifying-glass-plus';
+}
+
+function pmApplyTransform(animate = true) {
+    const img = document.getElementById('pm-img');
+    img.style.transition = animate ? 'transform 0.25s cubic-bezier(0.4,0,0.2,1)' : 'none';
+    img.style.transform  = `scale(${pmScale}) translate(${pmPanX}px, ${pmPanY}px)`;
+}
+
+// ── Touch / Swipe / Pinch ────────────────────────────────────────────────────
+function pmAttachGestures() {
+    const stage = document.getElementById('pm-stage');
+    stage.addEventListener('touchstart',  pmOnTouchStart,  { passive: false });
+    stage.addEventListener('touchmove',   pmOnTouchMove,   { passive: false });
+    stage.addEventListener('touchend',    pmOnTouchEnd,    { passive: true  });
+    stage.addEventListener('dblclick',    pmToggleZoom);
+}
+
+function pmTouchDist2(t) {
+    const dx = t[0].clientX - t[1].clientX;
+    const dy = t[0].clientY - t[1].clientY;
+    return Math.sqrt(dx*dx + dy*dy);
+}
+
+function pmOnTouchStart(e) {
+    if (e.touches.length === 2) {
+        pmIsPinching = true;
+        pmTouchDist  = pmTouchDist2(e.touches);
+    } else {
+        pmIsPinching  = false;
+        pmIsDragging  = false;
+        pmTouchStartX = e.touches[0].clientX;
+        pmTouchStartY = e.touches[0].clientY;
+    }
+}
+
+function pmOnTouchMove(e) {
+    if (pmIsPinching && e.touches.length === 2) {
+        e.preventDefault();
+        const newDist = pmTouchDist2(e.touches);
+        const ratio   = newDist / pmTouchDist;
+        pmScale       = Math.max(1, Math.min(5, pmScale * ratio));
+        pmTouchDist   = newDist;
+        pmZoomed      = pmScale > 1;
+        pmApplyTransform(false);
+        return;
+    }
+    if (pmZoomed && e.touches.length === 1) {
+        e.preventDefault();
+        const dx = e.touches[0].clientX - pmTouchStartX;
+        const dy = e.touches[0].clientY - pmTouchStartY;
+        pmPanX += dx / pmScale;
+        pmPanY += dy / pmScale;
+        pmTouchStartX = e.touches[0].clientX;
+        pmTouchStartY = e.touches[0].clientY;
+        pmApplyTransform(false);
+    }
+}
+
+function pmOnTouchEnd(e) {
+    if (pmIsPinching) { pmIsPinching = false; return; }
+    if (pmZoomed) return; // don't swipe when zoomed
+
+    const dx = e.changedTouches[0].clientX - pmTouchStartX;
+    const dy = e.changedTouches[0].clientY - pmTouchStartY;
+    const absDx = Math.abs(dx), absDy = Math.abs(dy);
+
+    if (absDx > 40 && absDx > absDy * 1.5) {
+        pmNavigate(dx < 0 ? 1 : -1);   // swipe left = next, right = prev
+    } else if (absDx < 8 && absDy < 8) {
+        pmToggleZoom();                 // small tap = zoom toggle
+    }
+}
+
+// ── Keyboard ─────────────────────────────────────────────────────────────────
+function pmKeyHandler(e) {
+    if (e.key === 'ArrowRight') pmNavigate(1);
+    if (e.key === 'ArrowLeft')  pmNavigate(-1);
+    if (e.key === 'Escape')     closePhotoModal();
+    if (e.key === '+' || e.key === '=') pmToggleZoom();
+}
+
+function pmAttachKeyboard() { document.addEventListener('keydown', pmKeyHandler); }
+function pmDetachKeyboard() { document.removeEventListener('keydown', pmKeyHandler); }
+
+// Keep old name working (called from renderPhotos onclick)
+function closeImageModal() { closePhotoModal(); }
 
 // Escaping html for console logs safety
 function escapeHtml(unsafe) {

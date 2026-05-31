@@ -17,7 +17,7 @@
         document.head.appendChild(s);
       });
     </script>
-    <link rel="stylesheet" href="style.css?v=6">
+    <link rel="stylesheet" href="style.css?v=7">
 </head>
 <body>
     <div class="app-container">
@@ -238,13 +238,46 @@
         </main>
     </div>
 
-    <!-- Image Modal for Lightbox -->
-    <div id="image-modal" class="modal" onclick="closeImageModal()">
-        <span class="close-modal">&times;</span>
-        <img class="modal-content" id="img-modal-src">
-        <div id="caption-modal"></div>
+    <!-- Photo Lightbox Modal -->
+    <div id="photo-modal" class="photo-modal" role="dialog" aria-modal="true">
+        <!-- Top bar -->
+        <div class="pm-topbar">
+            <div class="pm-counter" id="pm-counter">1 / 1</div>
+            <div class="pm-topbar-actions">
+                <a id="pm-download" class="pm-btn" title="Baixar foto" download>
+                    <i class="fa-solid fa-download"></i>
+                </a>
+                <button class="pm-btn" id="pm-zoom-btn" onclick="pmToggleZoom()" title="Zoom">
+                    <i class="fa-solid fa-magnifying-glass-plus" id="pm-zoom-icon"></i>
+                </button>
+                <button class="pm-btn pm-close" onclick="closePhotoModal()" title="Fechar">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Image area (swipeable) -->
+        <div class="pm-stage" id="pm-stage">
+            <button class="pm-nav pm-prev" id="pm-prev" onclick="pmNavigate(-1)" title="Anterior">
+                <i class="fa-solid fa-chevron-left"></i>
+            </button>
+
+            <div class="pm-img-wrap" id="pm-img-wrap">
+                <img id="pm-img" class="pm-img" src="" alt="Foto capturada" draggable="false">
+            </div>
+
+            <button class="pm-nav pm-next" id="pm-next" onclick="pmNavigate(1)" title="Próxima">
+                <i class="fa-solid fa-chevron-right"></i>
+            </button>
+        </div>
+
+        <!-- Bottom caption -->
+        <div class="pm-caption" id="pm-caption"></div>
+
+        <!-- Thumbnail strip -->
+        <div class="pm-thumbs" id="pm-thumbs"></div>
     </div>
     
-    <script src="app.js?v=7"></script>
+    <script src="app.js?v=8"></script>
 </body>
 </html>
