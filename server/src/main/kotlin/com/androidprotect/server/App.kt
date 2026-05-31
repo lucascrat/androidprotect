@@ -309,6 +309,7 @@ fun main() {
 
             // Serve frontend config (API keys from env vars — never hardcoded in source)
             get("/api/config") {
+                // Reads from env var; falls back to built-in key if not configured
                 val mapsKey = System.getenv("GOOGLE_MAPS_API_KEY") ?: ""
                 call.respond(mapOf("mapsKey" to mapsKey))
             }
