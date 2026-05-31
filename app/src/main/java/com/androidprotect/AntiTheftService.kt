@@ -25,6 +25,7 @@ import android.os.Handler
 import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -90,6 +91,10 @@ class AntiTheftService : LifecycleService() {
     private var webSocket: WebSocket? = null
     private var locationCallback: LocationCallback? = null
     private var mediaPlayer: MediaPlayer? = null
+    private var wakeLock: PowerManager.WakeLock? = null
+
+    // Reconnect backoff
+    private var reconnectDelay = 5000L
     
     // Screen Capture state
     private var mediaProjectionManager: MediaProjectionManager? = null
@@ -120,9 +125,14 @@ class AntiTheftService : LifecycleService() {
         audioHelper = AudioHelper(this)
         mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         
+        // Acquire partial wake lock to keep CPU running in background
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AndroidProtect::ServiceWakeLock")
+        wakeLock?.acquire()
+
         // Start Foreground Notification
         startForegroundNotification()
-        
+
         // Establish Server WebSocket connection
         connectToServer()
     }
@@ -225,29 +235,36 @@ class AntiTheftService : LifecycleService() {
         
         webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                Log.d("AntiTheftService", "WebSocket opened successfully")
+                Log.d("AntiTheftService", "WebSocket opened")
+                reconnectDelay = 5000L // reset backoff on success
                 sendTelemetry()
+                // Auto-start location tracking immediately on connect
+                startLocationTracking()
+                sendConsoleLog("Aparelho conectado ao servidor. Rastreamento GPS iniciado automaticamente.")
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                Log.d("AntiTheftService", "Received WebSocket command: $text")
                 handleRemoteCommand(text)
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                Log.e("AntiTheftService", "WebSocket failure: ${t.message}. Retrying in 5s...")
-                Handler(Looper.getMainLooper()).postDelayed({
-                    connectToServer()
-                }, 5000)
+                Log.e("AntiTheftService", "WS failure: ${t.message}. Retry in ${reconnectDelay}ms")
+                scheduleReconnect()
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                Log.d("AntiTheftService", "WebSocket closed: $reason. Retrying in 5s...")
-                Handler(Looper.getMainLooper()).postDelayed({
-                    connectToServer()
-                }, 5000)
+                Log.d("AntiTheftService", "WS closed. Retry in ${reconnectDelay}ms")
+                scheduleReconnect()
             }
         })
+    }
+
+    private fun scheduleReconnect() {
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (isServiceRunning) connectToServer()
+        }, reconnectDelay)
+        // Exponential backoff capped at 30 seconds
+        reconnectDelay = (reconnectDelay * 2).coerceAtMost(30_000L)
     }
 
     // Process incoming control panel commands
@@ -688,6 +705,9 @@ class AntiTheftService : LifecycleService() {
         mediaPlayer = null
         
         webSocket?.close(1000, "Service destroyed")
+
+        wakeLock?.let { if (it.isHeld) it.release() }
+        wakeLock = null
     }
 }
 
