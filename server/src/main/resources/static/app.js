@@ -564,31 +564,32 @@ function fetchMediaList(deviceId) {
 function renderPhotos(deviceId, photos) {
     const gallery = document.getElementById('photo-gallery');
     gallery.innerHTML = '';
-    
+
     if (photos.length === 0) {
         gallery.innerHTML = '<div class="empty-gallery-msg">Nenhuma foto capturada ainda.</div>';
         return;
     }
-    
-    photos.forEach(fileName => {
+
+    photos.forEach(item => {
+        const fileName = item.name || item;
+        const fileUrl = item.url || `/uploads/${deviceId}/photos/${fileName}`;
+
         const tsMatch = fileName.match(/photo_(\d+)\.jpg/);
         let timeStr = 'Captura';
         if (tsMatch) {
             const date = new Date(parseInt(tsMatch[1]));
             timeStr = date.toLocaleTimeString('pt-BR') + ' ' + date.toLocaleDateString('pt-BR');
         }
-        
-        const fileUrl = `/uploads/${deviceId}/photos/${fileName}`;
-        
+
         const photoDiv = document.createElement('div');
         photoDiv.className = 'gallery-photo-item';
         photoDiv.onclick = () => openImageModal(fileUrl, timeStr);
-        
+
         photoDiv.innerHTML = `
             <img src="${fileUrl}" alt="Photo Capture">
             <span class="photo-timestamp">${timeStr}</span>
         `;
-        
+
         gallery.appendChild(photoDiv);
     });
 }
@@ -597,25 +598,26 @@ function renderPhotos(deviceId, photos) {
 function renderAudios(deviceId, audios) {
     const audioList = document.getElementById('audio-list');
     audioList.innerHTML = '';
-    
+
     if (audios.length === 0) {
         audioList.innerHTML = '<div class="empty-audio-msg">Nenhuma gravação de áudio encontrada.</div>';
         return;
     }
-    
-    audios.forEach(fileName => {
+
+    audios.forEach(item => {
+        const fileName = item.name || item;
+        const fileUrl = item.url || `/uploads/${deviceId}/audio/${fileName}`;
+
         const tsMatch = fileName.match(/audio_(\d+)\.aac/);
         let timeStr = 'Gravação';
         if (tsMatch) {
             const date = new Date(parseInt(tsMatch[1]));
             timeStr = date.toLocaleTimeString('pt-BR') + ' ' + date.toLocaleDateString('pt-BR');
         }
-        
-        const fileUrl = `/uploads/${deviceId}/audio/${fileName}`;
-        
+
         const audioDiv = document.createElement('div');
         audioDiv.className = 'audio-item';
-        
+
         audioDiv.innerHTML = `
             <div class="audio-info">
                 <i class="fa-solid fa-microphone-lines"></i>
@@ -625,10 +627,18 @@ function renderAudios(deviceId, audios) {
                 </div>
             </div>
             <div class="audio-player-control">
-                <audio controls src="${fileUrl}"></audio>
+                <audio controls preload="none">
+                    <source src="${fileUrl}" type="audio/aac">
+                    <source src="${fileUrl}" type="audio/mp4">
+                </audio>
             </div>
         `;
-        
+
+        const audioEl = audioDiv.querySelector('audio');
+        audioEl.addEventListener('error', () => {
+            audioEl.parentElement.innerHTML = `<a href="${fileUrl}" target="_blank" download class="audio-download-link"><i class="fa-solid fa-download"></i> Baixar Áudio</a>`;
+        });
+
         audioList.appendChild(audioDiv);
     });
 }

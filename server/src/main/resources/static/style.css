@@ -649,9 +649,28 @@ body {
 }
 
 .audio-player-control audio {
-    height: 32px;
-    width: 160px;
+    height: 36px;
+    width: 220px;
     outline: none;
+    border-radius: 6px;
+    background: var(--bg-card);
+}
+
+.audio-download-link {
+    color: var(--neon-blue);
+    font-size: 0.8rem;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    border: 1px solid var(--neon-blue);
+    border-radius: 8px;
+    transition: background 0.2s;
+}
+
+.audio-download-link:hover {
+    background: rgba(0, 210, 255, 0.1);
 }
 
 /* Security Terminal Console */

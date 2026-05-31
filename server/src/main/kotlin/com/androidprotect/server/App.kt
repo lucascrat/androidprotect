@@ -289,13 +289,10 @@ fun main() {
             // Serve static dashboard files
             staticFiles("/", File("server/src/main/resources/static"), index = "index.html")
 
-            // Serve uploaded files
-            staticFiles("/uploads", File("uploads"))
-
-            // REST endpoint to list photos and audios for a device
+            // REST endpoint to list photos and audios for a device (returns full URLs)
             get("/uploads/{id}/media-list") {
                 val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
-                
+
                 val client = s3Client
                 if (client != null) {
                     try {
@@ -305,70 +302,68 @@ fun main() {
                             .prefix(prefix)
                             .build()
                         val listRes = client.listObjectsV2(listReq)
-                        
+
                         val photos = listRes.contents()
                             .filter { it.key().contains("/photos/") }
                             .map { it.key().substringAfter("/photos/") }
                             .filter { it.isNotBlank() }
                             .sortedDescending()
-                            
+                            .map { name -> mapOf("name" to name, "url" to "$r2PublicUrl/uploads/$id/photos/$name") }
+
                         val audios = listRes.contents()
                             .filter { it.key().contains("/audio/") }
                             .map { it.key().substringAfter("/audio/") }
                             .filter { it.isNotBlank() }
                             .sortedDescending()
-                            
+                            .map { name -> mapOf("name" to name, "url" to "$r2PublicUrl/uploads/$id/audio/$name") }
+
                         call.respond(mapOf("photos" to photos, "audio" to audios))
                         return@get
                     } catch (e: Exception) {
                         println("R2 STORAGE: Failed to list from R2: ${e.message}. Falling back to local directory.")
                     }
                 }
-                
+
                 val photosDir = File("uploads/$id/photos")
                 val audioDir = File("uploads/$id/audio")
 
                 val photos = if (photosDir.exists()) {
-                    photosDir.listFiles()?.map { it.name }?.sortedDescending() ?: emptyList()
-                } else emptyList()
+                    photosDir.listFiles()?.map { it.name }?.sortedDescending()
+                        ?.map { name -> mapOf("name" to name, "url" to "/uploads/$id/photos/$name") } ?: emptyList()
+                } else emptyList<Map<String, String>>()
 
                 val audios = if (audioDir.exists()) {
-                    audioDir.listFiles()?.map { it.name }?.sortedDescending() ?: emptyList()
-                } else emptyList()
+                    audioDir.listFiles()?.map { it.name }?.sortedDescending()
+                        ?.map { name -> mapOf("name" to name, "url" to "/uploads/$id/audio/$name") } ?: emptyList()
+                } else emptyList<Map<String, String>>()
 
                 call.respond(mapOf("photos" to photos, "audio" to audios))
             }
 
-            // Transparent redirection to Cloudflare R2 Edge CDN for media files
+            // Serve local uploaded photos (only used when R2 is not configured)
             get("/uploads/{id}/photos/{name}") {
                 val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
                 val name = call.parameters["name"] ?: return@get call.respond(mapOf("error" to "Missing file name"))
-                
-                if (s3Client != null) {
-                    call.respondRedirect("$r2PublicUrl/uploads/$id/photos/$name")
+                val file = File("uploads/$id/photos/$name")
+                if (file.exists()) {
+                    call.response.headers.append("Content-Type", "image/jpeg")
+                    call.respondFile(file)
                 } else {
-                    val file = File("uploads/$id/photos/$name")
-                    if (file.exists()) {
-                        call.respondFile(file)
-                    } else {
-                        call.respond(io.ktor.http.HttpStatusCode.NotFound)
-                    }
+                    call.respond(io.ktor.http.HttpStatusCode.NotFound)
                 }
             }
 
+            // Serve local uploaded audio (only used when R2 is not configured)
             get("/uploads/{id}/audio/{name}") {
                 val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
                 val name = call.parameters["name"] ?: return@get call.respond(mapOf("error" to "Missing file name"))
-                
-                if (s3Client != null) {
-                    call.respondRedirect("$r2PublicUrl/uploads/$id/audio/$name")
+                val file = File("uploads/$id/audio/$name")
+                if (file.exists()) {
+                    call.response.headers.append("Content-Type", "audio/aac")
+                    call.response.headers.append("Accept-Ranges", "bytes")
+                    call.respondFile(file)
                 } else {
-                    val file = File("uploads/$id/audio/$name")
-                    if (file.exists()) {
-                        call.respondFile(file)
-                    } else {
-                        call.respond(io.ktor.http.HttpStatusCode.NotFound)
-                    }
+                    call.respond(io.ktor.http.HttpStatusCode.NotFound)
                 }
             }
 
