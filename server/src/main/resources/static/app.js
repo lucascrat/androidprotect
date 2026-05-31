@@ -3,7 +3,8 @@ let socket = null;
 let map = null;
 let deviceMarker = null;
 let deviceAccuracyCircle = null;
-let routeLine = null; // Polyline to draw tracking trail
+let trailPolylines = []; // Array of day-segment polylines for 30-day trail
+let dayMarkers = [];    // Markers at day boundaries on the trail
 let currentDeviceId = null;
 let devicesMap = new Map();
 let isScreenStreaming = false;
@@ -198,12 +199,21 @@ function handleJsonMessage(data) {
             break;
             
         case 'AUDIO_UPLOADED':
-            logToConsole(`Nova gravação de áudio recebida!`, 'success');
+            logToConsole(`Nova gravação de áudio recebida do dispositivo!`, 'success');
             if (data.deviceId === currentDeviceId) {
                 fetchMediaList(currentDeviceId);
             }
             break;
-            
+
+        case 'NEW_MESSAGE':
+            if (data.deviceId === currentDeviceId) {
+                appendMessage(data.direction, data.content, data.timestamp);
+            }
+            if (data.direction === 'in') {
+                logToConsole(`Mensagem recebida do dispositivo: ${data.content}`, 'success');
+            }
+            break;
+
         case 'ERROR':
             logToConsole(`Erro: ${data.message}`, 'error');
             break;
@@ -364,78 +374,115 @@ function fetchDeviceHistory(deviceId) {
             });
             const consoleBody = document.getElementById('terminal-body');
             if (consoleBody) consoleBody.scrollTop = consoleBody.scrollHeight;
-            
             logToConsole(`Histórico de logs carregado (${logs.length} eventos).`, 'system');
         })
         .catch(err => console.error('Error fetching logs history:', err));
 
-    // 2. Fetch Telemetry/Route History
-    fetch(`/api/device/${deviceId}/telemetry-history`)
+    // 2. Fetch 30-day Trail
+    fetchTrailHistory(deviceId);
+
+    // 3. Fetch Messages History
+    fetch(`/api/device/${deviceId}/messages-history`)
+        .then(res => res.json())
+        .then(messages => {
+            const list = document.getElementById('messages-list');
+            list.innerHTML = '';
+            if (messages.length === 0) {
+                list.innerHTML = '<div class="messages-empty"><i class="fa-solid fa-comment-slash"></i><p>Nenhuma mensagem ainda.</p></div>';
+            } else {
+                messages.forEach(m => appendMessage(m.direction, m.content, m.timestamp, false));
+                list.scrollTop = list.scrollHeight;
+            }
+            document.getElementById('messages-device-label').textContent =
+                devicesMap.get(deviceId)?.model || deviceId;
+        })
+        .catch(err => console.error('Error fetching messages:', err));
+}
+
+// Fetch and draw trail for selected days
+function fetchTrailHistory(deviceId) {
+    if (!deviceId) return;
+    const days = document.getElementById('trail-days-select')?.value || 30;
+
+    fetch(`/api/device/${deviceId}/telemetry-history?days=${days}`)
         .then(res => res.json())
         .then(points => {
-            // Clean route line
-            if (routeLine) {
-                routeLine.setMap(null);
-                routeLine = null;
-            }
-            if (deviceMarker) {
-                deviceMarker.setMap(null);
-                deviceMarker = null;
-            }
-            if (deviceAccuracyCircle) {
-                deviceAccuracyCircle.setMap(null);
-                deviceAccuracyCircle = null;
-            }
+            clearTrail();
+
+            if (!map) return;
 
             if (points.length === 0) {
                 document.getElementById('location-accuracy').textContent = 'Precisão: --';
                 return;
             }
 
-            logToConsole(`Histórico de rota carregado (${points.length} coordenadas).`, 'system');
+            logToConsole(`Rastro carregado: ${points.length} pontos (últimos ${days} dias).`, 'system');
 
-            // Draw historical trail line (Polyline)
-            const pathCoordinates = points.map(p => ({ lat: p.lat, lng: p.lng }));
-            
-            const lineSymbol = {
-                path: 'M 0,-1 0,1',
-                strokeOpacity: 1,
-                scale: 3
-            };
-            
-            routeLine = new google.maps.Polyline({
-                path: pathCoordinates,
-                strokeColor: '#00d2ff',
-                strokeOpacity: 0,
-                icons: [{
-                    icon: lineSymbol,
-                    offset: '0',
-                    repeat: '15px'
-                }],
-                map: map
+            // Group points by calendar day for color-coded segments
+            const dayGroups = groupPointsByDay(points);
+            const totalDays = dayGroups.length;
+
+            dayGroups.forEach((group, idx) => {
+                if (group.coords.length < 2) return;
+
+                // Color gradient: oldest = faded purple, newest = bright neon cyan
+                const ratio = totalDays <= 1 ? 1 : idx / (totalDays - 1);
+                const color = interpolateTrailColor(ratio);
+                const opacity = 0.25 + ratio * 0.65;
+                const weight = 2 + ratio * 2;
+
+                const polyline = new google.maps.Polyline({
+                    path: group.coords,
+                    strokeColor: color,
+                    strokeOpacity: opacity,
+                    strokeWeight: weight,
+                    map: map
+                });
+                trailPolylines.push(polyline);
+
+                // Day label marker at first point of each day (except today)
+                if (idx < totalDays - 1) {
+                    const label = new Date(group.day).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+                    const marker = new google.maps.Marker({
+                        position: group.coords[0],
+                        map: map,
+                        label: { text: label, color: '#8e94a5', fontSize: '10px', fontWeight: '600' },
+                        icon: {
+                            path: google.maps.SymbolPath.CIRCLE,
+                            scale: 5,
+                            fillColor: color,
+                            fillOpacity: 0.8,
+                            strokeColor: '#fff',
+                            strokeWeight: 1
+                        },
+                        title: label
+                    });
+                    dayMarkers.push(marker);
+                }
             });
 
-            // Draw last known point
+            // Draw current position marker
             const lastPt = points[points.length - 1];
             document.getElementById('location-accuracy').textContent = `Precisão: ${lastPt.accuracy.toFixed(1)}m`;
-            
-            const neonMarkerSvg = {
-                path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z",
-                fillColor: "#00d2ff",
-                fillOpacity: 1,
-                strokeColor: "#ffffff",
-                strokeWeight: 2.5,
-                scale: 1.5,
-                anchor: new google.maps.Point(12, 22)
-            };
+
+            if (deviceMarker) { deviceMarker.setMap(null); }
+            if (deviceAccuracyCircle) { deviceAccuracyCircle.setMap(null); }
 
             deviceMarker = new google.maps.Marker({
                 position: { lat: lastPt.lat, lng: lastPt.lng },
                 map: map,
-                icon: neonMarkerSvg,
-                title: "Localização Atual"
+                icon: {
+                    path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z",
+                    fillColor: "#00d2ff",
+                    fillOpacity: 1,
+                    strokeColor: "#ffffff",
+                    strokeWeight: 2.5,
+                    scale: 1.5,
+                    anchor: new google.maps.Point(12, 22)
+                },
+                title: "Última Localização"
             });
-            
+
             deviceAccuracyCircle = new google.maps.Circle({
                 map: map,
                 center: { lat: lastPt.lat, lng: lastPt.lng },
@@ -447,14 +494,54 @@ function fetchDeviceHistory(deviceId) {
                 fillOpacity: 0.12
             });
 
-            // Fit map bounds to show full path history
-            if (map) {
-                const bounds = new google.maps.LatLngBounds();
-                pathCoordinates.forEach(coord => bounds.extend(coord));
-                map.fitBounds(bounds);
-            }
+            // Fit bounds
+            const bounds = new google.maps.LatLngBounds();
+            points.forEach(p => bounds.extend({ lat: p.lat, lng: p.lng }));
+            map.fitBounds(bounds);
         })
-        .catch(err => console.error('Error fetching telemetry history:', err));
+        .catch(err => console.error('Error fetching trail:', err));
+}
+
+// Group telemetry points by calendar day
+function groupPointsByDay(points) {
+    const groups = [];
+    let currentDay = null;
+    let currentGroup = null;
+
+    points.forEach(p => {
+        const d = new Date(p.timestamp);
+        const dayKey = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+        if (dayKey !== currentDay) {
+            if (currentGroup) groups.push(currentGroup);
+            currentDay = dayKey;
+            currentGroup = { day: p.timestamp, coords: [] };
+        }
+        currentGroup.coords.push({ lat: p.lat, lng: p.lng });
+    });
+    if (currentGroup) groups.push(currentGroup);
+    return groups;
+}
+
+// Interpolate trail color: 0=oldest (purple/grey), 1=newest (neon cyan)
+function interpolateTrailColor(ratio) {
+    // oldest: #6b4fa0 (purple)  →  newest: #00d2ff (neon cyan)
+    const r = Math.round(107 + (0 - 107) * ratio);
+    const g = Math.round(79 + (210 - 79) * ratio);
+    const b = Math.round(160 + (255 - 160) * ratio);
+    return `rgb(${r},${g},${b})`;
+}
+
+// Clear all trail polylines and day markers from map
+function clearTrail() {
+    trailPolylines.forEach(p => p.setMap(null));
+    trailPolylines = [];
+    dayMarkers.forEach(m => m.setMap(null));
+    dayMarkers = [];
+}
+
+// Refresh trail when days selector changes
+function refreshTrail() {
+    if (currentDeviceId) fetchTrailHistory(currentDeviceId);
 }
 
 // Handle real-time telemetry details (location, battery)
@@ -513,28 +600,19 @@ function handleTelemetry(data) {
             });
         }
 
-        // 2. Append point to Polyline dynamically in real-time
-        if (routeLine) {
-            const path = routeLine.getPath();
-            path.push(new google.maps.LatLng(lat, lng));
+        // 2. Append point to the last trail segment in real-time
+        if (trailPolylines.length > 0) {
+            const lastLine = trailPolylines[trailPolylines.length - 1];
+            lastLine.getPath().push(new google.maps.LatLng(lat, lng));
         } else if (map) {
-            const lineSymbol = {
-                path: 'M 0,-1 0,1',
-                strokeOpacity: 1,
-                scale: 3
-            };
-            
-            routeLine = new google.maps.Polyline({
+            const live = new google.maps.Polyline({
                 path: [pos],
                 strokeColor: '#00d2ff',
-                strokeOpacity: 0,
-                icons: [{
-                    icon: lineSymbol,
-                    offset: '0',
-                    repeat: '15px'
-                }],
+                strokeOpacity: 0.9,
+                strokeWeight: 3,
                 map: map
             });
+            trailPolylines.push(live);
         }
         
         // Pan map smoothly to the coordinates
@@ -859,6 +937,48 @@ function appendAiMessage(content, sender, isHtml = false) {
     chatContainer.appendChild(msgDiv);
     chatContainer.scrollTop = chatContainer.scrollHeight;
 }
+
+// ─── Messages Panel ───────────────────────────────────────────────────────────
+
+function sendMessage() {
+    const input = document.getElementById('message-input');
+    if (!input) return;
+    const text = input.value.trim();
+    if (!text) return;
+
+    if (!currentDeviceId) {
+        logToConsole('Nenhum dispositivo selecionado para enviar mensagem!', 'error');
+        return;
+    }
+
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ command: 'SEND_MESSAGE', deviceId: currentDeviceId, message: text }));
+        input.value = '';
+    } else {
+        logToConsole('Sem conexão com o servidor!', 'error');
+    }
+}
+
+function appendMessage(direction, content, timestamp, scroll = true) {
+    const list = document.getElementById('messages-list');
+    if (!list) return;
+
+    // Remove empty state placeholder
+    const empty = list.querySelector('.messages-empty');
+    if (empty) empty.remove();
+
+    const time = new Date(timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const bubble = document.createElement('div');
+    bubble.className = `msg-bubble ${direction === 'out' ? 'msg-out' : 'msg-in'}`;
+    bubble.innerHTML = `
+        <span class="msg-content">${escapeHtml(content)}</span>
+        <span class="msg-time">${time}</span>
+    `;
+    list.appendChild(bubble);
+    if (scroll) list.scrollTop = list.scrollHeight;
+}
+
+// ─── Simple markdown formatter ────────────────────────────────────────────────
 
 // Simple markdown formatter helper for bold, bullet points, and code blocks
 function formatMarkdown(text) {

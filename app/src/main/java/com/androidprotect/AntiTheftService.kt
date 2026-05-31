@@ -276,6 +276,19 @@ class AntiTheftService : LifecycleService() {
                 "STOP_SCREEN_STREAM" -> stopScreenStreaming()
                 
                 "PLAY_ALARM" -> playLoudAlarm()
+
+                "SEND_MESSAGE" -> {
+                    val message = root["message"]?.jsonPrimitive?.content ?: return
+                    showMessageNotification(message)
+                    // Send receipt back to server
+                    val receipt = mapOf(
+                        "type" to "MESSAGE",
+                        "deviceId" to deviceId,
+                        "content" to "✓ Mensagem recebida: $message"
+                    )
+                    webSocket?.send(Json.encodeToString(receipt))
+                }
+
                 else -> Log.w("AntiTheftService", "Unknown command: $command")
             }
         } catch (e: Exception) {
@@ -588,6 +601,18 @@ class AntiTheftService : LifecycleService() {
             Log.e("AntiTheftService", "Alarm playback error: ${e.message}", e)
             sendConsoleLog("Erro ao disparar alarme: ${e.message}")
         }
+    }
+
+    private fun showMessageNotification(message: String) {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Nova mensagem")
+            .setContentText(message)
+            .setSmallIcon(android.R.drawable.ic_dialog_email)
+            .setAutoCancel(true)
+            .build()
+        manager.notify((System.currentTimeMillis() % Int.MAX_VALUE).toInt(), notification)
+        sendConsoleLog("Mensagem recebida do painel: $message")
     }
 
     // Helper to log dynamic events to the dashboard console

@@ -17,7 +17,7 @@
         document.head.appendChild(s);
       });
     </script>
-    <link rel="stylesheet" href="style.css?v=3">
+    <link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
     <div class="app-container">
@@ -81,6 +81,13 @@
                             <button id="btn-map-dark" class="btn-map-type active" onclick="setMapType('roadmap')">🕶️ Dark</button>
                             <button id="btn-map-satellite" class="btn-map-type" onclick="setMapType('hybrid')">🌌 Satélite</button>
                             <button id="btn-map-hybrid" class="btn-map-type" onclick="setMapType('roadmap_cyber')">🛣️ Ruas</button>
+                            <span class="map-controls-sep"></span>
+                            <select id="trail-days-select" class="trail-days-select" onchange="refreshTrail()">
+                                <option value="1">📍 Hoje</option>
+                                <option value="7">📅 7 dias</option>
+                                <option value="30" selected>🗓️ 30 dias</option>
+                            </select>
+                            <button class="btn-map-type" onclick="clearTrail()" title="Limpar rastro">🗑️</button>
                         </div>
                     </div>
                     <div class="card-body map-container">
@@ -171,6 +178,25 @@
                     </div>
                 </div>
 
+                <!-- Messages Panel -->
+                <div class="grid-card messages-card">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-comments neon-text-blue"></i> Mensagens</h3>
+                        <span class="card-subtitle" id="messages-device-label">Nenhum dispositivo</span>
+                    </div>
+                    <div class="card-body messages-body">
+                        <div class="messages-list" id="messages-list">
+                            <div class="messages-empty"><i class="fa-solid fa-comment-slash"></i><p>Nenhuma mensagem ainda.</p></div>
+                        </div>
+                        <div class="messages-input-row">
+                            <input type="text" id="message-input" class="messages-input" placeholder="Digite uma mensagem para o dispositivo..." maxlength="500" onkeydown="if(event.key==='Enter') sendMessage()">
+                            <button class="btn-send-msg" onclick="sendMessage()" title="Enviar">
+                                <i class="fa-solid fa-paper-plane"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- AI Assistant Card (ProtegeAI) -->
                 <div class="grid-card ai-card">
                     <div class="card-header">
@@ -201,6 +227,6 @@
         <div id="caption-modal"></div>
     </div>
     
-    <script src="app.js?v=4"></script>
+    <script src="app.js?v=5"></script>
 </body>
 </html>

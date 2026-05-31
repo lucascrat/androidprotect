@@ -176,6 +176,24 @@ object LogsTable : Table("security_logs") {
     override val primaryKey = PrimaryKey(id)
 }
 
+object MessagesTable : Table("messages") {
+    val id = integer("id").autoIncrement()
+    val deviceId = varchar("device_id", 50)
+    val direction = varchar("direction", 10) // "out" = dashboard→device, "in" = device→dashboard
+    val content = text("content")
+    val timestamp = long("timestamp")
+
+    override val primaryKey = PrimaryKey(id)
+}
+
+@Serializable
+data class MessageItem(
+    val id: Int,
+    val direction: String,
+    val content: String,
+    val timestamp: Long
+)
+
 // Call Gemini API using Java HttpClient securely loading GEMINI_API_KEY from environment
 fun callGeminiApi(prompt: String): String {
     val apiKey = System.getenv("GEMINI_API_KEY")
@@ -257,7 +275,7 @@ fun initDatabase() {
     Database.connect(dataSource)
 
     transaction {
-        SchemaUtils.create(DevicesTable, TelemetryTable, LogsTable)
+        SchemaUtils.create(DevicesTable, TelemetryTable, LogsTable, MessagesTable)
         
         // Reset all devices to offline state initially on server start
         DevicesTable.update {
@@ -373,13 +391,18 @@ fun main() {
                 }
             }
 
-            // REST Endpoint to fetch historical coordinates (up to 100 points) for routing
+            // REST Endpoint to fetch historical coordinates for routing (up to 30 days, max 5000 points)
             get("/api/device/{id}/telemetry-history") {
                 val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
+                val days = call.request.queryParameters["days"]?.toIntOrNull()?.coerceIn(1, 30) ?: 30
+                val since = System.currentTimeMillis() - days.toLong() * 24 * 60 * 60 * 1000
+
                 val history = transaction {
-                    TelemetryTable.select { TelemetryTable.deviceId eq id }
-                        .orderBy(TelemetryTable.timestamp to SortOrder.DESC)
-                        .limit(100)
+                    TelemetryTable.select {
+                        (TelemetryTable.deviceId eq id) and (TelemetryTable.timestamp greaterEq since)
+                    }
+                        .orderBy(TelemetryTable.timestamp to SortOrder.ASC)
+                        .limit(5000)
                         .map {
                             TelemetryPoint(
                                 lat = it[TelemetryTable.lat],
@@ -388,7 +411,25 @@ fun main() {
                                 timestamp = it[TelemetryTable.timestamp]
                             )
                         }
-                        .reversed()
+                }
+                call.respond(history)
+            }
+
+            // REST Endpoint to fetch message history
+            get("/api/device/{id}/messages-history") {
+                val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
+                val history = transaction {
+                    MessagesTable.select { MessagesTable.deviceId eq id }
+                        .orderBy(MessagesTable.timestamp to SortOrder.ASC)
+                        .limit(200)
+                        .map {
+                            MessageItem(
+                                id = it[MessagesTable.id],
+                                direction = it[MessagesTable.direction],
+                                content = it[MessagesTable.content],
+                                timestamp = it[MessagesTable.timestamp]
+                            )
+                        }
                 }
                 call.respond(history)
             }
@@ -670,7 +711,21 @@ fun main() {
                                         val json = Json.parseToJsonElement(text).jsonObject
                                         val type = json["type"]?.jsonPrimitive?.content
                                         
-                                        if (type == "TELEMETRY") {
+                                        if (type == "MESSAGE") {
+                            val msg = json["content"]?.jsonPrimitive?.content ?: ""
+                            if (msg.isNotBlank()) {
+                                val savedId = transaction {
+                                    MessagesTable.insert {
+                                        it[MessagesTable.deviceId] = deviceId
+                                        it[direction] = "in"
+                                        it[content] = msg
+                                        it[timestamp] = System.currentTimeMillis()
+                                    } get MessagesTable.id
+                                }
+                                val event = """{"type":"NEW_MESSAGE","deviceId":"$deviceId","direction":"in","content":${Json.encodeToString(msg)},"timestamp":${System.currentTimeMillis()},"id":$savedId}"""
+                                broadcastToDashboards(event)
+                            }
+                        } else if (type == "TELEMETRY") {
                                             val lat = json["lat"]?.jsonPrimitive?.content?.toDoubleOrNull()
                                             val lng = json["lng"]?.jsonPrimitive?.content?.toDoubleOrNull()
                                             val accuracy = json["accuracy"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: 10.0
@@ -781,15 +836,36 @@ fun main() {
                         if (frame is Frame.Text) {
                             val text = frame.readText()
                             try {
-                                val json = Json.parseToJsonElement(text)
-                                val destDeviceId = json.let { it.asObjectOrNull()?.get("deviceId")?.toString()?.replace("\"", "") }
+                                val json = Json.parseToJsonElement(text).asObjectOrNull() ?: continue
+                                val destDeviceId = json["deviceId"]?.jsonPrimitive?.content
+                                val command = json["command"]?.jsonPrimitive?.content
+
                                 if (destDeviceId != null) {
-                                    val devSession = deviceSessions[destDeviceId]
-                                    if (devSession != null) {
-                                        // Relay command over WebSocket to targeted Android device
-                                        devSession.send(Frame.Text(text))
+                                    if (command == "SEND_MESSAGE") {
+                                        val msgContent = json["message"]?.jsonPrimitive?.content ?: ""
+                                        if (msgContent.isNotBlank()) {
+                                            val now = System.currentTimeMillis()
+                                            val savedId = transaction {
+                                                MessagesTable.insert {
+                                                    it[deviceId] = destDeviceId
+                                                    it[direction] = "out"
+                                                    it[content] = msgContent
+                                                    it[timestamp] = now
+                                                } get MessagesTable.id
+                                            }
+                                            // Relay to device
+                                            deviceSessions[destDeviceId]?.send(Frame.Text(text))
+                                            // Echo to all dashboards so everyone sees the sent message
+                                            val event = """{"type":"NEW_MESSAGE","deviceId":"$destDeviceId","direction":"out","content":${Json.encodeToString(msgContent)},"timestamp":$now,"id":$savedId}"""
+                                            broadcastToDashboards(event)
+                                        }
                                     } else {
-                                        send(packetJson.encodeToString(ErrorPacket(message = "Device $destDeviceId is offline")))
+                                        val devSession = deviceSessions[destDeviceId]
+                                        if (devSession != null) {
+                                            devSession.send(Frame.Text(text))
+                                        } else {
+                                            send(packetJson.encodeToString(ErrorPacket(message = "Device $destDeviceId is offline")))
+                                        }
                                     }
                                 }
                             } catch (e: Exception) {
