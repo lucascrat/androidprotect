@@ -17,7 +17,7 @@
         document.head.appendChild(s);
       });
     </script>
-    <link rel="stylesheet" href="style.css?v=5">
+    <link rel="stylesheet" href="style.css?v=6">
 </head>
 <body>
     <div class="app-container">
@@ -173,8 +173,15 @@
                     <div class="card-header">
                         <h3><i class="fa-solid fa-volume-high neon-text-pink"></i> Gravações de Áudio</h3>
                     </div>
-                    <div class="card-body audio-list" id="audio-list">
-                        <div class="empty-audio-msg">Nenhuma gravação de áudio encontrada.</div>
+                    <div class="card-body audio-card-body">
+                        <div class="audio-section-label"><i class="fa-solid fa-arrow-down"></i> Recebidos do aparelho</div>
+                        <div class="audio-list" id="audio-list">
+                            <div class="empty-audio-msg">Nenhuma gravação recebida ainda.</div>
+                        </div>
+                        <div class="audio-section-label" style="margin-top:10px;"><i class="fa-solid fa-arrow-up"></i> Enviados (comandos)</div>
+                        <div class="audio-list" id="audio-sent-list">
+                            <div class="empty-audio-msg">Nenhum comando enviado ainda.</div>
+                        </div>
                     </div>
                 </div>
 
@@ -238,6 +245,6 @@
         <div id="caption-modal"></div>
     </div>
     
-    <script src="app.js?v=6"></script>
+    <script src="app.js?v=7"></script>
 </body>
 </html>
