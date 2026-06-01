@@ -252,6 +252,8 @@ class MainActivity : ComponentActivity() {
         val hasAllFiles   = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
             android.os.Environment.isExternalStorageManager() else true
 
+        val isBatteryOptimized = isBatteryOptimizedFor(context)
+
         // Auto-start service on first compose
         LaunchedEffect(Unit) {
             AntiTheftService.serverIpAddress = serverIp
@@ -507,12 +509,36 @@ class MainActivity : ComponentActivity() {
                 PermRow("Transmissão de Tela", hasScreen)
                 PermRow("Administrador do Dispositivo", hasAdmin)
                 PermRow("Acesso a Todos os Arquivos", hasAllFiles)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    PermRow("Sem otimização de bateria (conexão estável)", !isBatteryOptimized)
+                }
 
                 val allGranted = hasLocation && hasBgLocation && hasCamera && hasMic &&
-                        hasPhone && hasSms && hasActivity && hasNotify && hasScreen && hasAdmin && hasAllFiles
+                        hasPhone && hasSms && hasActivity && hasNotify && hasScreen && hasAdmin &&
+                        hasAllFiles && !isBatteryOptimized
                 Spacer(Modifier.height(14.dp))
 
                 if (!allGranted) {
+                    // Battery optimization — CRITICAL for stable WebSocket connection
+                    if (isBatteryOptimized && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        Button(
+                            onClick = {
+                                val intent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                    data = android.net.Uri.parse("package:${context.packageName}")
+                                }
+                                context.startActivity(intent)
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF39FF14))
+                        ) {
+                            Text(
+                                "⚡  Desativar Otimização de Bateria (evita desconexões)",
+                                color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 12.sp
+                            )
+                        }
+                    }
+
                     // Manage all files (Android 11+)
                     if (!hasAllFiles && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                         Button(
@@ -675,6 +701,14 @@ class MainActivity : ComponentActivity() {
         onDone(ip)
         Toast.makeText(this, "Conectado: $ip", Toast.LENGTH_SHORT).show()
     }
+}
+
+fun isBatteryOptimizedFor(context: android.content.Context): Boolean {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        val pm = context.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+        return !pm.isIgnoringBatteryOptimizations(context.packageName)
+    }
+    return false // below Android M → no battery optimization restriction
 }
 
 @Composable

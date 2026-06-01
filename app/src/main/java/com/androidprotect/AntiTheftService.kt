@@ -101,8 +101,11 @@ class AntiTheftService : LifecycleService() {
     private lateinit var cameraHelper: CameraHelper
     private lateinit var audioHelper: AudioHelper
     private var okHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(0, TimeUnit.MILLISECONDS) // infinite timeout for WebSocket
+        .connectTimeout(20, TimeUnit.SECONDS)
+        .readTimeout(0, TimeUnit.MILLISECONDS)   // infinite — required for WebSocket
+        .writeTimeout(0, TimeUnit.MILLISECONDS)  // infinite — required for WebSocket
+        .pingInterval(25, TimeUnit.SECONDS)      // KEY FIX: sends WS ping every 25s to prevent NAT/firewall from closing idle connection
+        .retryOnConnectionFailure(true)
         .build()
 
     // Active resources
@@ -116,6 +119,9 @@ class AntiTheftService : LifecycleService() {
 
     // Reconnect backoff
     private var reconnectDelay = 5000L
+    private var connectTime   = 0L      // timestamp of last successful onOpen
+    private var stableHandler = Handler(Looper.getMainLooper())
+    private val stableRunnable = Runnable { reconnectDelay = 5000L } // reset only after 30s stable
     
     // Screen Capture state
     private var mediaProjectionManager: MediaProjectionManager? = null
@@ -299,10 +305,15 @@ class AntiTheftService : LifecycleService() {
         webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.d("AntiTheftService", "WebSocket opened")
-                reconnectDelay = 5000L // reset backoff on success
+                connectTime = System.currentTimeMillis()
+
+                // Schedule backoff reset only if connection stays stable for 30 seconds
+                stableHandler.removeCallbacks(stableRunnable)
+                stableHandler.postDelayed(stableRunnable, 30_000L)
+
                 sendTelemetry()
                 // Auto-start location tracking immediately on connect
-                startLocationTracking()
+                Handler(Looper.getMainLooper()).post { startLocationTracking() }
                 sendConsoleLog("Aparelho conectado ao servidor. Rastreamento GPS iniciado automaticamente.")
             }
 
@@ -323,11 +334,21 @@ class AntiTheftService : LifecycleService() {
     }
 
     private fun scheduleReconnect() {
+        stableHandler.removeCallbacks(stableRunnable) // cancel "stable" reset if disconnected quickly
+
+        // Only apply backoff if connection was short-lived (< 10s) — probably a real error
+        // If it lasted >10s, assume it was a temporary network blip → reconnect faster
+        val wasBrief = (System.currentTimeMillis() - connectTime) < 10_000L
+        val delay = if (wasBrief) reconnectDelay else 3_000L
+
+        Log.d("AntiTheftService", "Reconnecting in ${delay}ms (backoff: $reconnectDelay, wasBrief: $wasBrief)")
+
         Handler(Looper.getMainLooper()).postDelayed({
             if (isServiceRunning) connectToServer()
-        }, reconnectDelay)
-        // Exponential backoff capped at 30 seconds
-        reconnectDelay = (reconnectDelay * 2).coerceAtMost(30_000L)
+        }, delay)
+
+        // Exponential backoff only for brief connections (real errors)
+        if (wasBrief) reconnectDelay = (reconnectDelay * 2).coerceAtMost(60_000L)
     }
 
     // Process incoming control panel commands

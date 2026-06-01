@@ -375,8 +375,8 @@ fun main() {
 
     embeddedServer(Netty, port = 8080, host = "0.0.0.0") {
         install(WebSockets) {
-            pingPeriod = Duration.ofSeconds(15)
-            timeout = Duration.ofSeconds(30)
+            pingPeriod = Duration.ofSeconds(20)   // server pings client every 20s
+            timeout    = Duration.ofSeconds(90)   // allow up to 90s without pong before disconnecting
             maxFrameSize = Long.MAX_VALUE
             masking = false
         }
