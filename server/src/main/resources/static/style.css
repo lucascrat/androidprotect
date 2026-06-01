@@ -492,6 +492,43 @@ body {
     justify-content: center;
 }
 
+/* ── Leaflet custom markers ── */
+.device-marker-dot {
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    background: #00d2ff;
+    border: 3px solid #fff;
+    box-shadow: 0 0 14px rgba(0,210,255,0.8), 0 2px 6px rgba(0,0,0,0.5);
+    transition: background 0.3s, box-shadow 0.3s;
+}
+
+.day-marker-dot {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 18px;
+    border-radius: 10px;
+    padding: 0 6px;
+    border: 1px solid rgba(255,255,255,0.3);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+}
+
+.day-marker-label {
+    font-size: 9px;
+    font-weight: 700;
+    color: #fff;
+    font-family: 'Inter', sans-serif;
+    white-space: nowrap;
+}
+
+/* Override Leaflet attribution for dark theme */
+.leaflet-container .leaflet-control-attribution {
+    background: rgba(10,11,16,0.7) !important;
+    color: #8e94a5 !important;
+    font-size: 9px !important;
+}
+.leaflet-container .leaflet-control-attribution a { color: #00d2ff !important; }
+
 /* Map Container */
 .map-container {
     border-radius: 12px;

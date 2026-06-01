@@ -25,62 +25,24 @@ let audioCtx = null;
 let audioNextTime = 0;
 const AUDIO_SAMPLE_RATE = 16000;
 
-// Premium custom cyber-dark theme styling for Google Maps (neon style matching our dashboard)
-const darkMapStyle = [
-    { elementType: "geometry", stylers: [{ color: "#0a0b10" }] },
-    { elementType: "labels.text.stroke", stylers: [{ color: "#0a0b10" }] },
-    { elementType: "labels.text.fill", stylers: [{ color: "#8e94a5" }] },
-    {
-        featureType: "administrative.locality",
-        elementType: "labels.text.fill",
-        stylers: [{ color: "#00d2ff" }],
+// ─── Leaflet tile layers (no API key needed) ─────────────────────────────────
+const TILES = {
+    dark: {
+        url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+        attr: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CartoDB</a>'
     },
-    {
-        featureType: "poi",
-        elementType: "labels.text.fill",
-        stylers: [{ color: "#ff2a85", opacity: 0.5 }],
+    satellite: {
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        attr: '&copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP'
     },
-    {
-        featureType: "poi.park",
-        elementType: "geometry",
-        stylers: [{ color: "#12141d" }],
-    },
-    {
-        featureType: "road",
-        elementType: "geometry",
-        stylers: [{ color: "#1b1d28" }],
-    },
-    {
-        featureType: "road",
-        elementType: "geometry.stroke",
-        stylers: [{ color: "#252630" }],
-    },
-    {
-        featureType: "road",
-        elementType: "labels.text.fill",
-        stylers: [{ color: "#8e94a5" }],
-    },
-    {
-        featureType: "road.highway",
-        elementType: "geometry",
-        stylers: [{ color: "#252630" }],
-    },
-    {
-        featureType: "road.highway",
-        elementType: "geometry.stroke",
-        stylers: [{ color: "#00d2ff", weight: 0.5 }],
-    },
-    {
-        featureType: "water",
-        elementType: "geometry",
-        stylers: [{ color: "#050608" }],
-    },
-    {
-        featureType: "water",
-        elementType: "labels.text.fill",
-        stylers: [{ color: "#00d2ff" }],
-    },
-];
+    roads: {
+        url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+        attr: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+    }
+};
+
+let currentTileLayer = null;
+let currentMapStyle  = 'dark';
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 function getToken()    { return localStorage.getItem('ap_token') || ''; }
@@ -163,6 +125,7 @@ function copyLinkCode() {
 window.addEventListener('DOMContentLoaded', () => {
     const nameEl = document.getElementById('user-name-display');
     if (nameEl) nameEl.textContent = getUsername();
+    initMapIfReady();   // Leaflet is synchronous — init immediately
     connectWebSocket();
     initMobileTabs();
     window.addEventListener('resize', () => {
@@ -196,12 +159,12 @@ function switchTab(tab) {
         card.classList.toggle('tab-visible', match);
     });
 
-    // When switching to map tab, trigger resize so Google Maps re-renders
+    // When switching to map tab, trigger resize so Leaflet re-renders
     if (tab === 'map' && map) {
         setTimeout(() => {
-            google.maps.event.trigger(map, 'resize');
-            if (deviceMarker) map.panTo(deviceMarker.getPosition());
-        }, 100);
+            map.invalidateSize();
+            if (deviceMarker) map.panTo(deviceMarker.getLatLng());
+        }, 120);
     }
 
     // Close sidebar if open
@@ -331,8 +294,7 @@ function renderTrailPanel() {
 
 function panMapToPoint(lat, lng) {
     if (!map) return;
-    map.panTo({ lat, lng });
-    map.setZoom(16);
+    map.setView([lat, lng], 16);
     closeTrailPanel();
     if (window.innerWidth <= 767) switchTab('map');
 }
@@ -396,82 +358,78 @@ function closeSidebar() {
     document.body.style.overflow = '';
 }
 
-// Called automatically by Google Maps script after async load (callback=initMap)
-window.initMap = function() {
-    const defaultLat = -23.55052;
-    const defaultLng = -46.633308;
+// ─── Leaflet Map Init ─────────────────────────────────────────────────────────
 
-    try {
-        map = new google.maps.Map(document.getElementById('map'), {
-            center: { lat: defaultLat, lng: defaultLng },
-            zoom: 13,
-            disableDefaultUI: false,
-            zoomControl: true,
-            mapTypeControl: false,
-            streetViewControl: false,
-            fullscreenControl: true,
-            styles: darkMapStyle
-        });
-        // Disable follow mode when user manually pans the map
-        map.addListener('dragstart', () => {
-            if (mapFollowMode) {
-                mapFollowMode = false;
-                const btn = document.getElementById('btn-follow');
-                if (btn) { btn.classList.remove('active'); btn.title = 'Seguimento desativado (clique para reativar)'; }
-            }
-        });
+function initMap() {
+    if (map) return; // already initialized
 
-        console.log('Google Maps initialized successfully.');
-    } catch (e) {
-        console.error('Failed to initialize Google Maps:', e);
-        document.getElementById('map').innerHTML = `<div style="padding: 40px; text-align: center; color: var(--neon-pink);"><i class="fa-solid fa-triangle-exclamation fa-2x"></i><p style="margin-top: 10px;">Erro ao carregar o Google Maps. Verifique a chave de API.</p></div>`;
+    map = L.map('map', {
+        center: [-23.55052, -46.633308],
+        zoom: 13,
+        zoomControl: true,
+        attributionControl: true
+    });
+
+    // Load dark tile layer by default
+    currentTileLayer = L.tileLayer(TILES.dark.url, {
+        attribution: TILES.dark.attr,
+        maxZoom: 19,
+        subdomains: 'abcd'
+    }).addTo(map);
+
+    // Disable follow mode on manual pan
+    map.on('dragstart', () => {
+        mapFollowMode = false;
+        const btn = document.getElementById('btn-follow');
+        if (btn) btn.classList.remove('active');
+    });
+
+    console.log('Leaflet map initialized (OpenStreetMap, no API key).');
+}
+
+// Called on DOMContentLoaded (Leaflet is synchronous, no callback needed)
+function initMapIfReady() {
+    if (typeof L !== 'undefined' && document.getElementById('map')) {
+        initMap();
     }
-};
+}
 
-// Toggle map follow mode (auto-pan to device on GPS update)
+// Toggle map follow mode
 function toggleFollowMode() {
     mapFollowMode = !mapFollowMode;
     const btn = document.getElementById('btn-follow');
-    if (btn) {
-        btn.classList.toggle('active', mapFollowMode);
-        btn.title = mapFollowMode ? 'Seguimento ativo' : 'Seguimento desativado';
-    }
+    if (btn) btn.classList.toggle('active', mapFollowMode);
     logToConsole(mapFollowMode ? '📍 Modo seguimento ativado.' : '📍 Modo seguimento desativado.', 'system');
 }
 
-// Center map on device immediately
+// Center map on device
 function centerOnDevice() {
     if (deviceMarker && map) {
-        map.panTo(deviceMarker.getPosition());
-        map.setZoom(17);
+        map.setView(deviceMarker.getLatLng(), 17);
     } else if (currentDeviceId) {
         sendCommand('START_LOCATION', {});
         logToConsole('Solicitando localização atual...', 'system');
     }
 }
 
-// Switch Google Maps Layer Type dynamically
+// Switch tile layer
 function setMapType(type) {
     if (!map) return;
-    
-    // Update active button state
-    document.querySelectorAll('.btn-map-type').forEach(btn => btn.classList.remove('active'));
-    
-    if (type === 'roadmap') {
-        document.getElementById('btn-map-dark').classList.add('active');
-        map.setMapTypeId(google.maps.MapTypeId.ROADMAP);
-        map.setOptions({ styles: darkMapStyle });
-        logToConsole('Mapa alterado para Cyber-Dark.', 'system');
-    } else if (type === 'hybrid') {
-        document.getElementById('btn-map-satellite').classList.add('active');
-        map.setMapTypeId(google.maps.MapTypeId.HYBRID);
-        logToConsole('Mapa alterado para Satélite Real + Legendas.', 'system');
-    } else if (type === 'roadmap_cyber') {
-        document.getElementById('btn-map-hybrid').classList.add('active');
-        map.setMapTypeId(google.maps.MapTypeId.ROADMAP);
-        map.setOptions({ styles: [] }); // default Google Roads styling
-        logToConsole('Mapa alterado para Visualização de Ruas Padrão.', 'system');
-    }
+    document.querySelectorAll('.btn-map-type').forEach(b => b.classList.remove('active'));
+
+    let tileKey = 'dark', btnId = 'btn-map-dark', label = 'Cyber-Dark';
+    if (type === 'hybrid')       { tileKey = 'satellite'; btnId = 'btn-map-satellite'; label = 'Satélite'; }
+    if (type === 'roadmap_cyber'){ tileKey = 'roads';     btnId = 'btn-map-hybrid';    label = 'Ruas OSM'; }
+
+    document.getElementById(btnId)?.classList.add('active');
+    if (currentTileLayer) map.removeLayer(currentTileLayer);
+    currentTileLayer = L.tileLayer(TILES[tileKey].url, {
+        attribution: TILES[tileKey].attr,
+        maxZoom: 19,
+        subdomains: tileKey === 'dark' ? 'abcd' : 'abc'
+    }).addTo(map);
+    currentMapStyle = tileKey;
+    logToConsole(`Mapa: ${label}`, 'system');
 }
 
 // Connect to Ktor WebSocket
@@ -939,79 +897,55 @@ function fetchTrailHistory(deviceId) {
             dayGroups.forEach((group, idx) => {
                 if (group.coords.length < 2) return;
 
-                // Color gradient: oldest = faded purple, newest = bright neon cyan
-                const ratio = totalDays <= 1 ? 1 : idx / (totalDays - 1);
-                const color = interpolateTrailColor(ratio);
-                const opacity = 0.25 + ratio * 0.65;
-                const weight = 2 + ratio * 2;
+                const ratio   = totalDays <= 1 ? 1 : idx / (totalDays - 1);
+                const color   = interpolateTrailColor(ratio);
+                const opacity = 0.3 + ratio * 0.6;
+                const weight  = 2 + ratio * 2.5;
 
-                const polyline = new google.maps.Polyline({
-                    path: group.coords,
-                    strokeColor: color,
-                    strokeOpacity: opacity,
-                    strokeWeight: weight,
-                    map: map
-                });
+                // Leaflet polyline — coords are [lat, lng] arrays
+                const latlngs = group.coords.map(c => [c.lat, c.lng]);
+                const polyline = L.polyline(latlngs, {
+                    color, opacity, weight, smoothFactor: 1.5
+                }).addTo(map);
                 trailPolylines.push(polyline);
 
-                // Day label marker at first point of each day (except today)
+                // Day label marker
                 if (idx < totalDays - 1) {
                     const label = new Date(group.day).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
-                    const marker = new google.maps.Marker({
-                        position: group.coords[0],
-                        map: map,
-                        label: { text: label, color: '#8e94a5', fontSize: '10px', fontWeight: '600' },
-                        icon: {
-                            path: google.maps.SymbolPath.CIRCLE,
-                            scale: 5,
-                            fillColor: color,
-                            fillOpacity: 0.8,
-                            strokeColor: '#fff',
-                            strokeWeight: 1
-                        },
-                        title: label
+                    const dayIcon = L.divIcon({
+                        className: '',
+                        html: `<div class="day-marker-dot" style="background:${color};"><span class="day-marker-label">${label}</span></div>`,
+                        iconSize: [36, 18], iconAnchor: [18, 9]
                     });
-                    dayMarkers.push(marker);
+                    const m = L.marker([group.coords[0].lat, group.coords[0].lng], { icon: dayIcon }).addTo(map);
+                    dayMarkers.push(m);
                 }
             });
 
-            // Draw current position marker
+            // Device position marker
             const lastPt = points[points.length - 1];
             document.getElementById('location-accuracy').textContent = `Precisão: ${lastPt.accuracy.toFixed(1)}m`;
 
-            if (deviceMarker) { deviceMarker.setMap(null); }
-            if (deviceAccuracyCircle) { deviceAccuracyCircle.setMap(null); }
+            if (deviceMarker)       { map.removeLayer(deviceMarker); }
+            if (deviceAccuracyCircle){ map.removeLayer(deviceAccuracyCircle); }
 
-            deviceMarker = new google.maps.Marker({
-                position: { lat: lastPt.lat, lng: lastPt.lng },
-                map: map,
-                icon: {
-                    path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z",
-                    fillColor: "#00d2ff",
-                    fillOpacity: 1,
-                    strokeColor: "#ffffff",
-                    strokeWeight: 2.5,
-                    scale: 1.5,
-                    anchor: new google.maps.Point(12, 22)
-                },
-                title: "Última Localização"
+            const devIcon = L.divIcon({
+                className: '',
+                html: '<div class="device-marker-dot"></div>',
+                iconSize: [20, 20], iconAnchor: [10, 10]
             });
+            deviceMarker = L.marker([lastPt.lat, lastPt.lng], { icon: devIcon, zIndexOffset: 1000 }).addTo(map);
+            deviceMarker.bindPopup('<b>Última localização conhecida</b>');
 
-            deviceAccuracyCircle = new google.maps.Circle({
-                map: map,
-                center: { lat: lastPt.lat, lng: lastPt.lng },
+            deviceAccuracyCircle = L.circle([lastPt.lat, lastPt.lng], {
                 radius: lastPt.accuracy,
-                strokeColor: '#00d2ff',
-                strokeOpacity: 0.5,
-                strokeWeight: 1.5,
-                fillColor: '#00d2ff',
-                fillOpacity: 0.12
-            });
+                color: '#00d2ff', opacity: 0.5, weight: 1.5,
+                fillColor: '#00d2ff', fillOpacity: 0.1
+            }).addTo(map);
 
             // Fit bounds
-            const bounds = new google.maps.LatLngBounds();
-            points.forEach(p => bounds.extend({ lat: p.lat, lng: p.lng }));
-            map.fitBounds(bounds);
+            const allLatLngs = points.map(p => [p.lat, p.lng]);
+            if (allLatLngs.length > 0) map.fitBounds(allLatLngs, { padding: [20, 20] });
         })
         .catch(err => console.error('Error fetching trail:', err));
 }
@@ -1047,9 +981,11 @@ function interpolateTrailColor(ratio) {
 
 // Clear all trail polylines and day markers from map
 function clearTrail() {
-    trailPolylines.forEach(p => p.setMap(null));
+    if (map) {
+        trailPolylines.forEach(p => map.removeLayer(p));
+        dayMarkers.forEach(m => map.removeLayer(m));
+    }
     trailPolylines = [];
-    dayMarkers.forEach(m => m.setMap(null));
     dayMarkers = [];
 }
 
@@ -1098,56 +1034,41 @@ function handleTelemetry(data) {
         const markerColor = accuracy <= 15 ? '#00d2ff' : accuracy <= 50 ? '#ff9900' : '#ff3838';
 
         if (deviceMarker) {
-            deviceMarker.setPosition(pos);
-            deviceMarker.setIcon({ ...deviceMarker.getIcon(), fillColor: markerColor });
-            deviceAccuracyCircle.setCenter(pos);
+            // Update existing Leaflet marker and circle
+            deviceMarker.setLatLng([lat, lng]);
+            const el = deviceMarker.getElement();
+            if (el) el.querySelector('.device-marker-dot')?.setAttribute('style', `background:${markerColor};box-shadow:0 0 12px ${markerColor}80;`);
+            deviceAccuracyCircle.setLatLng([lat, lng]);
             deviceAccuracyCircle.setRadius(accuracy);
-            deviceAccuracyCircle.setOptions({ strokeColor: markerColor, fillColor: markerColor });
+            deviceAccuracyCircle.setStyle({ color: markerColor, fillColor: markerColor });
         } else if (map) {
-            deviceMarker = new google.maps.Marker({
-                position: pos,
-                map,
-                icon: {
-                    path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z",
-                    fillColor: markerColor,
-                    fillOpacity: 1,
-                    strokeColor: '#ffffff',
-                    strokeWeight: 2.5,
-                    scale: 1.6,
-                    anchor: new google.maps.Point(12, 22)
-                },
-                title: 'Localização do Dispositivo'
+            const devIcon = L.divIcon({
+                className: '',
+                html: `<div class="device-marker-dot" style="background:${markerColor};box-shadow:0 0 12px ${markerColor}80;"></div>`,
+                iconSize: [20, 20], iconAnchor: [10, 10]
             });
-            deviceAccuracyCircle = new google.maps.Circle({
-                map,
-                center: pos,
+            deviceMarker = L.marker([lat, lng], { icon: devIcon, zIndexOffset: 1000 }).addTo(map);
+            deviceMarker.bindPopup('<b>Dispositivo</b>');
+            deviceAccuracyCircle = L.circle([lat, lng], {
                 radius: accuracy,
-                strokeColor: markerColor,
-                strokeOpacity: 0.5,
-                strokeWeight: 1.5,
-                fillColor: markerColor,
-                fillOpacity: 0.10
-            });
+                color: markerColor, opacity: 0.5, weight: 1.5,
+                fillColor: markerColor, fillOpacity: 0.1
+            }).addTo(map);
         }
 
-        // Append to live trail
+        // Append to live trail polyline
         if (trailPolylines.length > 0) {
-            trailPolylines[trailPolylines.length - 1].getPath().push(new google.maps.LatLng(lat, lng));
+            trailPolylines[trailPolylines.length - 1].addLatLng([lat, lng]);
         } else if (map) {
-            trailPolylines.push(new google.maps.Polyline({
-                path: [pos],
-                strokeColor: '#00d2ff',
-                strokeOpacity: 0.9,
-                strokeWeight: 3,
-                map
-            }));
+            trailPolylines.push(
+                L.polyline([[lat, lng]], { color: '#00d2ff', opacity: 0.9, weight: 3 }).addTo(map)
+            );
         }
 
-        // Follow mode: pan map to device
+        // Follow mode
         if (map && mapFollowMode) {
-            map.panTo(pos);
-            // Zoom in on first GPS fix if map is at default zoom
-            if (!deviceMarker && map.getZoom() < 16) map.setZoom(17);
+            map.panTo([lat, lng]);
+            if (map.getZoom() < 15) map.setZoom(16);
         }
     }
 
