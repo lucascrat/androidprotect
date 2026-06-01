@@ -14,6 +14,7 @@ let isAudioStreaming = false;
 let currentStreamObjectUrl = null;
 let currentCamObjectUrl = null;
 let sentAudioLog = [];
+let mapFollowMode = true; // Auto-center map on device GPS updates
 
 // File browser state
 let fbCurrentPath = '';
@@ -164,12 +165,43 @@ window.initMap = function() {
             fullscreenControl: true,
             styles: darkMapStyle
         });
+        // Disable follow mode when user manually pans the map
+        map.addListener('dragstart', () => {
+            if (mapFollowMode) {
+                mapFollowMode = false;
+                const btn = document.getElementById('btn-follow');
+                if (btn) { btn.classList.remove('active'); btn.title = 'Seguimento desativado (clique para reativar)'; }
+            }
+        });
+
         console.log('Google Maps initialized successfully.');
     } catch (e) {
         console.error('Failed to initialize Google Maps:', e);
         document.getElementById('map').innerHTML = `<div style="padding: 40px; text-align: center; color: var(--neon-pink);"><i class="fa-solid fa-triangle-exclamation fa-2x"></i><p style="margin-top: 10px;">Erro ao carregar o Google Maps. Verifique a chave de API.</p></div>`;
     }
 };
+
+// Toggle map follow mode (auto-pan to device on GPS update)
+function toggleFollowMode() {
+    mapFollowMode = !mapFollowMode;
+    const btn = document.getElementById('btn-follow');
+    if (btn) {
+        btn.classList.toggle('active', mapFollowMode);
+        btn.title = mapFollowMode ? 'Seguimento ativo' : 'Seguimento desativado';
+    }
+    logToConsole(mapFollowMode ? '📍 Modo seguimento ativado.' : '📍 Modo seguimento desativado.', 'system');
+}
+
+// Center map on device immediately
+function centerOnDevice() {
+    if (deviceMarker && map) {
+        map.panTo(deviceMarker.getPosition());
+        map.setZoom(17);
+    } else if (currentDeviceId) {
+        sendCommand('START_LOCATION', {});
+        logToConsole('Solicitando localização atual...', 'system');
+    }
+}
 
 // Switch Google Maps Layer Type dynamically
 function setMapType(type) {
@@ -520,7 +552,6 @@ function renderDeviceList() {
 function selectDevice(deviceId) {
     currentDeviceId = deviceId;
 
-    // Update sidebar selection styling
     renderDeviceList();
 
     const device = devicesMap.get(deviceId);
@@ -531,9 +562,13 @@ function selectDevice(deviceId) {
         stopLocalCameraUI();
         if (isAudioStreaming) toggleAudioStream();
         fetchDeviceHistory(deviceId);
+
+        // Auto-request GPS immediately when device is online
+        if (device.isOnline) {
+            setTimeout(() => sendCommand('START_LOCATION', {}), 800);
+        }
     }
 
-    // Close sidebar drawer on mobile after selection
     if (window.innerWidth <= 767) closeSidebar();
 }
 
@@ -770,79 +805,86 @@ function refreshTrail() {
 // Handle real-time telemetry details (location, battery)
 function handleTelemetry(data) {
     if (data.deviceId !== currentDeviceId) return;
-    
-    // Update battery
+
     if (data.battery !== undefined) {
         updateBatteryUI(data.battery, data.isCharging || false);
     }
-    
-    // Update Location on Map
+
     if (data.lat && data.lng) {
-        const lat = data.lat;
-        const lng = data.lng;
-        const accuracy = data.accuracy || 10;
-        
-        document.getElementById('location-accuracy').textContent = `Precisão: ${accuracy.toFixed(1)}m`;
-        
-        logToConsole(`GPS Atualizado: Lat: ${lat.toFixed(5)}, Lng: ${lng.toFixed(5)} (Precisão: ${accuracy.toFixed(1)}m)`, 'system');
-        
-        const pos = { lat: lat, lng: lng };
-        
-        // 1. Update Marker & Circle
+        const lat      = parseFloat(data.lat);
+        const lng      = parseFloat(data.lng);
+        const accuracy = parseFloat(data.accuracy) || 10;
+        const provider = data.provider || 'unknown';
+
+        // Accuracy indicator with color coding
+        const accEl = document.getElementById('location-accuracy');
+        if (accEl) {
+            const providerLabel = provider === 'gps' ? '📡 GPS' : provider === 'fused' ? '🔀 Fusão' : '📶 Rede';
+            const color = accuracy <= 10 ? '#39ff14' : accuracy <= 50 ? '#ff9900' : '#ff3838';
+            accEl.innerHTML = `<span style="color:${color};font-weight:600;">${providerLabel} ${accuracy.toFixed(0)}m</span>`;
+        }
+
+        logToConsole(`📍 ${provider.toUpperCase()} ${lat.toFixed(6)}, ${lng.toFixed(6)} — ±${accuracy.toFixed(0)}m`, 'system');
+
+        const pos = { lat, lng };
+
+        // Marker color by accuracy
+        const markerColor = accuracy <= 15 ? '#00d2ff' : accuracy <= 50 ? '#ff9900' : '#ff3838';
+
         if (deviceMarker) {
             deviceMarker.setPosition(pos);
+            deviceMarker.setIcon({ ...deviceMarker.getIcon(), fillColor: markerColor });
             deviceAccuracyCircle.setCenter(pos);
             deviceAccuracyCircle.setRadius(accuracy);
+            deviceAccuracyCircle.setOptions({ strokeColor: markerColor, fillColor: markerColor });
         } else if (map) {
-            const neonMarkerSvg = {
-                path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z",
-                fillColor: "#00d2ff",
-                fillOpacity: 1,
-                strokeColor: "#ffffff",
-                strokeWeight: 2.5,
-                scale: 1.5,
-                anchor: new google.maps.Point(12, 22)
-            };
-
             deviceMarker = new google.maps.Marker({
                 position: pos,
-                map: map,
-                icon: neonMarkerSvg,
-                title: "Localização Atual"
+                map,
+                icon: {
+                    path: "M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z",
+                    fillColor: markerColor,
+                    fillOpacity: 1,
+                    strokeColor: '#ffffff',
+                    strokeWeight: 2.5,
+                    scale: 1.6,
+                    anchor: new google.maps.Point(12, 22)
+                },
+                title: 'Localização do Dispositivo'
             });
-            
             deviceAccuracyCircle = new google.maps.Circle({
-                map: map,
+                map,
                 center: pos,
                 radius: accuracy,
-                strokeColor: '#00d2ff',
+                strokeColor: markerColor,
                 strokeOpacity: 0.5,
                 strokeWeight: 1.5,
-                fillColor: '#00d2ff',
-                fillOpacity: 0.12
+                fillColor: markerColor,
+                fillOpacity: 0.10
             });
         }
 
-        // 2. Append point to the last trail segment in real-time
+        // Append to live trail
         if (trailPolylines.length > 0) {
-            const lastLine = trailPolylines[trailPolylines.length - 1];
-            lastLine.getPath().push(new google.maps.LatLng(lat, lng));
+            trailPolylines[trailPolylines.length - 1].getPath().push(new google.maps.LatLng(lat, lng));
         } else if (map) {
-            const live = new google.maps.Polyline({
+            trailPolylines.push(new google.maps.Polyline({
                 path: [pos],
                 strokeColor: '#00d2ff',
                 strokeOpacity: 0.9,
                 strokeWeight: 3,
-                map: map
-            });
-            trailPolylines.push(live);
+                map
+            }));
         }
-        
-        // Pan map smoothly to the coordinates
-        if (map) {
+
+        // Follow mode: pan map to device
+        if (map && mapFollowMode) {
             map.panTo(pos);
+            // Zoom in on first GPS fix if map is at default zoom
+            if (!deviceMarker && map.getZoom() < 16) map.setZoom(17);
         }
     }
+
 }
 
 // Fetch photos and audios for the selected device

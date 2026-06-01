@@ -17,7 +17,7 @@
         document.head.appendChild(s);
       });
     </script>
-    <link rel="stylesheet" href="style.css?v=11">
+    <link rel="stylesheet" href="style.css?v=12">
     <script>
       // Auth guard — redirect to login if no valid session
       (function(){
@@ -127,7 +127,10 @@
                                 <option value="30" selected>30 dias</option>
                             </select>
                             <button class="btn-map-type" onclick="clearTrail()" title="Limpar rastro"><i class="fa-solid fa-trash-can"></i></button>
-                            <button class="btn-map-type" onclick="if(currentDeviceId) sendCommand('START_LOCATION',{})" title="Rastrear agora"><i class="fa-solid fa-location-crosshairs"></i></button>
+                            <button class="btn-map-type" onclick="centerOnDevice()" title="Centralizar no aparelho"><i class="fa-solid fa-crosshairs"></i></button>
+                            <button id="btn-follow" class="btn-map-type active" onclick="toggleFollowMode()" title="Seguimento ativo — clique para desativar">
+                                <i class="fa-solid fa-location-arrow"></i>
+                            </button>
                         </div>
                     </div>
                     <div class="card-body map-container">
@@ -389,6 +392,6 @@
         <div class="pm-thumbs" id="pm-thumbs"></div>
     </div>
     
-    <script src="app.js?v=12"></script>
+    <script src="app.js?v=13"></script>
 </body>
 </html>

@@ -388,7 +388,8 @@ class AntiTheftService : LifecycleService() {
     }
 
     // Telemetry Update Dispatcher
-    private fun sendTelemetry(lat: Double? = null, lng: Double? = null, accuracy: Float? = null) {
+    private fun sendTelemetry(lat: Double? = null, lng: Double? = null,
+                               accuracy: Float? = null, provider: String? = null) {
         try {
             val telemetryMap = mutableMapOf<String, String>()
             telemetryMap["type"]      = "TELEMETRY"
@@ -400,7 +401,8 @@ class AntiTheftService : LifecycleService() {
             if (lat != null && lng != null) {
                 telemetryMap["lat"]      = lat.toString()
                 telemetryMap["lng"]      = lng.toString()
-                telemetryMap["accuracy"] = accuracy.toString()
+                telemetryMap["accuracy"] = (accuracy ?: 0f).toString()
+                telemetryMap["provider"] = provider ?: "unknown"
             }
 
             webSocket?.send(Json.encodeToString(telemetryMap))
@@ -447,20 +449,46 @@ class AntiTheftService : LifecycleService() {
     @SuppressLint("MissingPermission")
     private fun startLocationTracking() {
         if (locationCallback != null) return // Already running
-        
-        Log.d("AntiTheftService", "Starting GPS tracking...")
+
+        Log.d("AntiTheftService", "Starting GPS high-accuracy tracking...")
+
+        // Send last known location immediately while waiting for first GPS fix
+        fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
+            if (loc != null) {
+                Log.d("AntiTheftService", "Sending last known location: ${loc.latitude},${loc.longitude} provider=${loc.provider}")
+                sendTelemetry(loc.latitude, loc.longitude, loc.accuracy, loc.provider ?: "last_known")
+            }
+        }
+
         val locationRequest = LocationRequest.Builder(
-            Priority.PRIORITY_HIGH_ACCURACY, 
-            10000L // 10 seconds interval
+            Priority.PRIORITY_HIGH_ACCURACY,
+            5000L  // Update every 5 seconds
         ).apply {
-            setMinUpdateIntervalMillis(5000L) // Fastest interval
-            setMinUpdateDistanceMeters(1.0f) // 1 meter movement sensitivity
+            setMinUpdateIntervalMillis(2000L)       // Fastest: every 2 seconds
+            setMinUpdateDistanceMeters(0f)           // Any movement triggers update
+            setMaxUpdateDelayMillis(0L)              // No batching — deliver immediately
+            setWaitForAccurateLocation(true)         // Wait for GPS fix, not network estimate
+            // Android 12+ (API 31): force only fine/GPS results
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                setGranularity(com.google.android.gms.location.Granularity.GRANULARITY_FINE)
+            }
         }.build()
 
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult) {
-                val loc: Location = locationResult.lastLocation ?: return
-                sendTelemetry(loc.latitude, loc.longitude, loc.accuracy)
+                // Use the most accurate fix from the batch
+                val loc = locationResult.locations
+                    .filter { it.accuracy > 0 }
+                    .minByOrNull { it.accuracy }
+                    ?: locationResult.lastLocation
+                    ?: return
+
+                val provider = when {
+                    loc.accuracy <= 10f  -> "gps"
+                    loc.accuracy <= 50f  -> "fused"
+                    else                 -> "network"
+                }
+                sendTelemetry(loc.latitude, loc.longitude, loc.accuracy, provider)
             }
         }
 
@@ -470,7 +498,7 @@ class AntiTheftService : LifecycleService() {
                 locationCallback!!,
                 Looper.getMainLooper()
             )
-            sendConsoleLog("Rastreamento GPS iniciado no dispositivo.")
+            sendConsoleLog("📍 GPS de alta precisão iniciado (atualiza a cada 2-5s).")
         } catch (e: Exception) {
             Log.e("AntiTheftService", "Error requesting GPS updates: ${e.message}")
             sendConsoleLog("Erro ao iniciar rastreamento GPS: ${e.message}")
