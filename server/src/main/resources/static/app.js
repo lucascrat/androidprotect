@@ -100,16 +100,54 @@ async function doLogout() {
 }
 
 function showLinkCode() {
-    const popup = document.getElementById('link-code-popup');
+    let popup = document.getElementById('link-code-popup');
     if (!popup) return;
-    const isOpen = popup.style.display !== 'none';
-    if (isOpen) { popup.style.display = 'none'; return; }
+
+    // Toggle off if already visible
+    if (popup._portalOpen) {
+        closeLinkCodePopup();
+        return;
+    }
+
+    // Move popup to <body> as a direct child so it escapes every
+    // stacking context created by backdrop-filter on the grid cards
+    if (popup.parentElement !== document.body) {
+        document.body.appendChild(popup);
+    }
+
+    // Position under the link button
+    const btn = document.getElementById('user-link-btn');
+    if (btn) {
+        const r = btn.getBoundingClientRect();
+        popup.style.top  = (r.bottom + 8) + 'px';
+        popup.style.right = (window.innerWidth - r.right) + 'px';
+        popup.style.left  = 'auto';
+    }
+
     document.getElementById('lcp-token-val').textContent = getLinkToken() || '—';
     popup.style.display = 'block';
-    // Close on outside click
-    setTimeout(() => document.addEventListener('click', function handler(e) {
-        if (!popup.contains(e.target)) { popup.style.display = 'none'; document.removeEventListener('click', handler); }
-    }), 50);
+    popup._portalOpen = true;
+
+    // Close on click outside
+    setTimeout(() => {
+        document.addEventListener('click', _lcpOutsideHandler);
+    }, 60);
+}
+
+function _lcpOutsideHandler(e) {
+    const popup = document.getElementById('link-code-popup');
+    const btn   = document.getElementById('user-link-btn');
+    if (popup && !popup.contains(e.target) && e.target !== btn && !btn?.contains(e.target)) {
+        closeLinkCodePopup();
+    }
+}
+
+function closeLinkCodePopup() {
+    const popup = document.getElementById('link-code-popup');
+    if (!popup) return;
+    popup.style.display = 'none';
+    popup._portalOpen   = false;
+    document.removeEventListener('click', _lcpOutsideHandler);
 }
 
 function copyLinkCode() {
