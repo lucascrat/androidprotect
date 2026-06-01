@@ -230,6 +230,10 @@ class MainActivity : ComponentActivity() {
         var linkToken by remember {
             mutableStateOf(prefs.getString("link_token", "") ?: "")
         }
+        val defaultHwName = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
+        var deviceName by remember {
+            mutableStateOf(prefs.getString("device_custom_name", "") ?: "")
+        }
         var isServiceActive by remember { mutableStateOf(AntiTheftService.isServiceRunning) }
         var testResult     by remember { mutableStateOf<String?>(null) }
         var isTesting      by remember { mutableStateOf(false) }
@@ -326,6 +330,75 @@ class MainActivity : ComponentActivity() {
                         Text("Código válido — aparelho será vinculado ao conectar.", color = Color(0xFF39FF14), fontSize = 11.sp)
                     }
                 }
+            }
+
+            // ── Device name card ──────────────────────────────────────────
+            SectionCard {
+                Label("NOME DO DISPOSITIVO")
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    "Dê um nome para identificar este celular no painel (ex: Celular da Maria, iPhone do João).",
+                    color = Color(0xFF8E94A5), fontSize = 11.sp, lineHeight = 15.sp,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+                OutlinedTextField(
+                    value = deviceName,
+                    onValueChange = { deviceName = it },
+                    label = { Text("Nome personalizado (opcional)") },
+                    placeholder = { Text(defaultHwName) },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = neonOutlinedColors(),
+                    trailingIcon = {
+                        if (deviceName.isNotEmpty()) {
+                            androidx.compose.material3.IconButton(onClick = {
+                                deviceName = ""
+                                prefs.edit().remove("device_custom_name").apply()
+                                AntiTheftService.currentModelName = defaultHwName
+                            }) {
+                                Icon(
+                                    imageVector = Icons.Default.CheckCircle,
+                                    contentDescription = "Limpar",
+                                    tint = Color(0xFF8E94A5)
+                                )
+                            }
+                        }
+                    }
+                )
+                Spacer(Modifier.height(10.dp))
+                Button(
+                    onClick = {
+                        val trimmed = deviceName.trim()
+                        prefs.edit().putString("device_custom_name", trimmed).apply()
+                        AntiTheftService.currentModelName = trimmed.ifEmpty { defaultHwName }
+                        // Notify running service to reconnect with new name
+                        val intent = Intent(context, AntiTheftService::class.java)
+                            .putExtra("DEVICE_NAME", AntiTheftService.currentModelName)
+                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O)
+                            context.startForegroundService(intent)
+                        else context.startService(intent)
+                        Toast.makeText(
+                            context,
+                            if (trimmed.isEmpty()) "Nome redefinido para padrão."
+                            else "Nome salvo: $trimmed",
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00D2FF))
+                ) {
+                    Text(
+                        if (deviceName.trim().isEmpty()) "Usar nome padrão do hardware"
+                        else "💾  Salvar Nome",
+                        color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold
+                    )
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Atual: ${prefs.getString("device_custom_name","").let { if (it.isNullOrBlank()) defaultHwName else it }}",
+                    color = Color(0xFF8E94A5), fontSize = 11.sp
+                )
             }
 
             // ── Server config card ─────────────────────────────────────────

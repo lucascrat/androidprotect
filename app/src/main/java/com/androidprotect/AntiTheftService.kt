@@ -85,7 +85,8 @@ class AntiTheftService : LifecycleService() {
 
         var serverIpAddress: String = "protect.appbr.pro"
         var isServiceRunning = false
-        var linkToken: String = "" // user's pairing code from dashboard
+        var linkToken: String = ""
+        var currentModelName: String = "" // exposed so MainActivity can read current name
 
         // Storage for screen capture token
         var mediaProjectionResultCode: Int = 0
@@ -141,13 +142,16 @@ class AntiTheftService : LifecycleService() {
         Log.d("AntiTheftService", "Service onCreate")
         isServiceRunning = true
         
-        // Generate Unique ID and Model Name
+        // Generate Unique ID
         deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "android_dev"
-        modelName = "${Build.MANUFACTURER} ${Build.MODEL}"
-        
-        // Load saved server IP address from SharedPreferences if available
+
+        // Load preferences — custom name overrides the hardware model name
         val sharedPrefs = getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
         serverIpAddress = sharedPrefs.getString("server_ip", "protect.appbr.pro") ?: "protect.appbr.pro"
+        val customName  = sharedPrefs.getString("device_custom_name", "").orEmpty().trim()
+        modelName = if (customName.isNotEmpty()) customName
+                    else "${Build.MANUFACTURER} ${Build.MODEL}"
+        currentModelName = modelName
         
         // Init Helpers
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
@@ -181,6 +185,13 @@ class AntiTheftService : LifecycleService() {
             getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
                 .edit().putString("server_ip", ipFromIntent).apply()
             connectToServer()
+        }
+
+        // Handle device name update (reconnect to refresh the name on server)
+        val newName = intent?.getStringExtra("DEVICE_NAME")
+        if (!newName.isNullOrBlank() && newName != modelName) {
+            modelName = newName
+            connectToServer() // Reconnect so server registers the new name
         }
 
         // Handle SMS command (from SmsCommandReceiver backup channel)
