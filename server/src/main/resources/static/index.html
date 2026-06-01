@@ -17,7 +17,14 @@
         document.head.appendChild(s);
       });
     </script>
-    <link rel="stylesheet" href="style.css?v=7">
+    <link rel="stylesheet" href="style.css?v=8">
+    <script>
+      // Auth guard — redirect to login if no valid session
+      (function(){
+        const t = localStorage.getItem('ap_token');
+        if (!t) { window.location.href = '/login.html'; }
+      })();
+    </script>
 </head>
 <body>
     <div class="app-container">
@@ -67,15 +74,34 @@
                     </div>
                 </div>
 
-                <div class="device-telemetry" id="device-telemetry" style="display: none;">
-                    <div class="telemetry-item">
-                        <i id="battery-icon" class="fa-solid fa-battery-three-quarters"></i>
-                        <span id="battery-level">--%</span>
+                <div class="top-bar-right">
+                    <div class="device-telemetry" id="device-telemetry" style="display: none;">
+                        <div class="telemetry-item">
+                            <i id="battery-icon" class="fa-solid fa-battery-three-quarters"></i>
+                            <span id="battery-level">--%</span>
+                        </div>
+                        <div class="telemetry-item">
+                            <i class="fa-solid fa-wifi"></i>
+                            <span id="network-status" class="hide-xs">Conectado</span>
+                        </div>
                     </div>
-                    <div class="telemetry-item">
-                        <i class="fa-solid fa-wifi"></i>
-                        <span id="network-status" class="hide-xs">Conectado</span>
+                    <div class="user-info-bar">
+                        <button class="user-link-btn" id="user-link-btn" title="Ver código de vinculação" onclick="showLinkCode()">
+                            <i class="fa-solid fa-link"></i>
+                        </button>
+                        <span class="user-name" id="user-name-display"></span>
+                        <button class="logout-btn" onclick="doLogout()" title="Sair">
+                            <i class="fa-solid fa-right-from-bracket"></i>
+                        </button>
                     </div>
+                </div>
+
+                <!-- Link code tooltip -->
+                <div class="link-code-popup" id="link-code-popup" style="display:none">
+                    <div class="lcp-label"><i class="fa-solid fa-link"></i> Código de Vinculação</div>
+                    <div class="lcp-token" id="lcp-token-val"></div>
+                    <div class="lcp-hint">Digite este código no app Android para vincular o aparelho.</div>
+                    <button class="lcp-copy" onclick="copyLinkCode()"><i class="fa-solid fa-copy"></i> Copiar</button>
                 </div>
             </header>
 
@@ -278,6 +304,6 @@
         <div class="pm-thumbs" id="pm-thumbs"></div>
     </div>
     
-    <script src="app.js?v=8"></script>
+    <script src="app.js?v=9"></script>
 </body>
 </html>

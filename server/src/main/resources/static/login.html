@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AndroidProtect — Acesso</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="login.css">
+</head>
+<body>
+    <div class="login-bg">
+        <div class="login-card">
+            <!-- Logo -->
+            <div class="login-logo">
+                <i class="fa-solid fa-shield-halved"></i>
+                <span>Android<span class="pink">Protect</span></span>
+            </div>
+            <p class="login-sub">Sistema de Monitoramento Anti-Furto</p>
+
+            <!-- Tabs -->
+            <div class="tab-row">
+                <button class="tab active" id="tab-login" onclick="switchTab('login')">Entrar</button>
+                <button class="tab" id="tab-register" onclick="switchTab('register')">Cadastrar</button>
+            </div>
+
+            <!-- Login Form -->
+            <form id="form-login" onsubmit="doLogin(event)">
+                <div class="field">
+                    <i class="fa-solid fa-envelope"></i>
+                    <input type="email" id="login-email" placeholder="Seu e-mail" required autocomplete="email">
+                </div>
+                <div class="field">
+                    <i class="fa-solid fa-lock"></i>
+                    <input type="password" id="login-pass" placeholder="Sua senha" required autocomplete="current-password">
+                </div>
+                <div id="login-error" class="form-error" style="display:none"></div>
+                <button type="submit" class="btn-submit" id="login-btn">
+                    <span>Entrar no Painel</span>
+                    <i class="fa-solid fa-arrow-right"></i>
+                </button>
+            </form>
+
+            <!-- Register Form -->
+            <form id="form-register" style="display:none" onsubmit="doRegister(event)">
+                <div class="field">
+                    <i class="fa-solid fa-user"></i>
+                    <input type="text" id="reg-name" placeholder="Seu nome" required autocomplete="name">
+                </div>
+                <div class="field">
+                    <i class="fa-solid fa-envelope"></i>
+                    <input type="email" id="reg-email" placeholder="Seu e-mail" required autocomplete="email">
+                </div>
+                <div class="field">
+                    <i class="fa-solid fa-lock"></i>
+                    <input type="password" id="reg-pass" placeholder="Criar senha (mín. 6 caracteres)" required autocomplete="new-password" minlength="6">
+                </div>
+                <div class="field">
+                    <i class="fa-solid fa-lock"></i>
+                    <input type="password" id="reg-pass2" placeholder="Confirmar senha" required autocomplete="new-password">
+                </div>
+                <div id="reg-error" class="form-error" style="display:none"></div>
+                <button type="submit" class="btn-submit" id="reg-btn">
+                    <span>Criar Conta</span>
+                    <i class="fa-solid fa-user-plus"></i>
+                </button>
+            </form>
+
+            <!-- Success: show link token -->
+            <div id="success-panel" style="display:none">
+                <div class="success-icon"><i class="fa-solid fa-circle-check"></i></div>
+                <h3 class="success-title">Conta criada com sucesso!</h3>
+                <p class="success-desc">Seu código de vinculação do aparelho é:</p>
+                <div class="link-token-box" id="link-token-display"></div>
+                <p class="success-hint">
+                    <i class="fa-solid fa-info-circle"></i>
+                    Digite este código no app AndroidProtect no seu celular para vincular o aparelho à sua conta.
+                </p>
+                <button class="btn-submit" onclick="window.location.href='/'">
+                    <span>Ir para o Painel</span>
+                    <i class="fa-solid fa-arrow-right"></i>
+                </button>
+            </div>
+        </div>
+    </div>
+    <script src="login.js"></script>
+</body>
+</html>

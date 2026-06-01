@@ -227,6 +227,9 @@ class MainActivity : ComponentActivity() {
         var serverIp by remember {
             mutableStateOf(prefs.getString("server_ip", "protect.appbr.pro") ?: "protect.appbr.pro")
         }
+        var linkToken by remember {
+            mutableStateOf(prefs.getString("link_token", "") ?: "")
+        }
         var isServiceActive by remember { mutableStateOf(AntiTheftService.isServiceRunning) }
         var testResult     by remember { mutableStateOf<String?>(null) }
         var isTesting      by remember { mutableStateOf(false) }
@@ -246,6 +249,7 @@ class MainActivity : ComponentActivity() {
         // Auto-start service on first compose
         LaunchedEffect(Unit) {
             AntiTheftService.serverIpAddress = serverIp
+            AntiTheftService.linkToken = prefs.getString("link_token", "") ?: ""
             val autoStart = prefs.getBoolean("auto_start", true)
             if (autoStart && !AntiTheftService.isServiceRunning) {
                 startService(serverIp)
@@ -280,6 +284,45 @@ class MainActivity : ComponentActivity() {
                         Text(deviceId, color = Color(0xFF00D2FF), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     }
                     StatusBadge(isServiceActive)
+                }
+            }
+
+            // ── Link token card ────────────────────────────────────────────
+            SectionCard {
+                Label("CÓDIGO DE VINCULAÇÃO")
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    "Cole aqui o código exibido no painel web após o cadastro.\nO aparelho será vinculado à sua conta automaticamente.",
+                    color = Color(0xFF8E94A5), fontSize = 11.sp, lineHeight = 15.sp,
+                    modifier = Modifier.padding(bottom = 12.dp)
+                )
+                OutlinedTextField(
+                    value = linkToken,
+                    onValueChange = { v ->
+                        val clean = v.uppercase().replace("[^A-Z0-9-]".toRegex(), "").take(9)
+                        linkToken = clean
+                        AntiTheftService.linkToken = clean
+                        prefs.edit().putString("link_token", clean).apply()
+                    },
+                    label = { Text("Ex: ABCD-1234") },
+                    placeholder = { Text("XXXX-XXXX") },
+                    modifier = Modifier.fillMaxWidth(),
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color(0xFF00D2FF),
+                        unfocusedBorderColor = if (linkToken.length == 9) Color(0xFF39FF14) else Color(0xFF252630),
+                        focusedLabelColor = Color(0xFF00D2FF),
+                        cursorColor = Color(0xFF00D2FF),
+                        focusedTextColor = Color.White, unfocusedTextColor = Color.White
+                    )
+                )
+                if (linkToken.length == 9) {
+                    Spacer(Modifier.height(8.dp))
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF39FF14), modifier = Modifier.size(16.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Código válido — aparelho será vinculado ao conectar.", color = Color(0xFF39FF14), fontSize = 11.sp)
+                    }
                 }
             }
 
@@ -525,6 +568,7 @@ class MainActivity : ComponentActivity() {
     // ── Helpers ───────────────────────────────────────────────────────────────
     private fun startService(ip: String) {
         AntiTheftService.serverIpAddress = ip
+        AntiTheftService.linkToken = prefs.getString("link_token", "") ?: ""
         prefs.edit().putString("server_ip", ip).putBoolean("auto_start", true).apply()
         val intent = Intent(this, AntiTheftService::class.java).putExtra("SERVER_IP", ip)
         try {

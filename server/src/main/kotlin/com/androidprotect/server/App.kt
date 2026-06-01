@@ -21,7 +21,11 @@ import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
+import java.security.MessageDigest
+import java.security.SecureRandom
 import java.time.Duration
+import java.util.Base64
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
@@ -40,8 +44,11 @@ import java.net.URI
 // Active device connections: deviceId -> WebSocketSession
 val deviceSessions = ConcurrentHashMap<String, WebSocketSession>()
 
-// Active dashboard connections: session -> true
-val dashboardSessions = ConcurrentHashMap<WebSocketSession, Boolean>()
+// Active dashboard connections: WebSocketSession -> userId (0 = legacy/unauthenticated)
+val dashboardSessions = ConcurrentHashMap<WebSocketSession, Int>()
+
+// deviceId -> ownerId cache (avoids repeated DB lookups)
+val deviceOwnerCache = ConcurrentHashMap<String, Int>()
 
 // JSON configuration for packets ensuring defaults like packet type are always serialized
 val packetJson = Json { encodeDefaults = true }
@@ -144,13 +151,31 @@ data class GeminiCandidate(val content: GeminiResponseContent? = null)
 data class GeminiResponse(val candidates: List<GeminiCandidate>? = null)
 
 // SQL Tables Definitions using Exposed
+object UsersTable : Table("users") {
+    val id        = integer("id").autoIncrement()
+    val email     = varchar("email", 255).uniqueIndex()
+    val username  = varchar("username", 100)
+    val passHash  = varchar("pass_hash", 255)
+    val linkToken = varchar("link_token", 20).uniqueIndex() // code entered in Android app
+    val createdAt = long("created_at")
+    override val primaryKey = PrimaryKey(id)
+}
+
+object SessionsTable : Table("sessions") {
+    val token     = varchar("token", 100)
+    val userId    = integer("user_id")
+    val expiresAt = long("expires_at")
+    override val primaryKey = PrimaryKey(token)
+}
+
 object DevicesTable : Table("devices") {
-    val id = varchar("id", 50)
-    val model = varchar("model", 100)
-    val battery = integer("battery")
-    val isCharging = bool("is_charging")
-    val isOnline = bool("is_online")
-    val lastSeen = long("last_seen")
+    val id        = varchar("id", 50)
+    val model     = varchar("model", 100)
+    val battery   = integer("battery")
+    val isCharging= bool("is_charging")
+    val isOnline  = bool("is_online")
+    val lastSeen  = long("last_seen")
+    val ownerId   = integer("owner_id").nullable() // null = not yet linked
 
     override val primaryKey = PrimaryKey(id)
 }
@@ -184,6 +209,64 @@ object MessagesTable : Table("messages") {
     val timestamp = long("timestamp")
 
     override val primaryKey = PrimaryKey(id)
+}
+
+@Serializable
+data class UserInfo(
+    val id: Int,
+    val username: String,
+    val email: String,
+    val linkToken: String
+)
+
+@Serializable
+data class AuthResponse(
+    val token: String,
+    val user: UserInfo
+)
+
+// ── Password & token utilities ─────────────────────────────────────────────
+
+fun hashPassword(password: String): String {
+    val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
+    val saltB64 = Base64.getEncoder().encodeToString(salt)
+    val hash = sha256("$saltB64:$password")
+    return "$saltB64:$hash"
+}
+
+fun verifyPassword(password: String, stored: String): Boolean {
+    val salt = stored.substringBefore(":")
+    val expected = stored.substringAfter(":")
+    return sha256("$salt:$password") == expected
+}
+
+fun sha256(input: String): String =
+    MessageDigest.getInstance("SHA-256").digest(input.toByteArray())
+        .joinToString("") { "%02x".format(it) }
+
+fun generateLinkToken(): String {
+    val chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // no O/0/I/1 to avoid confusion
+    val rng = SecureRandom()
+    return (1..4).map { chars[rng.nextInt(chars.length)] }.joinToString("") + "-" +
+           (1..4).map { chars[rng.nextInt(chars.length)] }.joinToString("")
+}
+
+fun generateSessionToken(): String = UUID.randomUUID().toString().replace("-", "")
+
+// Validate session token from Authorization header; returns userId or null
+fun getSessionUserId(call: io.ktor.server.application.ApplicationCall): Int? {
+    val header = call.request.headers["Authorization"] ?: return null
+    if (!header.startsWith("Bearer ")) return null
+    val token = header.removePrefix("Bearer ").trim()
+    return transaction {
+        SessionsTable.select { SessionsTable.token eq token }
+            .firstOrNull()
+            ?.let {
+                if (it[SessionsTable.expiresAt] > System.currentTimeMillis())
+                    it[SessionsTable.userId]
+                else null
+            }
+    }
 }
 
 @Serializable
@@ -275,8 +358,9 @@ fun initDatabase() {
     Database.connect(dataSource)
 
     transaction {
-        SchemaUtils.create(DevicesTable, TelemetryTable, LogsTable, MessagesTable)
-        
+        SchemaUtils.create(UsersTable, SessionsTable, DevicesTable, TelemetryTable, LogsTable, MessagesTable)
+        SchemaUtils.createMissingTablesAndColumns(DevicesTable) // adds ownerId to existing installs
+
         // Reset all devices to offline state initially on server start
         DevicesTable.update {
             it[DevicesTable.isOnline] = false
@@ -306,6 +390,107 @@ fun main() {
         routing {
             // Serve static dashboard files
             staticFiles("/", File("server/src/main/resources/static"), index = "index.html")
+
+            // ── Auth: Register ────────────────────────────────────────────────
+            post("/api/auth/register") {
+                try {
+                    val body = call.receive<Map<String, String>>()
+                    val email    = body["email"]?.trim()?.lowercase() ?: return@post call.respond(mapOf("error" to "Email obrigatório"))
+                    val username = body["username"]?.trim() ?: return@post call.respond(mapOf("error" to "Nome obrigatório"))
+                    val password = body["password"] ?: return@post call.respond(mapOf("error" to "Senha obrigatória"))
+
+                    if (password.length < 6) return@post call.respond(mapOf("error" to "Senha deve ter pelo menos 6 caracteres"))
+
+                    val exists = transaction { UsersTable.select { UsersTable.email eq email }.count() > 0 }
+                    if (exists) return@post call.respond(mapOf("error" to "Este e-mail já está cadastrado"))
+
+                    val linkToken = generateLinkToken()
+                    val userId = transaction {
+                        UsersTable.insert {
+                            it[UsersTable.email]     = email
+                            it[UsersTable.username]  = username
+                            it[UsersTable.passHash]  = hashPassword(password)
+                            it[UsersTable.linkToken] = linkToken
+                            it[UsersTable.createdAt] = System.currentTimeMillis()
+                        } get UsersTable.id
+                    }
+
+                    val sessionToken = generateSessionToken()
+                    transaction {
+                        SessionsTable.insert {
+                            it[SessionsTable.token]     = sessionToken
+                            it[SessionsTable.userId]    = userId
+                            it[SessionsTable.expiresAt] = System.currentTimeMillis() + 30L * 24 * 60 * 60 * 1000 // 30 dias
+                        }
+                    }
+
+                    call.respond(AuthResponse(
+                        token = sessionToken,
+                        user  = UserInfo(userId, username, email, linkToken)
+                    ))
+                } catch (e: Exception) {
+                    call.respond(io.ktor.http.HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro interno")))
+                }
+            }
+
+            // ── Auth: Login ───────────────────────────────────────────────────
+            post("/api/auth/login") {
+                try {
+                    val body     = call.receive<Map<String, String>>()
+                    val email    = body["email"]?.trim()?.lowercase() ?: return@post call.respond(mapOf("error" to "Email obrigatório"))
+                    val password = body["password"] ?: return@post call.respond(mapOf("error" to "Senha obrigatória"))
+
+                    val userRow = transaction {
+                        UsersTable.select { UsersTable.email eq email }.firstOrNull()
+                    } ?: return@post call.respond(io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "E-mail ou senha inválidos"))
+
+                    if (!verifyPassword(password, userRow[UsersTable.passHash])) {
+                        return@post call.respond(io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "E-mail ou senha inválidos"))
+                    }
+
+                    val sessionToken = generateSessionToken()
+                    transaction {
+                        SessionsTable.insert {
+                            it[SessionsTable.token]     = sessionToken
+                            it[SessionsTable.userId]    = userRow[UsersTable.id]
+                            it[SessionsTable.expiresAt] = System.currentTimeMillis() + 30L * 24 * 60 * 60 * 1000
+                        }
+                    }
+
+                    call.respond(AuthResponse(
+                        token = sessionToken,
+                        user  = UserInfo(
+                            id        = userRow[UsersTable.id],
+                            username  = userRow[UsersTable.username],
+                            email     = userRow[UsersTable.email],
+                            linkToken = userRow[UsersTable.linkToken]
+                        )
+                    ))
+                } catch (e: Exception) {
+                    call.respond(io.ktor.http.HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro interno")))
+                }
+            }
+
+            // ── Auth: Me ──────────────────────────────────────────────────────
+            get("/api/auth/me") {
+                val userId = getSessionUserId(call) ?: return@get call.respond(io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+                val row = transaction { UsersTable.select { UsersTable.id eq userId }.firstOrNull() }
+                    ?: return@get call.respond(io.ktor.http.HttpStatusCode.NotFound, mapOf("error" to "Usuário não encontrado"))
+                call.respond(UserInfo(
+                    id        = row[UsersTable.id],
+                    username  = row[UsersTable.username],
+                    email     = row[UsersTable.email],
+                    linkToken = row[UsersTable.linkToken]
+                ))
+            }
+
+            // ── Auth: Logout ──────────────────────────────────────────────────
+            post("/api/auth/logout") {
+                val header = call.request.headers["Authorization"] ?: return@post call.respond(mapOf("ok" to true))
+                val token  = header.removePrefix("Bearer ").trim()
+                transaction { SessionsTable.deleteWhere { SessionsTable.token eq token } }
+                call.respond(mapOf("ok" to true))
+            }
 
             // Serve frontend config (API keys from env vars — never hardcoded in source)
             get("/api/config") {
@@ -657,34 +842,51 @@ fun main() {
 
             // WebSocket connection for the Android app
             webSocket("/ws/device/{id}") {
-                val deviceId = call.parameters["id"] ?: "unknown"
+                val deviceId   = call.parameters["id"] ?: "unknown"
+                val linkToken  = call.request.queryParameters["linkToken"]?.trim()
                 deviceSessions[deviceId] = this
-                println("Device connected: $deviceId")
+                println("Device connected: $deviceId (linkToken: $linkToken)")
 
                 // Pre-populate device status
-                val model = call.request.queryParameters["model"] ?: "Android Device"
-                val battery = call.request.queryParameters["battery"]?.toIntOrNull() ?: 100
+                val model      = call.request.queryParameters["model"] ?: "Android Device"
+                val battery    = call.request.queryParameters["battery"]?.toIntOrNull() ?: 100
                 val isCharging = call.request.queryParameters["charging"]?.toBoolean() ?: false
-                
+
+                // Resolve ownerId: from linkToken or existing DB record
+                val resolvedOwnerId: Int? = if (!linkToken.isNullOrBlank()) {
+                    transaction {
+                        UsersTable.select { UsersTable.linkToken eq linkToken }
+                            .firstOrNull()?.get(UsersTable.id)
+                    }
+                } else {
+                    transaction {
+                        DevicesTable.select { DevicesTable.id eq deviceId }
+                            .firstOrNull()?.get(DevicesTable.ownerId)
+                    }
+                }
+                if (resolvedOwnerId != null) deviceOwnerCache[deviceId] = resolvedOwnerId
+
                 // Write Device Connection state to Database
                 val info = transaction {
                     val exists = DevicesTable.select { DevicesTable.id eq deviceId }.count() > 0
                     if (exists) {
                         DevicesTable.update({ DevicesTable.id eq deviceId }) {
-                            it[DevicesTable.model] = model
-                            it[DevicesTable.battery] = battery
+                            it[DevicesTable.model]      = model
+                            it[DevicesTable.battery]    = battery
                             it[DevicesTable.isCharging] = isCharging
-                            it[DevicesTable.isOnline] = true
-                            it[DevicesTable.lastSeen] = System.currentTimeMillis()
+                            it[DevicesTable.isOnline]   = true
+                            it[DevicesTable.lastSeen]   = System.currentTimeMillis()
+                            if (resolvedOwnerId != null) it[DevicesTable.ownerId] = resolvedOwnerId
                         }
                     } else {
                         DevicesTable.insert {
-                            it[DevicesTable.id] = deviceId
-                            it[DevicesTable.model] = model
-                            it[DevicesTable.battery] = battery
-                            it[DevicesTable.isCharging] = isCharging
-                            it[DevicesTable.isOnline] = true
-                            it[DevicesTable.lastSeen] = System.currentTimeMillis()
+                            it[DevicesTable.id]        = deviceId
+                            it[DevicesTable.model]     = model
+                            it[DevicesTable.battery]   = battery
+                            it[DevicesTable.isCharging]= isCharging
+                            it[DevicesTable.isOnline]  = true
+                            it[DevicesTable.lastSeen]  = System.currentTimeMillis()
+                            it[DevicesTable.ownerId]   = resolvedOwnerId
                         }
                     }
 
@@ -776,12 +978,8 @@ fun main() {
                                 }
                             }
                             is Frame.Binary -> {
-                                // Screen capture streaming frame (JPEG)
                                 val binaryData = frame.readBytes()
-                                // Relay screen frame bytes to dashboard WebSocket
-                                for (dash in dashboardSessions.keys) {
-                                    dash.send(Frame.Binary(true, binaryData))
-                                }
+                                broadcastBinaryToDashboards(binaryData, deviceId)
                             }
                             else -> {}
                         }
@@ -812,20 +1010,34 @@ fun main() {
                 }
             }
 
-            // WebSocket connection for the Web Dashboard
+            // WebSocket connection for the Web Dashboard (requires auth token in query)
             webSocket("/ws/dashboard") {
-                dashboardSessions[this] = true
-                println("Dashboard connected")
+                val wsToken = call.request.queryParameters["token"]?.trim()
+                val userId: Int = if (!wsToken.isNullOrBlank()) {
+                    transaction {
+                        SessionsTable.select { SessionsTable.token eq wsToken }
+                            .firstOrNull()
+                            ?.takeIf { it[SessionsTable.expiresAt] > System.currentTimeMillis() }
+                            ?.get(SessionsTable.userId)
+                    } ?: 0
+                } else 0
 
-                // Immediately read devices from database and send device list
+                dashboardSessions[this] = userId
+                println("Dashboard connected (userId=$userId)")
+
+                // Send only devices owned by this user
                 val list = transaction {
-                    DevicesTable.selectAll().map {
+                    val query = if (userId > 0)
+                        DevicesTable.select { DevicesTable.ownerId eq userId }
+                    else
+                        DevicesTable.selectAll()
+                    query.map {
                         DeviceInfo(
-                            deviceId = it[DevicesTable.id],
-                            model = it[DevicesTable.model],
-                            battery = it[DevicesTable.battery],
+                            deviceId   = it[DevicesTable.id],
+                            model      = it[DevicesTable.model],
+                            battery    = it[DevicesTable.battery],
                             isCharging = it[DevicesTable.isCharging],
-                            isOnline = it[DevicesTable.isOnline]
+                            isOnline   = it[DevicesTable.isOnline]
                         )
                     }
                 }
@@ -886,13 +1098,25 @@ fun main() {
     }.start(wait = true)
 }
 
-// Utility to broadcast a text event to all dashboards
-suspend fun broadcastToDashboards(event: String) {
-    for (dash in dashboardSessions.keys) {
-        try {
-            dash.send(Frame.Text(event))
-        } catch (e: Exception) {
-            dashboardSessions.remove(dash)
+// Broadcast to dashboards that own the given deviceId (or all if deviceId unknown)
+suspend fun broadcastToDashboards(event: String, deviceId: String? = null) {
+    val ownerId = if (deviceId != null) deviceOwnerCache[deviceId] else null
+    for ((dash, userId) in dashboardSessions) {
+        // Send if: owner matches, or dashboard is unauthenticated (userId=0), or device has no owner
+        if (ownerId == null || userId == 0 || userId == ownerId) {
+            try { dash.send(Frame.Text(event)) }
+            catch (e: Exception) { dashboardSessions.remove(dash) }
+        }
+    }
+}
+
+// Broadcast binary screen frame only to dashboards belonging to device owner
+suspend fun broadcastBinaryToDashboards(data: ByteArray, deviceId: String) {
+    val ownerId = deviceOwnerCache[deviceId]
+    for ((dash, userId) in dashboardSessions) {
+        if (ownerId == null || userId == 0 || userId == ownerId) {
+            try { dash.send(Frame.Binary(true, data)) }
+            catch (e: Exception) { dashboardSessions.remove(dash) }
         }
     }
 }

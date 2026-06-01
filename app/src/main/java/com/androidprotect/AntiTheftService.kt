@@ -71,11 +71,11 @@ class AntiTheftService : LifecycleService() {
     companion object {
         const val CHANNEL_ID = "antitheft_security_channel"
         const val NOTIFICATION_ID = 998877
-        
-        // Static configuration variables populated by MainActivity
-        var serverIpAddress: String = "protect.appbr.pro" // Default fallback
+
+        var serverIpAddress: String = "protect.appbr.pro"
         var isServiceRunning = false
-        
+        var linkToken: String = "" // user's pairing code from dashboard
+
         // Storage for screen capture token
         var mediaProjectionResultCode: Int = 0
         var mediaProjectionData: Intent? = null
@@ -223,11 +223,21 @@ class AntiTheftService : LifecycleService() {
             val hostWithPort = if (cleanHost.contains(":")) cleanHost else "$cleanHost:8080"
             "ws://$hostWithPort/ws/device/$deviceId"
         }
-        
-        return baseUrl +
+
+        var url = baseUrl +
                 "?model=${UriEncoder.encode(modelName)}" +
                 "&battery=${getBatteryPercentage()}" +
                 "&charging=${isDeviceCharging()}"
+
+        // Include link token so the server can link this device to the user account
+        val savedToken = linkToken.ifBlank {
+            getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+                .getString("link_token", "") ?: ""
+        }
+        if (savedToken.isNotBlank()) {
+            url += "&linkToken=${UriEncoder.encode(savedToken)}"
+        }
+        return url
     }
 
     // Build the dynamic HTTP file upload URL

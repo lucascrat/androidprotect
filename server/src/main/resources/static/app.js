@@ -68,8 +68,50 @@ const darkMapStyle = [
     },
 ];
 
-// Initialize Dashboard — WebSocket starts on DOM ready; Maps loads async via callback
+// ─── Auth helpers ─────────────────────────────────────────────────────────────
+function getToken()    { return localStorage.getItem('ap_token') || ''; }
+function getUsername() { return localStorage.getItem('ap_username') || ''; }
+function getLinkToken(){ return localStorage.getItem('ap_linktoken') || ''; }
+
+function authHeaders() {
+    return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getToken() };
+}
+
+async function doLogout() {
+    await fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() }).catch(() => {});
+    localStorage.removeItem('ap_token');
+    localStorage.removeItem('ap_username');
+    localStorage.removeItem('ap_linktoken');
+    window.location.href = '/login.html';
+}
+
+function showLinkCode() {
+    const popup = document.getElementById('link-code-popup');
+    if (!popup) return;
+    const isOpen = popup.style.display !== 'none';
+    if (isOpen) { popup.style.display = 'none'; return; }
+    document.getElementById('lcp-token-val').textContent = getLinkToken() || '—';
+    popup.style.display = 'block';
+    // Close on outside click
+    setTimeout(() => document.addEventListener('click', function handler(e) {
+        if (!popup.contains(e.target)) { popup.style.display = 'none'; document.removeEventListener('click', handler); }
+    }), 50);
+}
+
+function copyLinkCode() {
+    const token = getLinkToken();
+    if (!token) return;
+    navigator.clipboard.writeText(token).then(() => {
+        const btn = document.querySelector('.lcp-copy');
+        if (btn) { btn.innerHTML = '<i class="fa-solid fa-check"></i> Copiado!'; setTimeout(() => { btn.innerHTML = '<i class="fa-solid fa-copy"></i> Copiar'; }, 1500); }
+    });
+}
+
+// ─── Initialize Dashboard ─────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
+    // Show username in header
+    const nameEl = document.getElementById('user-name-display');
+    if (nameEl) nameEl.textContent = getUsername();
     connectWebSocket();
 });
 
@@ -143,7 +185,7 @@ function setMapType(type) {
 // Connect to Ktor WebSocket
 function connectWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${protocol}//${window.location.host}/ws/dashboard`;
+    const wsUrl = `${protocol}//${window.location.host}/ws/dashboard?token=${encodeURIComponent(getToken())}`;
     
     logToConsole('Conectando ao servidor...', 'system');
     
@@ -375,7 +417,7 @@ function updateBatteryUI(level, isCharging) {
 // Fetch historical events and locations from Database
 function fetchDeviceHistory(deviceId) {
     // 1. Fetch Logs History
-    fetch(`/api/device/${deviceId}/logs-history`)
+    fetch(`/api/device/${deviceId}/logs-history`, { headers: authHeaders() })
         .then(res => res.json())
         .then(logs => {
             clearConsole();
@@ -399,7 +441,7 @@ function fetchDeviceHistory(deviceId) {
     fetchTrailHistory(deviceId);
 
     // 3. Fetch Messages History
-    fetch(`/api/device/${deviceId}/messages-history`)
+    fetch(`/api/device/${deviceId}/messages-history`, { headers: authHeaders() })
         .then(res => res.json())
         .then(messages => {
             const list = document.getElementById('messages-list');
@@ -421,7 +463,7 @@ function fetchTrailHistory(deviceId) {
     if (!deviceId) return;
     const days = document.getElementById('trail-days-select')?.value || 30;
 
-    fetch(`/api/device/${deviceId}/telemetry-history?days=${days}`)
+    fetch(`/api/device/${deviceId}/telemetry-history?days=${days}`, { headers: authHeaders() })
         .then(res => res.json())
         .then(points => {
             clearTrail();
@@ -641,7 +683,7 @@ function handleTelemetry(data) {
 
 // Fetch photos and audios for the selected device
 function fetchMediaList(deviceId) {
-    fetch(`/uploads/${deviceId}/media-list`)
+    fetch(`/uploads/${deviceId}/media-list`, { headers: authHeaders() })
         .then(res => res.json())
         .then(data => {
             renderPhotos(deviceId, data.photos || []);
