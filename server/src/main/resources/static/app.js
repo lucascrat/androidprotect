@@ -18,7 +18,8 @@ let mapFollowMode = true; // Auto-center map on device GPS updates
 
 // File browser state
 let fbCurrentPath = '';
-let fbHistory = [];
+let fbHistory     = [];
+let fbPreviewPending = {}; // path → { name, itemEl } — tracks pending preview requests
 
 // Web Audio API for live PCM streaming
 let audioCtx = null;
@@ -540,8 +541,8 @@ function handleJsonMessage(data) {
             break;
         case 'FILE_READY':
             if (data.deviceId === currentDeviceId) {
-                logToConsole(`📥 Arquivo pronto para download: ${data.name}`, 'success');
-                fbShowDownloadToast(data.name, data.url, data.originalPath);
+                logToConsole(`📥 Arquivo recebido: ${data.name}`, 'success');
+                fbHandleFileReady(data.name, data.url, data.originalPath);
             }
             break;
 
@@ -1678,8 +1679,12 @@ function fbRenderList(data) {
         const size   = isDir ? '' : fbFormatSize(f.size);
         const date   = new Date(f.modified).toLocaleDateString('pt-BR');
 
+        const isImg = fbIsImage(f.ext);
+        const isVid = ['mp4','mkv','avi','mov','3gp','webm'].includes((f.ext||'').toLowerCase());
+        const canPreview = !isDir && (isImg || isVid);
+
         const div = document.createElement('div');
-        div.className = 'fb-item';
+        div.className = 'fb-item' + (canPreview ? ' fb-item-previewable' : '');
         div.innerHTML = `
             <span class="fb-item-icon ${fbIconClass(f.ext, isDir)}">${icon}</span>
             <div class="fb-item-info">
@@ -1687,23 +1692,48 @@ function fbRenderList(data) {
                 <span class="fb-item-meta">${size}${size && date ? ' · ' : ''}${date}</span>
             </div>
             <div class="fb-item-actions">
-                ${!isDir ? `<button class="fb-act-btn dl" onclick="fbDownload('${escapeHtml(f.path)}','${escapeHtml(f.name)}')" title="Baixar"><i class="fa-solid fa-download"></i></button>` : ''}
-                <button class="fb-act-btn del" onclick="fbConfirmDelete('${escapeHtml(f.path)}','${escapeHtml(f.name)}')" title="Excluir"><i class="fa-solid fa-trash"></i></button>
+                ${canPreview ? `<button class="fb-act-btn fb-preview-btn" title="Visualizar" style="color:var(--neon-blue)"><i class="fa-solid fa-eye"></i></button>` : ''}
+                ${!isDir ? `<button class="fb-act-btn dl" title="Baixar" style="color:var(--neon-blue)"><i class="fa-solid fa-download"></i></button>` : ''}
+                <button class="fb-act-btn del" title="Excluir"><i class="fa-solid fa-trash"></i></button>
             </div>
+            ${canPreview ? '<div class="fb-preview-hint"><i class="fa-solid fa-eye"></i></div>' : ''}
         `;
 
+        // Bind actions safely (avoid inline onclick with complex args)
         if (isDir) {
-            div.addEventListener('click', (e) => {
+            div.addEventListener('click', e => {
                 if (e.target.closest('.fb-item-actions')) return;
                 fbHistory.push(data.path);
                 fbOpen(f.path);
             });
-        } else if (fbIsImage(f.ext)) {
-            div.addEventListener('click', (e) => {
-                if (e.target.closest('.fb-item-actions')) return;
+        } else {
+            // Preview button or click on image/video → open preview
+            if (canPreview) {
+                const previewBtn = div.querySelector('.fb-preview-btn');
+                if (previewBtn) previewBtn.addEventListener('click', e => {
+                    e.stopPropagation();
+                    fbPreview(f.path, f.name, div);
+                });
+                // Click anywhere on image/video item (outside actions) → preview
+                div.addEventListener('click', e => {
+                    if (e.target.closest('.fb-item-actions')) return;
+                    fbPreview(f.path, f.name, div);
+                });
+            }
+            // Download button
+            const dlBtn = div.querySelector('.fb-act-btn.dl');
+            if (dlBtn) dlBtn.addEventListener('click', e => {
+                e.stopPropagation();
                 fbDownload(f.path, f.name);
             });
         }
+
+        // Delete button
+        const delBtn = div.querySelector('.fb-act-btn.del');
+        if (delBtn) delBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            fbConfirmDelete(f.path, f.name);
+        });
 
         list.appendChild(div);
     });
@@ -1715,6 +1745,80 @@ function fbShowError(msg) {
     const empty = document.getElementById('fb-empty');
     empty.style.display = 'flex';
     empty.innerHTML = `<i class="fa-solid fa-triangle-exclamation fa-2x" style="color:var(--danger-red)"></i><p style="color:var(--danger-red)">${escapeHtml(msg)}</p><button class="btn btn-sm btn-primary" onclick="fbOpen()"><i class="fa-solid fa-folder-open"></i> Abrir Raiz</button>`;
+}
+
+// ── Preview image directly in lightbox (no manual download needed) ────────────
+function fbPreview(path, name, itemEl) {
+    if (!currentDeviceId) return;
+    if (fbPreviewPending[path]) return; // already loading
+
+    // Visual feedback: loading spinner on the item
+    fbPreviewPending[path] = { name, itemEl };
+    itemEl.classList.add('fb-item-loading');
+    const previewBtn = itemEl.querySelector('.fb-preview-btn');
+    if (previewBtn) previewBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
+    logToConsole(`🔍 Carregando preview: ${name}`, 'system');
+    sendCommand('DOWNLOAD_FILE', { path });
+}
+
+// Called when server sends FILE_READY — routes to lightbox or download toast
+function fbHandleFileReady(name, url, originalPath) {
+    const pending = fbPreviewPending[originalPath];
+    const ext     = (name.split('.').pop() || '').toLowerCase();
+    const isImg   = fbIsImage(ext);
+    const isVideo = ['mp4','mkv','avi','mov','3gp','webm'].includes(ext);
+
+    // Restore item state if it was a preview request
+    if (pending) {
+        pending.itemEl.classList.remove('fb-item-loading');
+        const btn = pending.itemEl.querySelector('.fb-preview-btn');
+        if (btn) btn.innerHTML = '<i class="fa-solid fa-eye"></i>';
+        delete fbPreviewPending[originalPath];
+    }
+
+    if (isImg) {
+        // Open image directly in the photo lightbox modal
+        pmPhotos = [{ url, caption: name }];
+        openPhotoModal(0);
+        return;
+    }
+
+    if (isVideo) {
+        // Open video in a simple video player overlay
+        fbOpenVideoPlayer(url, name);
+        return;
+    }
+
+    // Non-previewable file: show download toast
+    fbShowDownloadToast(name, url, originalPath);
+}
+
+function fbOpenVideoPlayer(url, name) {
+    const overlay = document.createElement('div');
+    overlay.className = 'fb-video-overlay';
+    overlay.innerHTML = `
+        <div class="fb-video-box">
+            <div class="fb-video-header">
+                <span>${escapeHtml(name)}</span>
+                <div style="display:flex;gap:8px;">
+                    <a href="${url}" download="${escapeHtml(name)}" class="fb-video-action" title="Baixar">
+                        <i class="fa-solid fa-download"></i>
+                    </a>
+                    <button class="fb-video-action" onclick="this.closest('.fb-video-overlay').remove()" title="Fechar">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+            </div>
+            <video class="fb-video-player" controls autoplay>
+                <source src="${url}">
+                Seu navegador não suporta o player de vídeo.
+            </video>
+        </div>
+    `;
+    overlay.addEventListener('click', e => { if (e.target === overlay) overlay.remove(); });
+    document.body.appendChild(overlay);
+    setTimeout(() => overlay.style.opacity = '1', 10);
 }
 
 function fbDownload(path, name) {
@@ -1730,7 +1834,7 @@ function fbShowDownloadToast(name, url, originalPath) {
         <i class="fa-solid fa-file-arrow-down" style="color:var(--neon-blue)"></i>
         <div style="flex:1;min-width:0;">
             <div style="font-weight:600;font-size:.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(name)}</div>
-            <div style="font-size:.7rem;color:var(--text-secondary)">Arquivo disponível para download</div>
+            <div style="font-size:.7rem;color:var(--text-secondary)">Pronto para baixar</div>
         </div>
         <a href="${url}" download="${escapeHtml(name)}" class="fb-act-btn dl" style="text-decoration:none;padding:6px 10px;border:1px solid var(--neon-blue);border-radius:8px;font-size:.78rem;font-weight:600;color:var(--neon-blue);">
             <i class="fa-solid fa-download"></i> Baixar
