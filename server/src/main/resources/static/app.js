@@ -123,11 +123,220 @@ function copyLinkCode() {
 
 // ─── Initialize Dashboard ─────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', () => {
-    // Show username in header
     const nameEl = document.getElementById('user-name-display');
     if (nameEl) nameEl.textContent = getUsername();
     connectWebSocket();
+    initMobileTabs();
+    window.addEventListener('resize', () => {
+        if (window.innerWidth > 767) {
+            document.querySelectorAll('#dashboard-grid [data-tab]').forEach(c => {
+                c.classList.remove('tab-visible');
+                c.style.display = '';
+            });
+        } else {
+            switchTab(activeTab);
+        }
+    });
 });
+
+// ─── Mobile Tab Navigation ───────────────────────────────────────────────────
+
+let activeTab = 'map';
+
+function switchTab(tab) {
+    if (window.innerWidth > 767) return; // desktop: ignore tabs
+    activeTab = tab;
+
+    // Update bottom nav buttons
+    document.querySelectorAll('.mbn-tab').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+
+    // Show/hide cards
+    document.querySelectorAll('#dashboard-grid [data-tab]').forEach(card => {
+        const match = card.dataset.tab === tab;
+        card.classList.toggle('tab-visible', match);
+    });
+
+    // When switching to map tab, trigger resize so Google Maps re-renders
+    if (tab === 'map' && map) {
+        setTimeout(() => {
+            google.maps.event.trigger(map, 'resize');
+            if (deviceMarker) map.panTo(deviceMarker.getPosition());
+        }, 100);
+    }
+
+    // Close sidebar if open
+    closeSidebar();
+}
+
+// Initialize tabs on mobile after DOM ready
+function initMobileTabs() {
+    if (window.innerWidth <= 767) {
+        switchTab('map');
+    } else {
+        // Desktop: show all cards
+        document.querySelectorAll('#dashboard-grid [data-tab]').forEach(c => c.style.display = '');
+    }
+}
+
+// ─── Trail History Panel ─────────────────────────────────────────────────────
+
+let trailHistoryPoints = []; // cached points from last fetch
+let trailPanelOpen = false;
+
+function toggleTrailPanel() {
+    trailPanelOpen ? closeTrailPanel() : openTrailPanel();
+}
+
+function openTrailPanel() {
+    trailPanelOpen = true;
+    document.getElementById('trail-panel').classList.add('open');
+    renderTrailPanel();
+}
+
+function closeTrailPanel() {
+    trailPanelOpen = false;
+    document.getElementById('trail-panel').classList.remove('open');
+}
+
+function renderTrailPanel() {
+    const list    = document.getElementById('trail-panel-list');
+    const summary = document.getElementById('trail-panel-summary');
+
+    if (trailHistoryPoints.length === 0) {
+        list.innerHTML = '<div class="trail-panel-empty"><i class="fa-solid fa-route fa-2x"></i><p>Nenhum ponto ainda.</p></div>';
+        summary.innerHTML = '';
+        return;
+    }
+
+    // Calculate stats
+    const totalKm = calcTotalDistance(trailHistoryPoints);
+    const oldest  = trailHistoryPoints[0];
+    const newest  = trailHistoryPoints[trailHistoryPoints.length - 1];
+    const elapsed = newest.timestamp - oldest.timestamp;
+    const hours   = Math.floor(elapsed / 3600000);
+    const mins    = Math.floor((elapsed % 3600000) / 60000);
+    const avgAcc  = Math.round(trailHistoryPoints.reduce((s,p) => s + p.accuracy, 0) / trailHistoryPoints.length);
+
+    summary.innerHTML = `
+        <div class="trail-sum-item">
+            <span class="trail-sum-val">${totalKm.toFixed(2)}</span>
+            <span class="trail-sum-label">km percorridos</span>
+        </div>
+        <div class="trail-sum-item">
+            <span class="trail-sum-val">${trailHistoryPoints.length}</span>
+            <span class="trail-sum-label">pontos GPS</span>
+        </div>
+        <div class="trail-sum-item">
+            <span class="trail-sum-val">${hours > 0 ? hours+'h ' : ''}${mins}min</span>
+            <span class="trail-sum-label">duração</span>
+        </div>
+        <div class="trail-sum-item">
+            <span class="trail-sum-val">±${avgAcc}m</span>
+            <span class="trail-sum-label">precisão média</span>
+        </div>
+    `;
+
+    // Render list (newest first)
+    const totalDays = new Set(trailHistoryPoints.map(p => {
+        const d = new Date(p.timestamp); return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    })).size;
+
+    list.innerHTML = '';
+    const points = [...trailHistoryPoints].reverse();
+    let lastDay  = null;
+
+    points.forEach((p, idx) => {
+        const d        = new Date(p.timestamp);
+        const dayKey   = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+        const ratio    = 1 - (idx / Math.max(points.length - 1, 1)); // newest=1, oldest=0
+        const dotColor = interpolateTrailColor(ratio);
+
+        // Day divider
+        if (dayKey !== lastDay) {
+            lastDay = dayKey;
+            const divider = document.createElement('div');
+            divider.style.cssText = 'padding:8px 16px 4px;font-size:.7rem;font-weight:700;color:var(--text-secondary);text-transform:uppercase;letter-spacing:.8px;background:rgba(0,0,0,.3);';
+            divider.innerHTML = `<i class="fa-solid fa-calendar-day" style="color:var(--neon-blue);margin-right:6px;"></i>${d.toLocaleDateString('pt-BR', {weekday:'long', day:'2-digit', month:'long'})}`;
+            list.appendChild(divider);
+        }
+
+        const timeStr  = d.toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+        const accColor = p.accuracy <= 10 ? 'var(--neon-green)' : p.accuracy <= 30 ? 'var(--neon-orange)' : 'var(--danger-red)';
+        const accLabel = p.accuracy <= 10 ? 'Alta precisão (GPS)' : p.accuracy <= 50 ? 'Média precisão' : 'Baixa precisão';
+
+        const item = document.createElement('div');
+        item.className = 'trail-point-item';
+        item.innerHTML = `
+            <div class="trail-point-dot" style="background:${dotColor};box-shadow:0 0 5px ${dotColor}40;"></div>
+            <div class="trail-point-info">
+                <div class="trail-point-time">${timeStr}</div>
+                <div class="trail-point-coords">${p.lat.toFixed(6)}, ${p.lng.toFixed(6)}</div>
+                <div class="trail-point-acc">
+                    <span style="color:${accColor}">●</span>
+                    <span style="color:${accColor}">${accLabel}</span>
+                    <span style="margin-left:4px;">±${p.accuracy.toFixed(0)}m</span>
+                </div>
+            </div>
+            <button class="trail-center-btn" onclick="panMapToPoint(${p.lat},${p.lng})" title="Ver no mapa">
+                <i class="fa-solid fa-crosshairs"></i>
+            </button>
+        `;
+        list.appendChild(item);
+    });
+
+    // Update stats in bar
+    document.getElementById('trail-km').textContent = totalKm.toFixed(1);
+    document.getElementById('trail-pts').textContent = trailHistoryPoints.length;
+}
+
+function panMapToPoint(lat, lng) {
+    if (!map) return;
+    map.panTo({ lat, lng });
+    map.setZoom(16);
+    closeTrailPanel();
+    if (window.innerWidth <= 767) switchTab('map');
+}
+
+function calcTotalDistance(points) {
+    let total = 0;
+    for (let i = 1; i < points.length; i++) {
+        total += haversineKm(points[i-1].lat, points[i-1].lng, points[i].lat, points[i].lng);
+    }
+    return total;
+}
+
+function haversineKm(lat1, lng1, lat2, lng2) {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLng/2)**2;
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// ─── GPS Bar Update ───────────────────────────────────────────────────────────
+
+let lastGpsTimestamp = 0;
+
+function updateGpsBar(lat, lng, accuracy, timestamp) {
+    const bar  = document.getElementById('map-gps-bar');
+    const dot  = document.getElementById('gps-dot');
+    const txt  = document.getElementById('gps-bar-text');
+    if (!bar) return;
+
+    lastGpsTimestamp = timestamp || Date.now();
+    const time = new Date(lastGpsTimestamp).toLocaleTimeString('pt-BR', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+    const accColor  = accuracy <= 10 ? 'var(--neon-green)' : accuracy <= 30 ? 'var(--neon-orange)' : 'var(--danger-red)';
+    const accLabel  = accuracy <= 10 ? 'GPS Alta' : accuracy <= 30 ? 'GPS Média' : 'Rede/WiFi';
+
+    dot.className = 'gps-dot active';
+    txt.innerHTML = `<span style="color:${accColor};font-weight:700;">${accLabel}</span> ±${accuracy.toFixed(0)}m &nbsp;·&nbsp; ${time}`;
+
+    // Stale check: mark orange after 60s without update
+    clearTimeout(updateGpsBar._timer);
+    updateGpsBar._timer = setTimeout(() => { if (dot) dot.className = 'gps-dot stale'; }, 60000);
+}
 
 // ─── Mobile Sidebar Drawer ────────────────────────────────────────────────────
 function toggleSidebar() {
@@ -665,6 +874,15 @@ function fetchTrailHistory(deviceId) {
     fetch(`/api/device/${deviceId}/telemetry-history?days=${days}`, { headers: authHeaders() })
         .then(res => res.json())
         .then(points => {
+            trailHistoryPoints = points; // cache for trail history panel
+
+            // Update trail stats bar (mobile)
+            const km = points.length >= 2 ? calcTotalDistance(points).toFixed(1) : '--';
+            const kEl = document.getElementById('trail-km');
+            const pEl = document.getElementById('trail-pts');
+            if (kEl) kEl.textContent = km;
+            if (pEl) pEl.textContent = points.length;
+
             clearTrail();
 
             if (!map) return;
@@ -814,17 +1032,27 @@ function handleTelemetry(data) {
         const lat      = parseFloat(data.lat);
         const lng      = parseFloat(data.lng);
         const accuracy = parseFloat(data.accuracy) || 10;
-        const provider = data.provider || 'unknown';
+        const provider = data.provider || 'gps';
 
-        // Accuracy indicator with color coding
+        // Accuracy indicator top bar
         const accEl = document.getElementById('location-accuracy');
         if (accEl) {
             const providerLabel = provider === 'gps' ? '📡 GPS' : provider === 'fused' ? '🔀 Fusão' : '📶 Rede';
             const color = accuracy <= 10 ? '#39ff14' : accuracy <= 50 ? '#ff9900' : '#ff3838';
-            accEl.innerHTML = `<span style="color:${color};font-weight:600;">${providerLabel} ${accuracy.toFixed(0)}m</span>`;
+            accEl.innerHTML = `<span style="color:${color};font-weight:600;">${providerLabel} ±${accuracy.toFixed(0)}m</span>`;
         }
 
-        logToConsole(`📍 ${provider.toUpperCase()} ${lat.toFixed(6)}, ${lng.toFixed(6)} — ±${accuracy.toFixed(0)}m`, 'system');
+        // Mobile GPS bar
+        updateGpsBar(lat, lng, accuracy, Date.now());
+
+        // Add to trail history cache (live point)
+        trailHistoryPoints.push({ lat, lng, accuracy, timestamp: Date.now() });
+        const kEl = document.getElementById('trail-km');
+        const pEl = document.getElementById('trail-pts');
+        if (pEl) pEl.textContent = trailHistoryPoints.length;
+        if (kEl && trailHistoryPoints.length >= 2) kEl.textContent = calcTotalDistance(trailHistoryPoints).toFixed(1);
+
+        logToConsole(`📍 ${provider.toUpperCase()} ±${accuracy.toFixed(0)}m — ${lat.toFixed(5)}, ${lng.toFixed(5)}`, 'system');
 
         const pos = { lat, lng };
 

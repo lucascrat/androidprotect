@@ -1588,6 +1588,358 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════
+   MOBILE BOTTOM NAVIGATION
+   ═══════════════════════════════════════════════════ */
+
+.mobile-bottom-nav {
+    display: none; /* shown only on mobile via media query */
+}
+
+@media (max-width: 767px) {
+    /* ── Bottom nav ── */
+    .mobile-bottom-nav {
+        display: flex;
+        position: fixed;
+        bottom: 0; left: 0; right: 0;
+        height: calc(56px + env(safe-area-inset-bottom));
+        padding-bottom: env(safe-area-inset-bottom);
+        background: rgba(10, 11, 16, 0.97);
+        border-top: 1px solid var(--border-color);
+        backdrop-filter: blur(16px);
+        z-index: 900;
+        justify-content: space-around;
+        align-items: stretch;
+    }
+
+    .mbn-tab {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        background: none;
+        border: none;
+        color: var(--text-secondary);
+        font-size: 0.62rem;
+        font-weight: 600;
+        letter-spacing: 0.3px;
+        font-family: 'Inter', sans-serif;
+        cursor: pointer;
+        padding: 6px 4px;
+        border-top: 2px solid transparent;
+        transition: color 0.18s, border-color 0.18s;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    .mbn-tab i { font-size: 1.15rem; transition: transform 0.18s; }
+    .mbn-tab.active {
+        color: var(--neon-blue);
+        border-top-color: var(--neon-blue);
+    }
+    .mbn-tab.active i { transform: scale(1.1); }
+
+    /* ── Tab visibility ── */
+    /* Default: show all cards */
+    #dashboard-grid [data-tab] { display: none; }
+
+    /* Active tab cards are shown */
+    #dashboard-grid [data-tab="map"].tab-visible,
+    #dashboard-grid [data-tab="control"].tab-visible,
+    #dashboard-grid [data-tab="cameras"].tab-visible,
+    #dashboard-grid [data-tab="media"].tab-visible,
+    #dashboard-grid [data-tab="more"].tab-visible {
+        display: flex;
+    }
+
+    /* ── Map tab fullscreen ── */
+    .tab-visible.map-card {
+        grid-column: 1 !important;
+        grid-row: auto !important;
+        margin: 0;
+        border-radius: 0;
+        border-left: none;
+        border-right: none;
+        border-top: none;
+        min-height: calc(100vh - 60px - 56px);
+        padding: 10px 12px 0;
+    }
+
+    .tab-visible.map-card .map-container {
+        border-radius: 14px;
+        overflow: hidden;
+    }
+
+    #map {
+        min-height: calc(100vh - 220px) !important;
+    }
+
+    /* ── Floating GPS info bar ── */
+    .map-gps-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: rgba(10,11,16,0.85);
+        border: 1px solid var(--border-color);
+        border-radius: 10px;
+        padding: 7px 12px;
+        margin: 8px 0 4px;
+        font-size: 0.8rem;
+        color: var(--text-primary);
+        backdrop-filter: blur(8px);
+    }
+
+    .gps-dot {
+        width: 8px; height: 8px;
+        border-radius: 50%;
+        background: var(--text-secondary);
+        flex-shrink: 0;
+    }
+    .gps-dot.active {
+        background: var(--neon-green);
+        box-shadow: 0 0 6px var(--neon-green);
+        animation: gpsPulse 2s infinite;
+    }
+    .gps-dot.stale { background: var(--neon-orange); }
+
+    @keyframes gpsPulse {
+        0%,100% { opacity: 1; }
+        50%      { opacity: 0.5; }
+    }
+
+    #gps-bar-text { flex: 1; font-size: 0.78rem; }
+
+    .gps-bar-btn {
+        background: rgba(0,210,255,0.1);
+        border: 1px solid rgba(0,210,255,0.2);
+        color: var(--neon-blue);
+        border-radius: 7px;
+        padding: 4px 8px;
+        cursor: pointer;
+        font-size: 0.85rem;
+    }
+
+    /* ── Trail stats bar ── */
+    .map-trail-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 0 8px;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+    }
+    .map-trail-bar::-webkit-scrollbar { display: none; }
+
+    .trail-stats {
+        font-size: 0.75rem;
+        color: var(--text-secondary);
+        white-space: nowrap;
+        flex-shrink: 0;
+    }
+    .trail-stats i { color: var(--neon-blue); }
+
+    .trail-day-pills {
+        display: flex;
+        gap: 4px;
+        flex-shrink: 0;
+    }
+
+    .day-pill {
+        background: rgba(255,255,255,0.05);
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+        border-radius: 20px;
+        padding: 4px 10px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        cursor: pointer;
+        font-family: 'Inter', sans-serif;
+        white-space: nowrap;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .day-pill.active {
+        background: rgba(0,210,255,0.12);
+        border-color: var(--neon-blue);
+        color: var(--neon-blue);
+    }
+
+    .trail-history-btn {
+        background: rgba(0,210,255,0.08);
+        border: 1px solid rgba(0,210,255,0.2);
+        color: var(--neon-blue);
+        border-radius: 20px;
+        padding: 4px 12px;
+        font-size: 0.72rem;
+        font-weight: 600;
+        cursor: pointer;
+        white-space: nowrap;
+        font-family: 'Inter', sans-serif;
+        flex-shrink: 0;
+        -webkit-tap-highlight-color: transparent;
+    }
+
+    /* ── Trail history slide-up panel ── */
+    .trail-panel {
+        position: fixed;
+        left: 0; right: 0;
+        bottom: 56px; /* above bottom nav */
+        height: 70vh;
+        background: rgba(10, 11, 16, 0.98);
+        border-top: 1px solid var(--border-color);
+        border-radius: 20px 20px 0 0;
+        z-index: 800;
+        display: flex;
+        flex-direction: column;
+        transform: translateY(100%);
+        transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+        backdrop-filter: blur(16px);
+        box-shadow: 0 -8px 40px rgba(0,0,0,0.5);
+    }
+
+    .trail-panel.open { transform: translateY(0); }
+
+    .trail-panel-handle {
+        padding: 12px 0 4px;
+        display: flex;
+        justify-content: center;
+        cursor: pointer;
+        flex-shrink: 0;
+    }
+    .trail-panel-drag {
+        width: 40px; height: 4px;
+        background: rgba(255,255,255,0.2);
+        border-radius: 4px;
+    }
+
+    .trail-panel-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 4px 16px 12px;
+        flex-shrink: 0;
+        border-bottom: 1px solid var(--border-color);
+    }
+    .trail-panel-header h4 {
+        font-size: 0.95rem;
+        font-weight: 600;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+    }
+    .trail-panel-close {
+        background: none; border: none;
+        color: var(--text-secondary);
+        font-size: 1.1rem;
+        cursor: pointer;
+        padding: 4px;
+    }
+
+    .trail-panel-summary {
+        display: flex;
+        gap: 16px;
+        padding: 10px 16px;
+        border-bottom: 1px solid var(--border-color);
+        flex-shrink: 0;
+    }
+    .trail-sum-item {
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+    }
+    .trail-sum-val {
+        font-size: 1.2rem;
+        font-weight: 700;
+        color: var(--neon-blue);
+        font-family: 'JetBrains Mono', monospace;
+    }
+    .trail-sum-label {
+        font-size: 0.65rem;
+        color: var(--text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+    }
+
+    .trail-panel-list {
+        flex: 1;
+        overflow-y: auto;
+        padding: 8px 0;
+    }
+
+    .trail-panel-empty {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        height: 100%;
+        gap: 10px;
+        color: var(--text-secondary);
+        font-size: 0.85rem;
+    }
+
+    .trail-point-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 12px;
+        padding: 10px 16px;
+        border-bottom: 1px solid rgba(255,255,255,0.04);
+        cursor: pointer;
+        transition: background 0.15s;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .trail-point-item:active { background: rgba(255,255,255,0.04); }
+
+    .trail-point-dot {
+        width: 10px; height: 10px;
+        border-radius: 50%;
+        margin-top: 4px;
+        flex-shrink: 0;
+    }
+
+    .trail-point-info { flex: 1; }
+    .trail-point-time {
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: var(--text-primary);
+    }
+    .trail-point-date {
+        font-size: 0.7rem;
+        color: var(--text-secondary);
+    }
+    .trail-point-coords {
+        font-size: 0.68rem;
+        color: var(--text-secondary);
+        font-family: 'JetBrains Mono', monospace;
+        margin-top: 2px;
+    }
+    .trail-point-acc {
+        font-size: 0.7rem;
+        color: var(--text-secondary);
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin-top: 3px;
+    }
+
+    .trail-center-btn {
+        background: none;
+        border: 1px solid var(--border-color);
+        color: var(--text-secondary);
+        border-radius: 6px;
+        padding: 4px 8px;
+        cursor: pointer;
+        font-size: 0.75rem;
+        flex-shrink: 0;
+    }
+
+    /* hide GPS bar and trail bar on desktop */
+}
+
+@media (min-width: 768px) {
+    .map-gps-bar, .map-trail-bar, .trail-panel { display: none !important; }
+}
+
+/* ═══════════════════════════════════════════════════
    HAMBURGER & SIDEBAR DRAWER (all sizes — hidden on desktop)
    ═══════════════════════════════════════════════════ */
 

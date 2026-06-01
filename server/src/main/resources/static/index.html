@@ -17,7 +17,7 @@
         document.head.appendChild(s);
       });
     </script>
-    <link rel="stylesheet" href="style.css?v=12">
+    <link rel="stylesheet" href="style.css?v=13">
     <script>
       // Auth guard — redirect to login if no valid session
       (function(){
@@ -105,10 +105,34 @@
                 </div>
             </header>
 
+            <!-- Mobile bottom navigation -->
+            <nav class="mobile-bottom-nav" id="mobile-bottom-nav">
+                <button class="mbn-tab active" data-tab="map" onclick="switchTab('map')">
+                    <i class="fa-solid fa-map-location-dot"></i>
+                    <span>Mapa</span>
+                </button>
+                <button class="mbn-tab" data-tab="control" onclick="switchTab('control')">
+                    <i class="fa-solid fa-terminal"></i>
+                    <span>Controle</span>
+                </button>
+                <button class="mbn-tab" data-tab="cameras" onclick="switchTab('cameras')">
+                    <i class="fa-solid fa-camera"></i>
+                    <span>Câmeras</span>
+                </button>
+                <button class="mbn-tab" data-tab="media" onclick="switchTab('media')">
+                    <i class="fa-solid fa-photo-film"></i>
+                    <span>Mídia</span>
+                </button>
+                <button class="mbn-tab" data-tab="more" onclick="switchTab('more')">
+                    <i class="fa-solid fa-ellipsis"></i>
+                    <span>Mais</span>
+                </button>
+            </nav>
+
             <!-- Dashboard Grid Layout -->
-            <div class="dashboard-grid">
+            <div class="dashboard-grid" id="dashboard-grid">
                 <!-- Row 1: Left Map, Right Commands & Screen -->
-                <div class="grid-card map-card">
+                <div class="grid-card map-card" data-tab="map">
                     <div class="flex-header">
                         <div class="flex-header-row1">
                             <h3 style="font-size:1rem;font-weight:600;display:flex;align-items:center;gap:8px;">
@@ -135,11 +159,57 @@
                     </div>
                     <div class="card-body map-container">
                         <div id="map"></div>
+
+                        <!-- Floating GPS info bar (mobile) -->
+                        <div class="map-gps-bar" id="map-gps-bar">
+                            <span class="gps-dot" id="gps-dot"></span>
+                            <span id="gps-bar-text">Aguardando GPS...</span>
+                            <button class="gps-bar-btn" onclick="mapFollowMode=true; if(deviceMarker) map.panTo(deviceMarker.getPosition())" title="Centralizar">
+                                <i class="fa-solid fa-crosshairs"></i>
+                            </button>
+                        </div>
+
+                        <!-- Trail stats bar (mobile) -->
+                        <div class="map-trail-bar" id="map-trail-bar">
+                            <div class="trail-stats" id="trail-stats-txt">
+                                <i class="fa-solid fa-route"></i> <span id="trail-km">--</span> km
+                                &nbsp;·&nbsp;
+                                <i class="fa-solid fa-location-dot"></i> <span id="trail-pts">--</span> pts
+                            </div>
+                            <div class="trail-day-pills" id="trail-day-pills">
+                                <button class="day-pill" onclick="document.getElementById('trail-days-select').value=1; refreshTrail()">Hoje</button>
+                                <button class="day-pill" onclick="document.getElementById('trail-days-select').value=7; refreshTrail()">7d</button>
+                                <button class="day-pill active" onclick="document.getElementById('trail-days-select').value=30; refreshTrail()">30d</button>
+                            </div>
+                            <button class="trail-history-btn" onclick="toggleTrailPanel()" id="trail-panel-toggle">
+                                <i class="fa-solid fa-list-ul"></i> Histórico
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Slide-up trail history panel -->
+                    <div class="trail-panel" id="trail-panel">
+                        <div class="trail-panel-handle" onclick="toggleTrailPanel()">
+                            <div class="trail-panel-drag"></div>
+                        </div>
+                        <div class="trail-panel-header">
+                            <h4><i class="fa-solid fa-route neon-text-blue"></i> Histórico de Localização</h4>
+                            <button class="trail-panel-close" onclick="closeTrailPanel()"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                        <div class="trail-panel-summary" id="trail-panel-summary">
+                            <!-- filled by JS -->
+                        </div>
+                        <div class="trail-panel-list" id="trail-panel-list">
+                            <div class="trail-panel-empty">
+                                <i class="fa-solid fa-route fa-2x"></i>
+                                <p>Nenhum ponto de localização ainda.</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
 
                 <!-- Remote Commands -->
-                <div class="grid-card commands-card">
+                <div class="grid-card commands-card" data-tab="control">
                     <div class="card-header">
                         <h3><i class="fa-solid fa-terminal neon-text-pink"></i> Comandos Remotos</h3>
                     </div>
@@ -191,7 +261,7 @@
                 </div>
 
                 <!-- Live Camera Stream -->
-                <div class="grid-card camera-card">
+                <div class="grid-card camera-card" data-tab="cameras">
                     <div class="card-header">
                         <h3><i class="fa-solid fa-camera neon-text-blue"></i> Câmera Ao Vivo</h3>
                         <div style="display:flex;gap:8px;align-items:center;">
@@ -219,7 +289,7 @@
                 </div>
 
                 <!-- Live Screen Stream -->
-                <div class="grid-card screen-card">
+                <div class="grid-card screen-card" data-tab="cameras">
                     <div class="card-header">
                         <h3><i class="fa-solid fa-tv neon-text-blue"></i> Tela ao Vivo</h3>
                         <span id="screen-stream-badge" class="badge red-badge" style="display: none;"><span class="pulse-dot"></span> AO VIVO</span>
@@ -242,7 +312,7 @@
                 </div>
 
                 <!-- Captured Photos Gallery -->
-                <div class="grid-card gallery-card">
+                <div class="grid-card gallery-card" data-tab="media">
                     <div class="card-header">
                         <h3><i class="fa-solid fa-images neon-text-blue"></i> Galeria de Câmera</h3>
                     </div>
@@ -252,7 +322,7 @@
                 </div>
 
                 <!-- Ambient Audios Player -->
-                <div class="grid-card audio-card">
+                <div class="grid-card audio-card" data-tab="media">
                     <div class="card-header">
                         <h3><i class="fa-solid fa-volume-high neon-text-pink"></i> Gravações de Áudio</h3>
                     </div>
@@ -269,7 +339,7 @@
                 </div>
 
                 <!-- Security Event Log (Terminal Console) -->
-                <div class="grid-card terminal-card">
+                <div class="grid-card terminal-card" data-tab="more">
                     <div class="card-header">
                         <h3><i class="fa-solid fa-code neon-text-blue"></i> Console de Segurança</h3>
                         <button class="btn btn-sm btn-clear-log" onclick="clearConsole()"><i class="fa-solid fa-trash-can"></i> Limpar</button>
@@ -280,7 +350,7 @@
                 </div>
 
                 <!-- Messages Panel -->
-                <div class="grid-card messages-card">
+                <div class="grid-card messages-card" data-tab="more">
                     <div class="card-header">
                         <h3><i class="fa-solid fa-comments neon-text-blue"></i> Mensagens</h3>
                         <span class="card-subtitle" id="messages-device-label">Nenhum dispositivo</span>
@@ -299,7 +369,7 @@
                 </div>
 
                 <!-- Remote File Browser -->
-                <div class="grid-card filebrowser-card">
+                <div class="grid-card filebrowser-card" data-tab="more">
                     <div class="card-header">
                         <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
                             <h3><i class="fa-solid fa-folder-open neon-text-blue"></i> Explorador de Arquivos</h3>
@@ -330,7 +400,7 @@
                 </div>
 
                 <!-- AI Assistant Card (ProtegeAI) -->
-                <div class="grid-card ai-card">
+                <div class="grid-card ai-card" data-tab="more">
                     <div class="card-header">
                         <h3><i class="fa-solid fa-brain neon-text-pink"></i> ProtegeAI - Assistente de Segurança</h3>
                         <span class="card-subtitle">Gemini AI</span>
@@ -392,6 +462,6 @@
         <div class="pm-thumbs" id="pm-thumbs"></div>
     </div>
     
-    <script src="app.js?v=13"></script>
+    <script src="app.js?v=14"></script>
 </body>
 </html>
