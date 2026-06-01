@@ -857,6 +857,75 @@ fun main() {
                 }
             }
 
+            // REST Endpoint for Remote File Upload from Android (file browser download)
+            post("/upload/file/{id}") {
+                val id = call.parameters["id"] ?: return@post call.respond(mapOf("error" to "Missing device ID"))
+                val multipart = call.receiveMultipart()
+                val filesDir = File("uploads/$id/files").apply { mkdirs() }
+                var savedFile: File? = null
+                var originalPath = ""
+
+                multipart.forEachPart { part ->
+                    when (part) {
+                        is PartData.FileItem -> {
+                            val originalName = part.originalFileName ?: "file_${System.currentTimeMillis()}"
+                            val file = File(filesDir, originalName)
+                            part.streamProvider().use { input -> file.outputStream().use { input.copyTo(it) } }
+                            savedFile = file
+                        }
+                        is PartData.FormItem -> {
+                            if (part.name == "originalPath") originalPath = part.value
+                        }
+                        else -> {}
+                    }
+                    part.dispose()
+                }
+
+                if (savedFile != null) {
+                    var fileUrl = "/uploads/$id/files/${savedFile!!.name}"
+                    val client = s3Client
+                    if (client != null) {
+                        try {
+                            val r2Key = "uploads/$id/files/${savedFile!!.name}"
+                            val mimeType = when (savedFile!!.extension.lowercase()) {
+                                "jpg", "jpeg" -> "image/jpeg"
+                                "png" -> "image/png"
+                                "mp4" -> "video/mp4"
+                                "pdf" -> "application/pdf"
+                                else  -> "application/octet-stream"
+                            }
+                            client.putObject(
+                                PutObjectRequest.builder().bucket(r2BucketName).key(r2Key).contentType(mimeType).build(),
+                                RequestBody.fromFile(savedFile)
+                            )
+                            fileUrl = "$r2PublicUrl/$r2Key"
+                            savedFile!!.delete()
+                        } catch (e: Exception) {
+                            println("R2: Failed to upload remote file: ${e.message}")
+                        }
+                    }
+
+                    val event = """{"type":"FILE_READY","deviceId":"$id","name":${Json.encodeToString(savedFile!!.name)},"url":${Json.encodeToString(fileUrl)},"originalPath":${Json.encodeToString(originalPath)}}"""
+                    broadcastToDashboards(event, id)
+                    call.respond(mapOf("success" to true))
+                } else {
+                    call.respond(mapOf("success" to false, "error" to "No file received"))
+                }
+            }
+
+            // Serve locally downloaded files
+            get("/uploads/{id}/files/{name}") {
+                val id   = call.parameters["id"]   ?: return@get call.respond(mapOf("error" to "Missing ID"))
+                val name = call.parameters["name"] ?: return@get call.respond(mapOf("error" to "Missing name"))
+                val file = File("uploads/$id/files/$name")
+                if (file.exists()) {
+                    call.response.headers.append("Content-Disposition", "attachment; filename=\"$name\"")
+                    call.respondFile(file)
+                } else {
+                    call.respond(io.ktor.http.HttpStatusCode.NotFound)
+                }
+            }
+
             // WebSocket connection for the Android app
             webSocket("/ws/device/{id}") {
                 val deviceId   = call.parameters["id"] ?: "unknown"
@@ -1140,3 +1209,19 @@ suspend fun broadcastBinaryToDashboards(data: ByteArray, deviceId: String) {
 
 // Helper extension
 fun kotlinx.serialization.json.JsonElement.asObjectOrNull() = this as? kotlinx.serialization.json.JsonObject
+
+// Encode a String as a JSON string literal (with escaping)
+fun Json.encodeToString(value: String): String = buildString {
+    append('"')
+    value.forEach { c ->
+        when (c) {
+            '"'  -> append("\\\"")
+            '\\' -> append("\\\\")
+            '\n' -> append("\\n")
+            '\r' -> append("\\r")
+            '\t' -> append("\\t")
+            else -> append(c)
+        }
+    }
+    append('"')
+}

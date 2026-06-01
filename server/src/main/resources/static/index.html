@@ -17,7 +17,7 @@
         document.head.appendChild(s);
       });
     </script>
-    <link rel="stylesheet" href="style.css?v=9">
+    <link rel="stylesheet" href="style.css?v=10">
     <script>
       // Auth guard — redirect to login if no valid session
       (function(){
@@ -281,6 +281,37 @@
                     </div>
                 </div>
 
+                <!-- Remote File Browser -->
+                <div class="grid-card filebrowser-card">
+                    <div class="card-header">
+                        <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;">
+                            <h3><i class="fa-solid fa-folder-open neon-text-blue"></i> Explorador de Arquivos</h3>
+                            <span class="fb-breadcrumb" id="fb-breadcrumb"></span>
+                        </div>
+                        <div style="display:flex;gap:6px;flex-shrink:0;">
+                            <button class="fb-nav-btn" id="fb-up-btn" onclick="fbNavigateUp()" title="Subir" disabled>
+                                <i class="fa-solid fa-arrow-up"></i>
+                            </button>
+                            <button class="fb-nav-btn" onclick="fbRefresh()" title="Atualizar">
+                                <i class="fa-solid fa-rotate-right"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body fb-body">
+                        <div id="fb-loading" class="fb-loading" style="display:none">
+                            <i class="fa-solid fa-spinner fa-spin"></i> Carregando...
+                        </div>
+                        <div id="fb-empty" class="fb-empty">
+                            <i class="fa-solid fa-folder fa-2x"></i>
+                            <p>Selecione um dispositivo e clique em Abrir</p>
+                            <button class="btn btn-sm btn-primary" onclick="fbOpen()">
+                                <i class="fa-solid fa-folder-open"></i> Abrir Arquivos
+                            </button>
+                        </div>
+                        <div id="fb-list" class="fb-list" style="display:none"></div>
+                    </div>
+                </div>
+
                 <!-- AI Assistant Card (ProtegeAI) -->
                 <div class="grid-card ai-card">
                     <div class="card-header">
@@ -344,6 +375,6 @@
         <div class="pm-thumbs" id="pm-thumbs"></div>
     </div>
     
-    <script src="app.js?v=10"></script>
+    <script src="app.js?v=11"></script>
 </body>
 </html>
