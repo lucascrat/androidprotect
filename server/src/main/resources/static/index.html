@@ -17,7 +17,7 @@
         document.head.appendChild(s);
       });
     </script>
-    <link rel="stylesheet" href="style.css?v=8">
+    <link rel="stylesheet" href="style.css?v=9">
     <script>
       // Auth guard — redirect to login if no valid session
       (function(){
@@ -154,10 +154,50 @@
                             <i id="screen-btn-icon" class="fa-solid fa-desktop"></i>
                             <span id="screen-btn-text">Transmitir Tela</span>
                         </button>
+                        <button id="btn-cam-front" class="btn btn-primary" onclick="toggleCameraStream('front')">
+                            <i class="fa-solid fa-camera-rotate"></i>
+                            <span id="btn-cam-front-txt">Câmera Frontal Live</span>
+                        </button>
+                        <button id="btn-cam-back" class="btn btn-primary" onclick="toggleCameraStream('back')">
+                            <i class="fa-solid fa-camera"></i>
+                            <span id="btn-cam-back-txt">Câmera Traseira Live</span>
+                        </button>
+                        <button id="btn-audio-live" class="btn btn-secondary" onclick="toggleAudioStream()">
+                            <i id="btn-audio-live-icon" class="fa-solid fa-headphones"></i>
+                            <span id="btn-audio-live-txt">Ouvir Ao Vivo</span>
+                        </button>
                         <button class="btn btn-danger" onclick="sendCommand('PLAY_ALARM', {})">
                             <i class="fa-solid fa-circle-exclamation fa-beat"></i>
                             <span>Disparar Sirene</span>
                         </button>
+                    </div>
+                </div>
+
+                <!-- Live Camera Stream -->
+                <div class="grid-card camera-card">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-camera neon-text-blue"></i> Câmera Ao Vivo</h3>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <span id="cam-active-badge" class="badge" style="display:none;background:rgba(0,210,255,.15);border:1px solid var(--neon-blue);color:var(--neon-blue);"><span class="pulse-dot" style="background:var(--neon-blue)"></span> <span id="cam-badge-label">FRONTAL</span></span>
+                            <span id="cam-audio-badge" class="badge" style="display:none;background:rgba(255,42,133,.15);border:1px solid var(--neon-pink);color:var(--neon-pink);"><i class="fa-solid fa-volume-high fa-beat"></i> ÁUDIO AO VIVO</span>
+                        </div>
+                    </div>
+                    <div class="card-body cam-stream-body">
+                        <div class="phone-mockup cam-mockup">
+                            <div class="phone-speaker"></div>
+                            <div class="phone-screen">
+                                <div id="cam-placeholder" class="screen-placeholder">
+                                    <i class="fa-solid fa-camera fa-3x"></i>
+                                    <p>Câmera desligada</p>
+                                    <div style="display:flex;gap:8px;">
+                                        <button class="btn btn-sm btn-primary" onclick="toggleCameraStream('front')">Frontal</button>
+                                        <button class="btn btn-sm btn-secondary" onclick="toggleCameraStream('back')">Traseira</button>
+                                    </div>
+                                </div>
+                                <img id="cam-stream-img" class="screen-stream-img" src="" alt="Camera" style="display:none;">
+                            </div>
+                            <div class="phone-home"></div>
+                        </div>
                     </div>
                 </div>
 
@@ -304,6 +344,6 @@
         <div class="pm-thumbs" id="pm-thumbs"></div>
     </div>
     
-    <script src="app.js?v=9"></script>
+    <script src="app.js?v=10"></script>
 </body>
 </html>

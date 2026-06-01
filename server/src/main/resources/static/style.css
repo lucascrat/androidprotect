@@ -425,14 +425,19 @@ body {
 
 /* Row Spannings */
 /* ── Explicit grid placement (desktop) ─────────────────────────────────────── */
-.map-card      { grid-column: 1; grid-row: 1 / 3; min-height: 520px; }
-.commands-card { grid-column: 2; grid-row: 1; }
-.screen-card   { grid-column: 2; grid-row: 2; }
-.gallery-card  { grid-column: 1; grid-row: 3; }
-.audio-card    { grid-column: 2; grid-row: 3; }
-.messages-card { grid-column: 1; grid-row: 4; }
-.ai-card       { grid-column: 2; grid-row: 4; }
-.terminal-card { grid-column: 1 / 3; grid-row: 5; }
+.map-card      { grid-column: 1;     grid-row: 1 / 3; min-height: 520px; }
+.commands-card { grid-column: 2;     grid-row: 1; }
+.camera-card   { grid-column: 2;     grid-row: 2; }
+.screen-card   { grid-column: 1;     grid-row: 3; }
+.gallery-card  { grid-column: 2;     grid-row: 3; }
+.audio-card    { grid-column: 1;     grid-row: 4; }
+.messages-card { grid-column: 2;     grid-row: 4; }
+.ai-card       { grid-column: 1;     grid-row: 5; }
+.terminal-card { grid-column: 1 / 3; grid-row: 6; }
+
+.cam-stream-body { display: flex; justify-content: center; align-items: center; }
+.cam-mockup { width: 200px; height: 360px; }
+.cam-mockup .phone-screen { margin: 24px 8px 32px 8px; border-radius: 14px; }
 
 .flex-header {
     display: flex;
@@ -1415,14 +1420,12 @@ body {
         gap: 16px;
     }
 
-    .map-card      { grid-column: 1 / 3; grid-row: auto; min-height: 340px; }
-    .commands-card { grid-column: 1;     grid-row: auto; }
-    .screen-card   { grid-column: 2;     grid-row: auto; }
-    .gallery-card  { grid-column: 1;     grid-row: auto; }
-    .audio-card    { grid-column: 2;     grid-row: auto; }
-    .messages-card { grid-column: 1;     grid-row: auto; }
-    .ai-card       { grid-column: 2;     grid-row: auto; }
-    .terminal-card { grid-column: 1 / 3; grid-row: auto; }
+    .map-card, .commands-card, .camera-card, .screen-card, .gallery-card,
+    .audio-card, .messages-card, .ai-card, .terminal-card {
+        grid-column: auto; grid-row: auto;
+    }
+    .map-card      { grid-column: 1 / 3; min-height: 340px; }
+    .terminal-card { grid-column: 1 / 3; }
 
     /* Map controls wrap */
     .flex-header { flex-wrap: wrap; gap: 8px; }
@@ -1496,7 +1499,7 @@ body {
         gap: 12px;
         padding-bottom: calc(12px + env(safe-area-inset-bottom));
     }
-    .map-card, .commands-card, .screen-card, .gallery-card,
+    .map-card, .commands-card, .camera-card, .screen-card, .gallery-card,
     .audio-card, .messages-card, .ai-card, .terminal-card {
         grid-column: auto;
         grid-row: auto;

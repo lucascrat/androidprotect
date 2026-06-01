@@ -9,9 +9,15 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
+import android.graphics.ImageFormat
+import android.graphics.Rect
+import android.graphics.YuvImage
 import android.hardware.camera2.CameraManager
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
+import android.media.AudioFormat
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import android.location.Location
 import android.media.AudioAttributes
 import android.media.AudioManager
@@ -37,6 +43,11 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
 import com.androidprotect.helpers.AudioHelper
+import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
+import androidx.camera.core.ImageProxy
+import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.core.content.ContextCompat
 import com.androidprotect.helpers.CameraHelper
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationCallback
@@ -112,6 +123,16 @@ class AntiTheftService : LifecycleService() {
     private var imageReader: ImageReader? = null
     private var screenCaptureThread: HandlerThread? = null
     private var screenCaptureHandler: Handler? = null
+
+    // Live Camera Stream state (CameraX ImageAnalysis)
+    private var cameraProvider: ProcessCameraProvider? = null
+    private var cameraStreamExecutor: java.util.concurrent.ExecutorService? = null
+    private var isCameraStreaming = false
+
+    // Live Audio Stream state (AudioRecord → PCM WebSocket)
+    private var audioRecord: AudioRecord? = null
+    private var isAudioStreaming = false
+    private var audioStreamThread: Thread? = null
     private var isScreenStreaming = false
     private var lastFrameTime = 0L
 
@@ -324,6 +345,15 @@ class AntiTheftService : LifecycleService() {
                 "STOP_SCREEN_STREAM" -> stopScreenStreaming()
                 
                 "PLAY_ALARM" -> playLoudAlarm()
+
+                "START_CAMERA_STREAM" -> {
+                    val cam = root["camera"]?.jsonPrimitive?.content ?: "front"
+                    startCameraStream(cam)
+                }
+                "STOP_CAMERA_STREAM" -> stopCameraStream()
+
+                "START_AUDIO_STREAM" -> startAudioStream()
+                "STOP_AUDIO_STREAM"  -> stopAudioStream()
 
                 "SEND_MESSAGE" -> {
                     val message = root["message"]?.jsonPrimitive?.content ?: return
@@ -596,19 +626,16 @@ class AntiTheftService : LifecycleService() {
                         bitmap
                     }
                     
-                    // Compress to highly efficient JPEG
+                    // Compress to JPEG
                     val outStream = ByteArrayOutputStream()
                     cleanBitmap.compress(Bitmap.CompressFormat.JPEG, 45, outStream)
                     val jpegBytes = outStream.toByteArray()
-                    
-                    // Recycle resources
-                    if (cleanBitmap != bitmap) {
-                        cleanBitmap.recycle()
-                    }
+
+                    if (cleanBitmap != bitmap) cleanBitmap.recycle()
                     bitmap.recycle()
-                    
-                    // Send JPEG as Binary WebSocket Frame
-                    webSocket?.send(jpegBytes.toByteString())
+
+                    // 0x01 = screen frame type prefix
+                    sendTypedBinary(0x01.toByte(), jpegBytes)
                     
                 } catch (e: Exception) {
                     Log.e("AntiTheftService", "Error processing screen frame: ${e.message}")
@@ -748,6 +775,126 @@ class AntiTheftService : LifecycleService() {
         } catch (e: Exception) { /* ignore */ }
     }
 
+    // ── Binary frame helper ────────────────────────────────────────────────────
+    private fun sendTypedBinary(type: Byte, payload: ByteArray) {
+        val packet = ByteArray(1 + payload.size)
+        packet[0] = type
+        System.arraycopy(payload, 0, packet, 1, payload.size)
+        webSocket?.send(packet.toByteString())
+    }
+
+    // ── Live Camera Stream (CameraX ImageAnalysis) ─────────────────────────────
+    @SuppressLint("MissingPermission")
+    private fun startCameraStream(camera: String) {
+        if (isCameraStreaming) stopCameraStream()
+        isCameraStreaming = true
+        cameraStreamExecutor = java.util.concurrent.Executors.newSingleThreadExecutor()
+
+        val mainExecutor = ContextCompat.getMainExecutor(this)
+        val future = ProcessCameraProvider.getInstance(this)
+        future.addListener({
+            try {
+                cameraProvider = future.get()
+                val selector = if (camera == "front")
+                    CameraSelector.DEFAULT_FRONT_CAMERA
+                else
+                    CameraSelector.DEFAULT_BACK_CAMERA
+
+                val analysis = ImageAnalysis.Builder()
+                    .setTargetResolution(android.util.Size(360, 640))
+                    .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                    .build()
+
+                var camLastFrame = 0L
+                analysis.setAnalyzer(cameraStreamExecutor!!) { proxy ->
+                    try {
+                        val now = System.currentTimeMillis()
+                        if (isCameraStreaming && now - camLastFrame >= 200) {
+                            camLastFrame = now
+                            val jpeg = imageProxyToJpeg(proxy)
+                            if (jpeg != null) {
+                                val type = if (camera == "front") 0x02.toByte() else 0x03.toByte()
+                                sendTypedBinary(type, jpeg)
+                            }
+                        }
+                    } finally { proxy.close() }
+                }
+
+                cameraProvider?.unbindAll()
+                cameraProvider?.bindToLifecycle(this, selector, analysis)
+                sendConsoleLog("Câmera $camera ao vivo iniciada.")
+            } catch (e: Exception) {
+                Log.e("AntiTheftService", "Camera stream error: ${e.message}")
+                sendConsoleLog("Erro na câmera ao vivo: ${e.message}")
+                isCameraStreaming = false
+            }
+        }, mainExecutor)
+    }
+
+    private fun stopCameraStream() {
+        isCameraStreaming = false
+        cameraProvider?.unbindAll()
+        cameraProvider = null
+        cameraStreamExecutor?.shutdown()
+        cameraStreamExecutor = null
+        sendConsoleLog("Câmera ao vivo encerrada.")
+    }
+
+    private fun imageProxyToJpeg(proxy: ImageProxy): ByteArray? {
+        return try {
+            val yPlane = proxy.planes[0]
+            val uPlane = proxy.planes[1]
+            val vPlane = proxy.planes[2]
+            val yBuf = yPlane.buffer; val uBuf = uPlane.buffer; val vBuf = vPlane.buffer
+            val ySize = yBuf.remaining(); val uSize = uBuf.remaining(); val vSize = vBuf.remaining()
+            val nv21 = ByteArray(ySize + uSize + vSize)
+            yBuf.get(nv21, 0, ySize)
+            vBuf.get(nv21, ySize, vSize)
+            uBuf.get(nv21, ySize + vSize, uSize)
+            val yuvImage = YuvImage(nv21, ImageFormat.NV21, proxy.width, proxy.height, null)
+            val out = ByteArrayOutputStream()
+            yuvImage.compressToJpeg(Rect(0, 0, proxy.width, proxy.height), 50, out)
+            out.toByteArray()
+        } catch (e: Exception) { null }
+    }
+
+    // ── Live Audio Stream (AudioRecord → PCM 16-bit 16kHz) ────────────────────
+    @SuppressLint("MissingPermission")
+    private fun startAudioStream() {
+        if (isAudioStreaming) return
+        val sampleRate  = 16000
+        val channelCfg  = AudioFormat.CHANNEL_IN_MONO
+        val audioFmt    = AudioFormat.ENCODING_PCM_16BIT
+        val bufSize     = maxOf(AudioRecord.getMinBufferSize(sampleRate, channelCfg, audioFmt), 3200)
+
+        audioRecord = AudioRecord(MediaRecorder.AudioSource.MIC, sampleRate, channelCfg, audioFmt, bufSize)
+        if (audioRecord?.state != AudioRecord.STATE_INITIALIZED) {
+            sendConsoleLog("Erro: microfone indisponível para streaming ao vivo.")
+            audioRecord = null; return
+        }
+
+        isAudioStreaming = true
+        audioRecord?.startRecording()
+
+        audioStreamThread = Thread {
+            val buf = ByteArray(bufSize)
+            while (isAudioStreaming) {
+                val read = audioRecord?.read(buf, 0, bufSize) ?: -1
+                if (read > 0) sendTypedBinary(0x04.toByte(), buf.copyOf(read))
+            }
+        }.also { it.isDaemon = true; it.start() }
+
+        sendConsoleLog("Áudio ao vivo iniciado (16kHz PCM).")
+    }
+
+    private fun stopAudioStream() {
+        isAudioStreaming = false
+        audioStreamThread?.join(400)
+        audioRecord?.stop(); audioRecord?.release(); audioRecord = null
+        audioStreamThread = null
+        sendConsoleLog("Áudio ao vivo encerrado.")
+    }
+
     private fun notifyReactivateScreenCapture() {
         val intent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -826,6 +973,8 @@ class AntiTheftService : LifecycleService() {
         mediaPlayer = null
         
         webSocket?.close(1000, "Service destroyed")
+        stopCameraStream()
+        stopAudioStream()
         stopVibration()
         stopFlash()
         wakeLock?.let { if (it.isHeld) it.release() }

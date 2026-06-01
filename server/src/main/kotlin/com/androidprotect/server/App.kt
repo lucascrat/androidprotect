@@ -38,6 +38,7 @@ import software.amazon.awssdk.regions.Region
 import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.PutObjectRequest
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Request
+import software.amazon.awssdk.services.s3.model.GetObjectRequest
 import software.amazon.awssdk.core.sync.RequestBody
 import java.net.URI
 
@@ -525,7 +526,7 @@ fun main() {
                             .map { it.key().substringAfter("/audio/") }
                             .filter { it.isNotBlank() }
                             .sortedDescending()
-                            .map { name -> mapOf("name" to name, "url" to "$r2PublicUrl/uploads/$id/audio/$name") }
+                            .map { name -> mapOf("name" to name, "url" to "/uploads/$id/audio/$name") } // always via server proxy
 
                         call.respond(mapOf("photos" to photos, "audio" to audios))
                         return@get
@@ -563,14 +564,30 @@ fun main() {
                 }
             }
 
-            // Serve local uploaded audio (only used when R2 is not configured)
+            // Audio proxy — always served through our server with proper headers (fixes browser playback)
             get("/uploads/{id}/audio/{name}") {
-                val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
+                val id   = call.parameters["id"]   ?: return@get call.respond(mapOf("error" to "Missing device ID"))
                 val name = call.parameters["name"] ?: return@get call.respond(mapOf("error" to "Missing file name"))
+
+                call.response.headers.append("Access-Control-Allow-Origin", "*")
+                call.response.headers.append("Accept-Ranges", "bytes")
+
+                val client = s3Client
+                if (client != null) {
+                    try {
+                        val key = "uploads/$id/audio/$name"
+                        val obj = client.getObject(GetObjectRequest.builder().bucket(r2BucketName).key(key).build())
+                        call.respondOutputStream(io.ktor.http.ContentType.parse("audio/aac")) {
+                            obj.use { it.copyTo(this) }
+                        }
+                        return@get
+                    } catch (e: Exception) {
+                        println("R2: Failed to proxy audio $name: ${e.message}")
+                    }
+                }
                 val file = File("uploads/$id/audio/$name")
                 if (file.exists()) {
                     call.response.headers.append("Content-Type", "audio/aac")
-                    call.response.headers.append("Accept-Ranges", "bytes")
                     call.respondFile(file)
                 } else {
                     call.respond(io.ktor.http.HttpStatusCode.NotFound)
