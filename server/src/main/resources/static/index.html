@@ -17,7 +17,7 @@
         document.head.appendChild(s);
       });
     </script>
-    <link rel="stylesheet" href="style.css?v=10">
+    <link rel="stylesheet" href="style.css?v=11">
     <script>
       // Auth guard — redirect to login if no valid session
       (function(){
@@ -109,10 +109,12 @@
             <div class="dashboard-grid">
                 <!-- Row 1: Left Map, Right Commands & Screen -->
                 <div class="grid-card map-card">
-                    <div class="card-header flex-header">
-                        <div class="header-left">
-                            <h3><i class="fa-solid fa-map-location-dot neon-text-blue"></i> Localização em Tempo Real</h3>
-                            <span class="card-subtitle" id="location-accuracy">Precisão: --m</span>
+                    <div class="flex-header">
+                        <div class="flex-header-row1">
+                            <h3 style="font-size:1rem;font-weight:600;display:flex;align-items:center;gap:8px;">
+                                <i class="fa-solid fa-map-location-dot neon-text-blue"></i> Localização em Tempo Real
+                            </h3>
+                            <span class="card-subtitle" id="location-accuracy">Precisão: --</span>
                         </div>
                         <div class="map-controls">
                             <button id="btn-map-dark" class="btn-map-type active" onclick="setMapType('roadmap')">🕶️ Dark</button>
@@ -120,11 +122,12 @@
                             <button id="btn-map-hybrid" class="btn-map-type" onclick="setMapType('roadmap_cyber')">🛣️ Ruas</button>
                             <span class="map-controls-sep"></span>
                             <select id="trail-days-select" class="trail-days-select" onchange="refreshTrail()">
-                                <option value="1">📍 Hoje</option>
-                                <option value="7">📅 7 dias</option>
-                                <option value="30" selected>🗓️ 30 dias</option>
+                                <option value="1">Hoje</option>
+                                <option value="7">7 dias</option>
+                                <option value="30" selected>30 dias</option>
                             </select>
-                            <button class="btn-map-type" onclick="clearTrail()" title="Limpar rastro">🗑️</button>
+                            <button class="btn-map-type" onclick="clearTrail()" title="Limpar rastro"><i class="fa-solid fa-trash-can"></i></button>
+                            <button class="btn-map-type" onclick="if(currentDeviceId) sendCommand('START_LOCATION',{})" title="Rastrear agora"><i class="fa-solid fa-location-crosshairs"></i></button>
                         </div>
                     </div>
                     <div class="card-body map-container">
@@ -138,38 +141,49 @@
                         <h3><i class="fa-solid fa-terminal neon-text-pink"></i> Comandos Remotos</h3>
                     </div>
                     <div class="card-body command-buttons-grid">
-                        <button class="btn btn-primary" onclick="sendCommand('TAKE_PHOTO', {camera: 'front'})">
-                            <i class="fa-solid fa-camera-rotate"></i>
-                            <span>Câmera Frontal</span>
-                        </button>
-                        <button class="btn btn-primary" onclick="sendCommand('TAKE_PHOTO', {camera: 'back'})">
-                            <i class="fa-solid fa-camera"></i>
-                            <span>Câmera Traseira</span>
-                        </button>
-                        <button class="btn btn-secondary" onclick="sendCommand('RECORD_AUDIO', {duration: 15})">
-                            <i class="fa-solid fa-microphone"></i>
-                            <span>Gravar Ambiente (15s)</span>
-                        </button>
-                        <button id="btn-screen" class="btn btn-secondary" onclick="toggleScreenStream()">
-                            <i id="screen-btn-icon" class="fa-solid fa-desktop"></i>
-                            <span id="screen-btn-text">Transmitir Tela</span>
-                        </button>
-                        <button id="btn-cam-front" class="btn btn-primary" onclick="toggleCameraStream('front')">
-                            <i class="fa-solid fa-camera-rotate"></i>
-                            <span id="btn-cam-front-txt">Câmera Frontal Live</span>
-                        </button>
-                        <button id="btn-cam-back" class="btn btn-primary" onclick="toggleCameraStream('back')">
-                            <i class="fa-solid fa-camera"></i>
-                            <span id="btn-cam-back-txt">Câmera Traseira Live</span>
-                        </button>
-                        <button id="btn-audio-live" class="btn btn-secondary" onclick="toggleAudioStream()">
-                            <i id="btn-audio-live-icon" class="fa-solid fa-headphones"></i>
-                            <span id="btn-audio-live-txt">Ouvir Ao Vivo</span>
-                        </button>
-                        <button class="btn btn-danger" onclick="sendCommand('PLAY_ALARM', {})">
-                            <i class="fa-solid fa-circle-exclamation fa-beat"></i>
-                            <span>Disparar Sirene</span>
-                        </button>
+
+                        <!-- Captura -->
+                        <div class="cmd-section-label">📸 Captura</div>
+                        <div class="cmd-row">
+                            <button class="btn btn-primary" onclick="sendCommand('TAKE_PHOTO',{camera:'front'})">
+                                <i class="fa-solid fa-camera-rotate"></i><span>Foto Frontal</span>
+                            </button>
+                            <button class="btn btn-primary" onclick="sendCommand('TAKE_PHOTO',{camera:'back'})">
+                                <i class="fa-solid fa-camera"></i><span>Foto Traseira</span>
+                            </button>
+                        </div>
+
+                        <!-- Ao Vivo -->
+                        <div class="cmd-section-label">📡 Ao Vivo</div>
+                        <div class="cmd-row cols-3">
+                            <button id="btn-cam-front" class="btn btn-primary" onclick="toggleCameraStream('front')">
+                                <i class="fa-solid fa-camera-rotate"></i><span id="btn-cam-front-txt">Câmera F.</span>
+                            </button>
+                            <button id="btn-cam-back" class="btn btn-primary" onclick="toggleCameraStream('back')">
+                                <i class="fa-solid fa-camera"></i><span id="btn-cam-back-txt">Câmera T.</span>
+                            </button>
+                            <button id="btn-audio-live" class="btn btn-secondary" onclick="toggleAudioStream()">
+                                <i id="btn-audio-live-icon" class="fa-solid fa-headphones"></i><span id="btn-audio-live-txt">Áudio</span>
+                            </button>
+                        </div>
+                        <div class="cmd-row">
+                            <button id="btn-screen" class="btn btn-secondary" onclick="toggleScreenStream()">
+                                <i id="screen-btn-icon" class="fa-solid fa-desktop"></i><span id="screen-btn-text">Tela ao Vivo</span>
+                            </button>
+                            <button class="btn btn-secondary" onclick="sendCommand('RECORD_AUDIO',{duration:15})">
+                                <i class="fa-solid fa-microphone"></i><span>Gravar (15s)</span>
+                            </button>
+                        </div>
+
+                        <!-- Alarme -->
+                        <div class="cmd-section-label">🚨 Segurança</div>
+                        <div class="cmd-row cols-1">
+                            <button class="btn btn-danger" onclick="sendCommand('PLAY_ALARM',{})">
+                                <i class="fa-solid fa-circle-exclamation fa-beat"></i>
+                                <span>Disparar Sirene + Flash + Vibração</span>
+                            </button>
+                        </div>
+
                     </div>
                 </div>
 
@@ -375,6 +389,6 @@
         <div class="pm-thumbs" id="pm-thumbs"></div>
     </div>
     
-    <script src="app.js?v=11"></script>
+    <script src="app.js?v=12"></script>
 </body>
 </html>
