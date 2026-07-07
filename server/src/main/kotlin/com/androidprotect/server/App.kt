@@ -780,6 +780,7 @@ fun main() {
                                 file.outputStream().use { output -> input.copyTo(output) }
                             }
                             savedFile = file
+                            println("UPLOAD SAVED: abs=${file.absolutePath} exists=${file.exists()} size=${file.length()} dir=${mediaDir.absolutePath} dirExists=${mediaDir.exists()}")
                         }
                         is PartData.FormItem -> {
                             when (part.name) {
