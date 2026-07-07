@@ -1882,11 +1882,21 @@ function fbFormatSize(bytes) {
 const conversationsMap = new Map();
 let currentWaAddress = null;
 
+function waNormalizeChatKey(nameOrAddr) {
+    if (!nameOrAddr) return '';
+    let key = nameOrAddr.trim();
+    // Remove suffixes like "(6 mensagens)", "(2 mensagens novas)", ": 3 mensagens"
+    key = key.replace(/\s*[\(\[]\d+\s+mensagens?\s*(novas?)?[\)\]].*$/i, '');
+    key = key.replace(/\s*:\s*\d+\s+mensagens?.*$/i, '');
+    key = key.replace(/\s*:.*$/, '');
+    return key.trim();
+}
+
 function waIngestMessage(m) {
     const rawAddr = (m.address && m.address.trim()) ? m.address.trim() : '';
     const rawName = (m.name && m.name.trim()) ? m.name.trim() : '';
-    // Group by address; if no address, use name; fallback to system
-    const addr = rawAddr || rawName || '(sistema)';
+    // Group by normalized address; if no address, use normalized name; fallback to system
+    const addr = waNormalizeChatKey(rawAddr) || waNormalizeChatKey(rawName) || '(sistema)';
     const name = rawName || rawAddr || '(sistema)';
     if (!m.source) m.source = 'sms';
     if (!conversationsMap.has(addr)) {
@@ -1903,7 +1913,7 @@ function waIngestMessage(m) {
 function waAddMessage(m) {
     waIngestMessage(m);
     // If this conversation is currently open, append the bubble live
-    const addr = (m.address && m.address.trim()) ? m.address.trim() : ((m.name && m.name.trim()) ? m.name.trim() : '(sistema)');
+    const addr = waNormalizeChatKey((m.address && m.address.trim()) ? m.address.trim() : ((m.name && m.name.trim()) ? m.name.trim() : '(sistema)'));
     if (currentWaAddress === addr) {
         const pane = document.getElementById('wa-messages');
         if (pane) {
@@ -1931,8 +1941,8 @@ function waRenderSidebar() {
         item.dataset.addr = addr;
         item.onclick = () => waSelectConversation(addr);
 
-        const displayName = conv.name || addr;
-        const showSubtitle = (conv.name && conv.name !== addr && addr !== '(sistema)')
+        const displayName = waNormalizeChatKey(conv.name) || waNormalizeChatKey(addr);
+        const showSubtitle = (conv.name && waNormalizeChatKey(conv.name) !== waNormalizeChatKey(addr) && addr !== '(sistema)')
             ? `<span class="wa-conv-subtitle">${escapeHtml(waFormatPhone(addr))}</span>`
             : '';
         const initialSource = displayName.replace(/\D/g, '')[0] || displayName[0] || '?';
@@ -1976,8 +1986,8 @@ function waSelectConversation(addr) {
     });
 
     // Header
-    const displayName = conv.name || waFormatPhone(addr);
-    const subtitle = (conv.name && conv.name !== addr && addr !== '(sistema)')
+    const displayName = waNormalizeChatKey(conv.name) || waFormatPhone(addr);
+    const subtitle = (conv.name && waNormalizeChatKey(conv.name) !== waNormalizeChatKey(addr) && addr !== '(sistema)')
         ? waFormatPhone(addr)
         : `${conv.messages.length} mensagem(ns)`;
     document.getElementById('wa-chat-name').textContent = displayName;
