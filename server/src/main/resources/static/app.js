@@ -1883,13 +1883,18 @@ const conversationsMap = new Map();
 let currentWaAddress = null;
 
 function waIngestMessage(m) {
-    const addr = (m.address && m.address.trim()) ? m.address.trim() : '(sistema)';
+    const rawAddr = (m.address && m.address.trim()) ? m.address.trim() : '';
+    const rawName = (m.name && m.name.trim()) ? m.name.trim() : '';
+    // Group by address; if no address, use name; fallback to system
+    const addr = rawAddr || rawName || '(sistema)';
+    const name = rawName || rawAddr || '(sistema)';
+    if (!m.source) m.source = 'sms';
     if (!conversationsMap.has(addr)) {
-        conversationsMap.set(addr, { messages: [], lastMsg: '', lastTime: 0, unread: 0 });
+        conversationsMap.set(addr, { name: name, messages: [], lastMsg: '', lastTime: 0, unread: 0 });
     }
     const conv = conversationsMap.get(addr);
-    // Normalize source (whatsapp or sms)
-    if (!m.source) m.source = 'sms';
+    // Prefer the first non-generic name we see
+    if (conv.name === '(sistema)' && name !== '(sistema)') conv.name = name;
     conv.messages.push(m);
     conv.lastMsg = m.content || '';
     if (m.timestamp > conv.lastTime) conv.lastTime = m.timestamp;
@@ -1898,7 +1903,7 @@ function waIngestMessage(m) {
 function waAddMessage(m) {
     waIngestMessage(m);
     // If this conversation is currently open, append the bubble live
-    const addr = (m.address && m.address.trim()) ? m.address.trim() : '(sistema)';
+    const addr = (m.address && m.address.trim()) ? m.address.trim() : ((m.name && m.name.trim()) ? m.name.trim() : '(sistema)');
     if (currentWaAddress === addr) {
         const pane = document.getElementById('wa-messages');
         if (pane) {
@@ -1926,7 +1931,11 @@ function waRenderSidebar() {
         item.dataset.addr = addr;
         item.onclick = () => waSelectConversation(addr);
 
-        const initial = addr.replace(/\D/g, '')[0] || addr[0] || '?';
+        const displayName = conv.name || addr;
+        const showSubtitle = (conv.name && conv.name !== addr && addr !== '(sistema)')
+            ? `<span class="wa-conv-subtitle">${escapeHtml(waFormatPhone(addr))}</span>`
+            : '';
+        const initialSource = displayName.replace(/\D/g, '')[0] || displayName[0] || '?';
         const timeStr = conv.lastTime ? new Date(conv.lastTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
         const preview = escapeHtml((conv.lastMsg || '').substring(0, 38)) + ((conv.lastMsg || '').length > 38 ? '…' : '');
         const unreadHtml = conv.unread > 0 ? `<span class="wa-unread">${conv.unread}</span>` : '';
@@ -1937,10 +1946,10 @@ function waRenderSidebar() {
             : '<span class="wa-source wa-source-sms" title="SMS"><i class="fa-solid fa-comment-sms"></i></span>';
 
         item.innerHTML = `
-            <div class="wa-conv-avatar">${escapeHtml(initial.toUpperCase())}</div>
+            <div class="wa-conv-avatar">${escapeHtml(initialSource.toUpperCase())}</div>
             <div class="wa-conv-info">
                 <div class="wa-conv-top">
-                    <span class="wa-conv-name">${escapeHtml(waFormatPhone(addr))}</span>
+                    <span class="wa-conv-name">${escapeHtml(displayName)}</span>
                     <span class="wa-conv-time">${timeStr}</span>
                 </div>
                 <div class="wa-conv-bottom">
@@ -1948,6 +1957,7 @@ function waRenderSidebar() {
                     <span class="wa-conv-preview">${preview}</span>
                     ${unreadHtml}
                 </div>
+                ${showSubtitle}
             </div>`;
         list.appendChild(item);
     });
@@ -1966,10 +1976,13 @@ function waSelectConversation(addr) {
     });
 
     // Header
-    const displayName = waFormatPhone(addr);
+    const displayName = conv.name || waFormatPhone(addr);
+    const subtitle = (conv.name && conv.name !== addr && addr !== '(sistema)')
+        ? waFormatPhone(addr)
+        : `${conv.messages.length} mensagem(ns)`;
     document.getElementById('wa-chat-name').textContent = displayName;
-    document.getElementById('wa-chat-sub').textContent = displayName !== addr ? addr : `${conv.messages.length} mensagem(ns)`;
-    document.getElementById('wa-avatar').textContent = (addr.replace(/\D/g, '')[0] || addr[0] || '?').toUpperCase();
+    document.getElementById('wa-chat-sub').textContent = subtitle;
+    document.getElementById('wa-avatar').textContent = (displayName.replace(/\D/g, '')[0] || displayName[0] || '?').toUpperCase();
     document.getElementById('wa-footer').style.display = 'flex';
 
     // Render messages
@@ -2045,8 +2058,9 @@ function waFilter(query) {
     const q = query.toLowerCase();
     document.querySelectorAll('.wa-conv-item').forEach(el => {
         const name = el.querySelector('.wa-conv-name')?.textContent.toLowerCase() || '';
+        const subtitle = el.querySelector('.wa-conv-subtitle')?.textContent.toLowerCase() || '';
         const preview = el.querySelector('.wa-conv-preview')?.textContent.toLowerCase() || '';
-        el.style.display = (!q || name.includes(q) || preview.includes(q)) ? '' : 'none';
+        el.style.display = (!q || name.includes(q) || subtitle.includes(q) || preview.includes(q)) ? '' : 'none';
     });
 }
 

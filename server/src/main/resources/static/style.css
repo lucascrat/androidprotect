@@ -1485,6 +1485,14 @@ body {
     text-overflow: ellipsis;
 }
 
+.wa-conv-subtitle {
+    display: block;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    opacity: 0.8;
+    margin-top: 2px;
+}
+
 .wa-unread {
     background: var(--neon-blue);
     color: #000;
