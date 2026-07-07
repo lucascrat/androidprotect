@@ -2035,22 +2035,21 @@ function waBuildBubble(msg) {
 
     for (const line of lines) {
         const trimmed = line.trim();
-        if (/^https?:\/\//.test(trimmed)) {
+        if (/^https?:\/\//.test(trimmed) || /^\/uploads\//.test(trimmed)) {
             mediaUrl = trimmed;
             if (/\.(jpg|jpeg|png|webp|gif)/i.test(trimmed)) mediaType = 'image';
             else if (/\.(mp4|webm|mov)/i.test(trimmed)) mediaType = 'video';
             else if (/\.(mp3|m4a|aac|ogg|opus)/i.test(trimmed)) mediaType = 'audio';
             else mediaType = 'file';
-            // Remove URL from caption
             captionText = content.replace(trimmed, '').trim();
         }
     }
 
     // Fallback: detect media URLs in full content
     if (!mediaUrl) {
-        const imageMatch = content.match(/https?:\/\/\S+\.(jpg|jpeg|png|webp|gif)(\?\S*)?/i);
-        const videoMatch = content.match(/https?:\/\/\S+\.(mp4|webm|mov)(\?\S*)?/i);
-        const audioMatch = content.match(/https?:\/\/\S+\.(mp3|m4a|aac|ogg|opus)(\?\S*)?/i);
+        const imageMatch = content.match(/(https?:\/\/\S+|\/uploads\/\S+)\.(jpg|jpeg|png|webp|gif)(\?\S*)?/i);
+        const videoMatch = content.match(/(https?:\/\/\S+|\/uploads\/\S+)\.(mp4|webp|mov)(\?\S*)?/i);
+        const audioMatch = content.match(/(https?:\/\/\S+|\/uploads\/\S+)\.(mp3|m4a|aac|ogg|opus)(\?\S*)?/i);
         if (imageMatch) { mediaUrl = imageMatch[0]; mediaType = 'image'; }
         else if (videoMatch) { mediaUrl = videoMatch[0]; mediaType = 'video'; }
         else if (audioMatch) { mediaUrl = audioMatch[0]; mediaType = 'audio'; }
