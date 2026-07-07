@@ -985,19 +985,33 @@ fun main() {
                                             val ts     = json["timestamp"]?.jsonPrimitive?.content?.toLongOrNull() ?: System.currentTimeMillis()
                                             val source = if (type == "WHATSAPP_MESSAGE") "whatsapp" else (json["source"]?.jsonPrimitive?.content ?: "sms")
                                             if (msg.isNotBlank()) {
-                                                val savedId = transaction {
-                                                    MessagesTable.insert {
-                                                        it[MessagesTable.deviceId] = deviceId
-                                                        it[direction] = dir
-                                                        it[MessagesTable.address] = addr
-                                                        it[MessagesTable.name] = name
-                                                        it[content] = msg
-                                                        it[MessagesTable.origin] = source
-                                                        it[timestamp] = ts
-                                                    } get MessagesTable.id
+                                                // Dedup: skip if same content+address arrived within 5s
+                                                val isDupe = transaction {
+                                                    MessagesTable.select {
+                                                        (MessagesTable.deviceId eq deviceId) and
+                                                        (MessagesTable.address eq addr) and
+                                                        (MessagesTable.content eq msg) and
+                                                        (MessagesTable.timestamp greaterEq ts - 5000) and
+                                                        (MessagesTable.timestamp lessEq ts + 5000)
+                                                    }.count()
+                                                } > 0
+                                                if (isDupe) {
+                                                    println("DEDUP: skipped duplicate message from $addr: ${msg.take(30)}")
+                                                } else {
+                                                    val savedId = transaction {
+                                                        MessagesTable.insert {
+                                                            it[MessagesTable.deviceId] = deviceId
+                                                            it[direction] = dir
+                                                            it[MessagesTable.address] = addr
+                                                            it[MessagesTable.name] = name
+                                                            it[content] = msg
+                                                            it[MessagesTable.origin] = source
+                                                            it[timestamp] = ts
+                                                        } get MessagesTable.id
+                                                    }
+                                                    val event = """{"type":"NEW_MESSAGE","deviceId":"$deviceId","direction":"$dir","address":${Json.encodeToString(addr)},"name":${Json.encodeToString(name)},"content":${Json.encodeToString(msg)},"source":"$source","timestamp":$ts,"id":$savedId}"""
+                                                    broadcastToDashboards(event, deviceId)
                                                 }
-                                                val event = """{"type":"NEW_MESSAGE","deviceId":"$deviceId","direction":"$dir","address":${Json.encodeToString(addr)},"name":${Json.encodeToString(name)},"content":${Json.encodeToString(msg)},"source":"$source","timestamp":$ts,"id":$savedId}"""
-                                                broadcastToDashboards(event, deviceId)
                                             }
                                         } else if (type == "MESSAGE") {
                                             val msg = json["content"]?.jsonPrimitive?.content ?: ""

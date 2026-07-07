@@ -1739,6 +1739,76 @@ body {
     display: block;
 }
 
+/* Media wrapper with download button */
+.wa-media-wrap {
+    position: relative;
+    display: inline-block;
+    margin-bottom: 4px;
+}
+
+.wa-media-download {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    background: rgba(0,0,0,0.55);
+    color: #fff;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.7rem;
+    text-decoration: none;
+    transition: background 0.15s;
+    z-index: 2;
+}
+.wa-media-download:hover { background: rgba(0,0,0,0.8); }
+
+/* Audio bubble */
+.wa-audio-wrap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 12px;
+    padding: 8px 12px;
+    min-width: 220px;
+}
+
+.wa-audio-icon {
+    font-size: 1.4rem;
+    color: var(--neon-green);
+    flex-shrink: 0;
+}
+
+.wa-bubble-audio {
+    flex: 1;
+    height: 36px;
+    min-width: 0;
+}
+
+/* File download bubble */
+.wa-file-wrap {
+    padding: 8px 12px;
+}
+
+.wa-bubble-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255,255,255,0.08);
+    color: var(--neon-blue);
+    padding: 8px 14px;
+    border-radius: 10px;
+    text-decoration: none;
+    font-size: 0.82rem;
+    font-weight: 500;
+    transition: background 0.15s;
+}
+.wa-bubble-link:hover { background: rgba(255,255,255,0.14); }
+.wa-bubble-link i { font-size: 1.1rem; }
+
 .btn-send-msg {
     background: var(--gradient-blue);
     border: none;

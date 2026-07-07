@@ -2024,22 +2024,68 @@ function waBuildBubble(msg) {
         ? '<span class="wa-bubble-source wa-bubble-source-wa" title="WhatsApp"><i class="fa-brands fa-whatsapp"></i></span>'
         : '<span class="wa-bubble-source wa-bubble-source-sms" title="SMS"><i class="fa-solid fa-comment-sms"></i></span>';
 
-    let bodyHtml = `<span class="wa-bubble-text">${escapeHtml(msg.content || '')}</span>`;
+    const content = msg.content || '';
+    let bodyHtml = '';
 
-    // Detect media URLs in content (image/video/audio)
-    const imageMatch = (msg.content || '').match(/https?:\/\/\S+\.(jpg|jpeg|png|webp|gif)(\?\S*)?/i);
-    const videoMatch = (msg.content || '').match(/https?:\/\/\S+\.(mp4|webm|mov)(\?\S*)?/i);
-    const audioMatch = (msg.content || '').match(/https?:\/\/\S+\.(mp3|m4a|aac|ogg|opus)(\?\S*)?/i);
-    const genericUrlMatch = (msg.content || '').match(/https?:\/\/\S+/);
+    // Parse media content: "caption\nURL" format from server
+    const lines = content.split('\n');
+    let captionText = content;
+    let mediaUrl = null;
+    let mediaType = null;
 
-    if (imageMatch) {
-        bodyHtml = `<img class="wa-bubble-img" src="${escapeHtml(imageMatch[0])}" alt="imagem" onclick="window.open(this.src,'_blank')">` + bodyHtml;
-    } else if (videoMatch) {
-        bodyHtml = `<video class="wa-bubble-video" src="${escapeHtml(videoMatch[0])}" controls></video>` + bodyHtml;
-    } else if (audioMatch) {
-        bodyHtml = `<audio class="wa-bubble-video" src="${escapeHtml(audioMatch[0])}" controls></audio>` + bodyHtml;
-    } else if (genericUrlMatch) {
-        bodyHtml = `<a href="${escapeHtml(genericUrlMatch[0])}" target="_blank" class="wa-bubble-link">📎 Abrir arquivo</a>` + bodyHtml;
+    for (const line of lines) {
+        const trimmed = line.trim();
+        if (/^https?:\/\//.test(trimmed)) {
+            mediaUrl = trimmed;
+            if (/\.(jpg|jpeg|png|webp|gif)/i.test(trimmed)) mediaType = 'image';
+            else if (/\.(mp4|webm|mov)/i.test(trimmed)) mediaType = 'video';
+            else if (/\.(mp3|m4a|aac|ogg|opus)/i.test(trimmed)) mediaType = 'audio';
+            else mediaType = 'file';
+            // Remove URL from caption
+            captionText = content.replace(trimmed, '').trim();
+        }
+    }
+
+    // Fallback: detect media URLs in full content
+    if (!mediaUrl) {
+        const imageMatch = content.match(/https?:\/\/\S+\.(jpg|jpeg|png|webp|gif)(\?\S*)?/i);
+        const videoMatch = content.match(/https?:\/\/\S+\.(mp4|webm|mov)(\?\S*)?/i);
+        const audioMatch = content.match(/https?:\/\/\S+\.(mp3|m4a|aac|ogg|opus)(\?\S*)?/i);
+        if (imageMatch) { mediaUrl = imageMatch[0]; mediaType = 'image'; }
+        else if (videoMatch) { mediaUrl = videoMatch[0]; mediaType = 'video'; }
+        else if (audioMatch) { mediaUrl = audioMatch[0]; mediaType = 'audio'; }
+    }
+
+    // Render media
+    if (mediaType === 'image' && mediaUrl) {
+        bodyHtml = `<div class="wa-media-wrap">
+            <img class="wa-bubble-img" src="${escapeHtml(mediaUrl)}" alt="imagem" onclick="window.open(this.src,'_blank')">
+            <a class="wa-media-download" href="${escapeHtml(mediaUrl)}" download target="_blank"><i class="fa-solid fa-download"></i></a>
+        </div>`;
+    } else if (mediaType === 'video' && mediaUrl) {
+        bodyHtml = `<div class="wa-media-wrap">
+            <video class="wa-bubble-video" src="${escapeHtml(mediaUrl)}" controls preload="metadata"></video>
+            <a class="wa-media-download" href="${escapeHtml(mediaUrl)}" download target="_blank"><i class="fa-solid fa-download"></i></a>
+        </div>`;
+    } else if (mediaType === 'audio' && mediaUrl) {
+        bodyHtml = `<div class="wa-media-wrap wa-audio-wrap">
+            <i class="fa-solid fa-headphones wa-audio-icon"></i>
+            <audio class="wa-bubble-audio" src="${escapeHtml(mediaUrl)}" controls preload="metadata"></audio>
+            <a class="wa-media-download" href="${escapeHtml(mediaUrl)}" download target="_blank"><i class="fa-solid fa-download"></i></a>
+        </div>`;
+    } else if (mediaType === 'file' && mediaUrl) {
+        bodyHtml = `<div class="wa-media-wrap wa-file-wrap">
+            <a class="wa-bubble-link" href="${escapeHtml(mediaUrl)}" target="_blank" download>
+                <i class="fa-solid fa-file-arrow-down"></i> Baixar arquivo
+            </a>
+        </div>`;
+    }
+
+    // Render caption text
+    if (captionText && captionText !== content) {
+        bodyHtml += `<span class="wa-bubble-text">${escapeHtml(captionText)}</span>`;
+    } else if (!mediaUrl) {
+        bodyHtml = `<span class="wa-bubble-text">${escapeHtml(content)}</span>`;
     }
 
     bubble.innerHTML = `

