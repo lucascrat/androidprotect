@@ -347,9 +347,6 @@ fun main() {
         }
 
         routing {
-            // Serve static dashboard files
-            staticFiles("/", File("server/src/main/resources/static"), index = "index.html")
-
             // ── Auth: Register ────────────────────────────────────────────────
             post("/api/auth/register") {
                 try {
@@ -905,8 +902,8 @@ fun main() {
 
             // Serve locally downloaded files
             get("/uploads/{id}/files/{name}") {
-                val id   = call.parameters["id"]   ?: return@get call.respond(mapOf("error" to "Missing ID"))
-                val name = call.parameters["name"] ?: return@get call.respond(mapOf("error" to "Missing name"))
+                val id   = call.parameters["id"]   ?: return@get call.respondText("""{"error":"Missing ID"}""", io.ktor.http.ContentType.Application.Json)
+                val name = call.parameters["name"] ?: return@get call.respondText("""{"error":"Missing name"}""", io.ktor.http.ContentType.Application.Json)
                 val file = File("uploads/$id/files/$name")
                 if (file.exists()) {
                     call.response.headers.append("Content-Disposition", "attachment; filename=\"$name\"")
@@ -918,12 +915,13 @@ fun main() {
 
             // Serve WhatsApp media files (images, videos, audio, documents)
             get("/uploads/{id}/whatsapp/{type}/{name}") {
-                val id   = call.parameters["id"]   ?: return@get call.respond(mapOf("error" to "Missing ID"))
-                val type = call.parameters["type"] ?: return@get call.respond(mapOf("error" to "Missing type"))
-                val name = call.parameters["name"] ?: return@get call.respond(mapOf("error" to "Missing name"))
+                val id   = call.parameters["id"]   ?: return@get call.respondText("""{"error":"Missing ID"}""", io.ktor.http.ContentType.Application.Json)
+                val type = call.parameters["type"] ?: return@get call.respondText("""{"error":"Missing type"}""", io.ktor.http.ContentType.Application.Json)
+                val name = call.parameters["name"] ?: return@get call.respondText("""{"error":"Missing name"}""", io.ktor.http.ContentType.Application.Json)
                 val allowedTypes = setOf("images", "videos", "audio", "files")
-                if (type !in allowedTypes) return@get call.respond(mapOf("error" to "Invalid type"))
+                if (type !in allowedTypes) return@get call.respondText("""{"error":"Invalid type"}""", io.ktor.http.ContentType.Application.Json)
                 val file = File("uploads/$id/whatsapp/$type/$name")
+                println("SERVE WHATSAPP: path=$id/$type/$name -> $file exists=${file.exists()} cwd=${System.getProperty("user.dir")}")
                 if (file.exists()) {
                     call.respondFile(file)
                 } else {
@@ -1237,6 +1235,9 @@ fun main() {
                     dashboardSessions.remove(this)
                 }
             }
+
+            // Serve static dashboard files (last — more specific routes match first)
+            staticFiles("/", File("server/src/main/resources/static"), index = "index.html")
         }
     }.start(wait = true)
 }
