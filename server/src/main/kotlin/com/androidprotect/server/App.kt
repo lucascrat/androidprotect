@@ -743,7 +743,20 @@ fun main() {
             // REST Endpoint for WhatsApp media files (images, videos, audio, documents)
             post("/upload/whatsapp-media/{id}") {
                 val id = call.parameters["id"] ?: return@post call.respond(mapOf("error" to "Missing device ID"))
-                if (!assertDeviceOwner(call, id)) return@post
+                val lt = call.request.queryParameters["linkToken"]?.trim()
+                val sessionUserId = getSessionUserId(call)
+                if (sessionUserId == null && lt.isNullOrBlank()) {
+                    return@post call.respond(io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+                }
+                if (sessionUserId != null) {
+                    val ownerId = deviceOwnerCache[id] ?: transaction { DevicesTable.select { DevicesTable.id eq id }.firstOrNull()?.get(DevicesTable.ownerId) }
+                    if (ownerId == null || ownerId != sessionUserId) {
+                        return@post call.respond(io.ktor.http.HttpStatusCode.Forbidden, mapOf("error" to "Acesso negado"))
+                    }
+                } else if (!lt.isNullOrBlank()) {
+                    val ownerUserId = transaction { UsersTable.select { UsersTable.linkToken eq lt }.firstOrNull()?.get(UsersTable.id) }
+                    if (ownerUserId != null) deviceOwnerCache[id] = ownerUserId
+                }
 
                 val multipart = call.receiveMultipart()
                 var savedFile: File? = null
