@@ -762,6 +762,9 @@ fun main() {
                 var msgAddress = ""
                 var msgName = ""
                 var caption = "📎 Arquivo"
+                // Buffer to hold the file data until form fields are processed
+                var filePart: PartData.FileItem? = null
+                var fileExt = "bin"
 
                 multipart.forEachPart { part ->
                     when (part) {
@@ -776,30 +779,30 @@ fun main() {
                             part.dispose()
                         }
                         is PartData.FileItem -> {
-                            val ext = part.originalFileName?.substringAfterLast('.', "bin")?.lowercase() ?: "bin"
-                            val rawName = "wa_${System.currentTimeMillis()}_${(1..9999).random()}.${ext}"
-                            // Save to temp first; final folder is determined after all form fields are collected
-                            val tmpDir = File("uploads/$id/whatsapp/tmp").apply { mkdirs() }
-                            val tmpFile = File(tmpDir, rawName)
-                            part.streamProvider().use { input ->
-                                tmpFile.outputStream().use { output -> input.copyTo(output) }
-                            }
-                            // Move to final folder based on the now-collected mediaType
-                            val finalFolder = when (mediaType) {
-                                "image" -> "whatsapp/images"
-                                "video" -> "whatsapp/videos"
-                                "audio" -> "whatsapp/audio"
-                                else -> "whatsapp/files"
-                            }
-                            val finalDir = File("uploads/$id/$finalFolder").apply { mkdirs() }
-                            val finalFile = File(finalDir, rawName)
-                            tmpFile.renameTo(finalFile)
-                            savedFile = finalFile
-                            part.dispose()
-                            println("UPLOAD SAVED: folder=$finalFolder file=$rawName abs=${finalFile.absolutePath} exists=${finalFile.exists()}")
+                            filePart = part
+                            fileExt = part.originalFileName?.substringAfterLast('.', "bin")?.lowercase() ?: "bin"
                         }
                         else -> part.dispose()
                     }
+                }
+
+                // Now process the file with all form fields already collected
+                if (filePart != null) {
+                    val rawName = "wa_${System.currentTimeMillis()}_${(1..9999).random()}.${fileExt}"
+                    val folder = when (mediaType) {
+                        "image" -> "whatsapp/images"
+                        "video" -> "whatsapp/videos"
+                        "audio" -> "whatsapp/audio"
+                        else -> "whatsapp/files"
+                    }
+                    val mediaDir = File("uploads/$id/$folder").apply { mkdirs() }
+                    val file = File(mediaDir, rawName)
+                    filePart!!.streamProvider().use { input ->
+                        file.outputStream().use { output -> input.copyTo(output) }
+                    }
+                    filePart!!.dispose()
+                    savedFile = file
+                    println("UPLOAD SAVED: folder=$folder file=$rawName abs=${file.absolutePath}")
                 }
 
                 if (savedFile != null) {
