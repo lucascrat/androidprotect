@@ -14,9 +14,8 @@ COPY --from=build /home/gradle/src/server/build/libs/server.jar /app/server.jar
 # Copy static frontend assets so they are served correctly at relative paths
 COPY --from=build /home/gradle/src/server/src/main/resources/static /app/server/src/main/resources/static
 
-# Persistent Volume for photos and audio recordings uploads
+# Persistent Volume for photos, audio and WhatsApp media uploads
 RUN mkdir -p /app/uploads
-VOLUME ["/app/uploads"]
 
 # Port exposed by Ktor Netty
 EXPOSE 8080
