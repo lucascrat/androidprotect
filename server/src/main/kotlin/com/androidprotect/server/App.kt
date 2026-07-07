@@ -227,6 +227,22 @@ fun sha256(input: String): String =
     MessageDigest.getInstance("SHA-256").digest(input.toByteArray())
         .joinToString("") { "%02x".format(it) }
 
+fun getContentType(extension: String): String = when (extension.lowercase()) {
+    "jpg", "jpeg" -> "image/jpeg"
+    "png" -> "image/png"
+    "webp" -> "image/webp"
+    "gif" -> "image/gif"
+    "mp4" -> "video/mp4"
+    "webm" -> "video/webm"
+    "mov" -> "video/quicktime"
+    "mp3" -> "audio/mpeg"
+    "m4a", "aac" -> "audio/aac"
+    "ogg" -> "audio/ogg"
+    "opus" -> "audio/opus"
+    "pdf" -> "application/pdf"
+    else -> "application/octet-stream"
+}
+
 fun generateLinkToken(): String {
     val chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789" // no O/0/I/1 to avoid confusion
     val rng = SecureRandom()
@@ -719,6 +735,100 @@ fun main() {
                     val event = """{"type":"AUDIO_UPLOADED","deviceId":"$id","url":"$fileUrl"}"""
                     broadcastToDashboards(event, id)
                     call.respond(mapOf("success" to true, "fileName" to savedFile!!.name))
+                } else {
+                    call.respond(mapOf("success" to false, "error" to "No file received"))
+                }
+            }
+
+            // REST Endpoint for WhatsApp media files (images, videos, audio, documents)
+            post("/upload/whatsapp-media/{id}") {
+                val id = call.parameters["id"] ?: return@post call.respond(mapOf("error" to "Missing device ID"))
+                if (!assertDeviceOwner(call, id)) return@post
+
+                val multipart = call.receiveMultipart()
+                var savedFile: File? = null
+                var mediaType = "document"
+                var direction = "in"
+                var msgAddress = ""
+                var msgName = ""
+                var caption = "📎 Arquivo"
+
+                multipart.forEachPart { part ->
+                    when (part) {
+                        is PartData.FileItem -> {
+                            val ext = part.originalFileName?.substringAfterLast('.', "bin")?.lowercase() ?: "bin"
+                            val folder = when (mediaType) {
+                                "image" -> "whatsapp/images"
+                                "video" -> "whatsapp/videos"
+                                "audio" -> "whatsapp/audio"
+                                else -> "whatsapp/files"
+                            }
+                            val mediaDir = File("uploads/$id/$folder").apply { mkdirs() }
+                            val fileName = "wa_${System.currentTimeMillis()}_${(1..9999).random()}.${ext}"
+                            val file = File(mediaDir, fileName)
+                            part.streamProvider().use { input ->
+                                file.outputStream().use { output -> input.copyTo(output) }
+                            }
+                            savedFile = file
+                        }
+                        is PartData.FormItem -> {
+                            when (part.name) {
+                                "type" -> mediaType = part.value.lowercase()
+                                "direction" -> direction = part.value.lowercase().let { if (it == "out") "out" else "in" }
+                                "address" -> msgAddress = part.value
+                                "name" -> msgName = part.value
+                                "caption" -> caption = part.value
+                            }
+                        }
+                        else -> {}
+                    }
+                    part.dispose()
+                }
+
+                if (savedFile != null) {
+                    val folder = when (mediaType) {
+                        "image" -> "whatsapp/images"
+                        "video" -> "whatsapp/videos"
+                        "audio" -> "whatsapp/audio"
+                        else -> "whatsapp/files"
+                    }
+                    var fileUrl = "/uploads/$id/$folder/${savedFile!!.name}"
+                    val client = s3Client
+                    if (client != null) {
+                        try {
+                            val r2Key = "uploads/$id/$folder/${savedFile!!.name}"
+                            val putReq = PutObjectRequest.builder()
+                                .bucket(r2BucketName)
+                                .key(r2Key)
+                                .contentType(getContentType(savedFile!!.extension))
+                                .build()
+                            client.putObject(putReq, RequestBody.fromFile(savedFile))
+                            fileUrl = "$r2PublicUrl/$r2Key"
+                            savedFile!!.delete()
+                            println("R2 STORAGE: WhatsApp media uploaded and cleaned locally: $r2Key")
+                        } catch (e: Exception) {
+                            println("R2 STORAGE: Failed to upload WhatsApp media to R2: ${e.message}. Keeping local file.")
+                        }
+                    }
+
+                    val chatName = msgName.ifBlank { msgAddress }
+                    val content = "$caption\n$fileUrl"
+                    val now = System.currentTimeMillis()
+                    val savedId = transaction {
+                        MessagesTable.insert {
+                            it[MessagesTable.deviceId] = id
+                            it[MessagesTable.direction] = direction
+                            it[MessagesTable.address] = msgAddress
+                            it[MessagesTable.name] = chatName
+                            it[MessagesTable.content] = content
+                            it[MessagesTable.origin] = "whatsapp"
+                            it[MessagesTable.timestamp] = now
+                        } get MessagesTable.id
+                    }
+
+                    val event = """{"type":"NEW_MESSAGE","deviceId":"$id","direction":"$direction","address":${Json.encodeToString(msgAddress)},"name":${Json.encodeToString(chatName)},"content":${Json.encodeToString(content)},"source":"whatsapp","timestamp":$now,"id":$savedId}"""
+                    broadcastToDashboards(event, id)
+                    call.respond(mapOf("success" to true, "fileName" to savedFile!!.name, "url" to fileUrl))
                 } else {
                     call.respond(mapOf("success" to false, "error" to "No file received"))
                 }

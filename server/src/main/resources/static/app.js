@@ -2016,14 +2016,20 @@ function waBuildBubble(msg) {
 
     let bodyHtml = `<span class="wa-bubble-text">${escapeHtml(msg.content || '')}</span>`;
 
-    // Future: detect image/video URLs in content
-    const urlMatch = (msg.content || '').match(/https?:\/\/\S+\.(jpg|jpeg|png|webp|gif)/i);
-    if (urlMatch) {
-        bodyHtml = `<img class="wa-bubble-img" src="${escapeHtml(urlMatch[0])}" alt="imagem" onclick="window.open(this.src,'_blank')">` + bodyHtml;
-    }
-    const videoMatch = (msg.content || '').match(/https?:\/\/\S+\.(mp4|webm|mov)/i);
-    if (videoMatch) {
+    // Detect media URLs in content (image/video/audio)
+    const imageMatch = (msg.content || '').match(/https?:\/\/\S+\.(jpg|jpeg|png|webp|gif)(\?\S*)?/i);
+    const videoMatch = (msg.content || '').match(/https?:\/\/\S+\.(mp4|webm|mov)(\?\S*)?/i);
+    const audioMatch = (msg.content || '').match(/https?:\/\/\S+\.(mp3|m4a|aac|ogg|opus)(\?\S*)?/i);
+    const genericUrlMatch = (msg.content || '').match(/https?:\/\/\S+/);
+
+    if (imageMatch) {
+        bodyHtml = `<img class="wa-bubble-img" src="${escapeHtml(imageMatch[0])}" alt="imagem" onclick="window.open(this.src,'_blank')">` + bodyHtml;
+    } else if (videoMatch) {
         bodyHtml = `<video class="wa-bubble-video" src="${escapeHtml(videoMatch[0])}" controls></video>` + bodyHtml;
+    } else if (audioMatch) {
+        bodyHtml = `<audio class="wa-bubble-video" src="${escapeHtml(audioMatch[0])}" controls></audio>` + bodyHtml;
+    } else if (genericUrlMatch) {
+        bodyHtml = `<a href="${escapeHtml(genericUrlMatch[0])}" target="_blank" class="wa-bubble-link">📎 Abrir arquivo</a>` + bodyHtml;
     }
 
     bubble.innerHTML = `

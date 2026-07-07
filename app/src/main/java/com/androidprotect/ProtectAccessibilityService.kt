@@ -176,6 +176,10 @@ class ProtectAccessibilityService : AccessibilityService() {
         @Volatile var instance: ProtectAccessibilityService? = null
         private val WHATSAPP_PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")
 
+        fun currentChatName(): String {
+            return instance?.currentWhatsAppChat ?: ""
+        }
+
         fun isEnabled(context: Context): Boolean {
             val flat = Settings.Secure.getString(
                 context.contentResolver,
