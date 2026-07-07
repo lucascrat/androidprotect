@@ -1495,6 +1495,14 @@ body {
     flex-shrink: 0;
 }
 
+.wa-source {
+    font-size: 0.7rem;
+    margin-right: 4px;
+    flex-shrink: 0;
+}
+.wa-source-wa { color: #25D366; }
+.wa-source-sms { color: var(--neon-blue); }
+
 /* ── Chat Pane ───────────────────────────────────────── */
 .wa-chat-pane {
     flex-grow: 1;
@@ -1645,6 +1653,14 @@ body {
     color: var(--neon-blue);
     opacity: 0.8;
 }
+
+.wa-bubble-source {
+    font-size: 0.62rem;
+    margin-right: 3px;
+    opacity: 0.9;
+}
+.wa-bubble-source-wa { color: #25D366; }
+.wa-bubble-source-sms { color: var(--text-secondary); }
 
 /* ── Footer input ─────────────────────────────────────── */
 .wa-footer {

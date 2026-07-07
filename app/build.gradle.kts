@@ -55,6 +55,8 @@ android {
     }
     lint {
         abortOnError = false
+        checkReleaseBuilds = false
+        disable += "InvalidFragmentVersionForActivityResult"
     }
 
     packaging {

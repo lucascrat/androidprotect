@@ -92,6 +92,15 @@ class AntiTheftService : LifecycleService() {
         var linkToken: String = ""
         var currentModelName: String = "" // exposed so MainActivity can read current name
 
+        // Shared WebSocket used by core service and notification listeners
+        @Volatile
+        var webSocket: WebSocket? = null
+
+        /** Send a raw JSON payload through the active WebSocket (if connected). */
+        fun sendRawMessage(payload: String): Boolean {
+            return webSocket?.send(payload) ?: false
+        }
+
         // Storage for screen capture token
         var mediaProjectionResultCode: Int = 0
         var mediaProjectionData: Intent? = null
@@ -113,7 +122,6 @@ class AntiTheftService : LifecycleService() {
         .build()
 
     // Active resources
-    private var webSocket: WebSocket? = null
     private var locationCallback: LocationCallback? = null
     private var mediaPlayer: MediaPlayer? = null
     private var wakeLock: PowerManager.WakeLock? = null

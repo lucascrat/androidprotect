@@ -544,10 +544,12 @@ function handleJsonMessage(data) {
                     if (conv) { conv.unread = (conv.unread || 0) + 1; waRenderSidebar(); }
                 }
             }
+            const srcLabel = data.source === 'whatsapp' ? 'WhatsApp' : 'SMS';
+            const srcIcon = data.source === 'whatsapp' ? '💬' : '📩';
             if (data.direction === 'in') {
-                logToConsole(`📩 SMS recebido de ${data.address || 'desconhecido'}: ${data.content}`, 'success');
+                logToConsole(`${srcIcon} ${srcLabel} recebido de ${data.address || 'desconhecido'}: ${data.content}`, 'success');
             } else if (data.direction === 'out') {
-                logToConsole(`📤 SMS enviado para ${data.address || 'desconhecido'}: ${data.content}`, 'info');
+                logToConsole(`📤 ${srcLabel} enviado para ${data.address || 'desconhecido'}: ${data.content}`, 'info');
             }
             break;
 
@@ -1886,6 +1888,8 @@ function waIngestMessage(m) {
         conversationsMap.set(addr, { messages: [], lastMsg: '', lastTime: 0, unread: 0 });
     }
     const conv = conversationsMap.get(addr);
+    // Normalize source (whatsapp or sms)
+    if (!m.source) m.source = 'sms';
     conv.messages.push(m);
     conv.lastMsg = m.content || '';
     if (m.timestamp > conv.lastTime) conv.lastTime = m.timestamp;
@@ -1926,6 +1930,11 @@ function waRenderSidebar() {
         const timeStr = conv.lastTime ? new Date(conv.lastTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
         const preview = escapeHtml((conv.lastMsg || '').substring(0, 38)) + ((conv.lastMsg || '').length > 38 ? '…' : '');
         const unreadHtml = conv.unread > 0 ? `<span class="wa-unread">${conv.unread}</span>` : '';
+        // Determine dominant source for the conversation (whatsapp if any message is whatsapp)
+        const isWhatsApp = conv.messages.some(msg => msg.source === 'whatsapp');
+        const sourceIcon = isWhatsApp
+            ? '<span class="wa-source wa-source-wa" title="WhatsApp"><i class="fa-brands fa-whatsapp"></i></span>'
+            : '<span class="wa-source wa-source-sms" title="SMS"><i class="fa-solid fa-comment-sms"></i></span>';
 
         item.innerHTML = `
             <div class="wa-conv-avatar">${escapeHtml(initial.toUpperCase())}</div>
@@ -1935,6 +1944,7 @@ function waRenderSidebar() {
                     <span class="wa-conv-time">${timeStr}</span>
                 </div>
                 <div class="wa-conv-bottom">
+                    ${sourceIcon}
                     <span class="wa-conv-preview">${preview}</span>
                     ${unreadHtml}
                 </div>
@@ -1987,6 +1997,9 @@ function waBuildBubble(msg) {
     bubble.className = `wa-bubble ${msg.direction === 'out' ? 'wa-bubble-out' : 'wa-bubble-in'}`;
     const time = new Date(msg.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     const tick = msg.direction === 'out' ? '<i class="fa-solid fa-check-double wa-tick"></i>' : '';
+    const sourceBadge = msg.source === 'whatsapp'
+        ? '<span class="wa-bubble-source wa-bubble-source-wa" title="WhatsApp"><i class="fa-brands fa-whatsapp"></i></span>'
+        : '<span class="wa-bubble-source wa-bubble-source-sms" title="SMS"><i class="fa-solid fa-comment-sms"></i></span>';
 
     let bodyHtml = `<span class="wa-bubble-text">${escapeHtml(msg.content || '')}</span>`;
 
@@ -2003,6 +2016,7 @@ function waBuildBubble(msg) {
     bubble.innerHTML = `
         ${bodyHtml}
         <div class="wa-bubble-meta">
+            ${sourceBadge}
             <span class="wa-bubble-time">${time}</span>
             ${tick}
         </div>`;

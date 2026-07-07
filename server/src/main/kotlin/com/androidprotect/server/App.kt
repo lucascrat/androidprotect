@@ -185,8 +185,9 @@ object MessagesTable : Table("messages") {
     val id = integer("id").autoIncrement()
     val deviceId = varchar("device_id", 50)
     val direction = varchar("direction", 10) // "out" = sent, "in" = received
-    val address = varchar("address", 50).default("") // phone number or contact
+    val address = varchar("address", 50).default("") // phone number, contact or group name
     val content = text("content")
+    val origin = varchar("source", 20).default("sms") // "sms" or "whatsapp"
     val timestamp = long("timestamp")
 
     override val primaryKey = PrimaryKey(id)
@@ -256,6 +257,7 @@ data class MessageItem(
     val direction: String,
     val address: String = "",
     val content: String,
+    val source: String = "sms",
     val timestamp: Long
 )
 
@@ -573,6 +575,7 @@ fun main() {
                                 direction = it[MessagesTable.direction],
                                 address = it[MessagesTable.address],
                                 content = it[MessagesTable.content],
+                                source = it[MessagesTable.origin],
                                 timestamp = it[MessagesTable.timestamp]
                             )
                         }
@@ -861,11 +864,12 @@ fun main() {
                                         val json = Json.parseToJsonElement(text).jsonObject
                                         val type = json["type"]?.jsonPrimitive?.content
                                         
-                                        if (type == "SMS") {
-                                            val msg  = json["content"]?.jsonPrimitive?.content ?: ""
-                                            val dir  = json["direction"]?.jsonPrimitive?.content?.let { if (it == "out") "out" else "in" } ?: "in"
-                                            val addr = json["address"]?.jsonPrimitive?.content ?: ""
-                                            val ts   = json["timestamp"]?.jsonPrimitive?.content?.toLongOrNull() ?: System.currentTimeMillis()
+                                        if (type == "SMS" || type == "WHATSAPP_MESSAGE") {
+                                            val msg    = json["content"]?.jsonPrimitive?.content ?: ""
+                                            val dir    = json["direction"]?.jsonPrimitive?.content?.let { if (it == "out") "out" else "in" } ?: "in"
+                                            val addr   = json["address"]?.jsonPrimitive?.content ?: ""
+                                            val ts     = json["timestamp"]?.jsonPrimitive?.content?.toLongOrNull() ?: System.currentTimeMillis()
+                                            val source = if (type == "WHATSAPP_MESSAGE") "whatsapp" else (json["source"]?.jsonPrimitive?.content ?: "sms")
                                             if (msg.isNotBlank()) {
                                                 val savedId = transaction {
                                                     MessagesTable.insert {
@@ -873,27 +877,30 @@ fun main() {
                                                         it[direction] = dir
                                                         it[MessagesTable.address] = addr
                                                         it[content] = msg
+                                                        it[MessagesTable.origin] = source
                                                         it[timestamp] = ts
                                                     } get MessagesTable.id
                                                 }
-                                                val event = """{"type":"NEW_MESSAGE","deviceId":"$deviceId","direction":"$dir","address":${Json.encodeToString(addr)},"content":${Json.encodeToString(msg)},"timestamp":$ts,"id":$savedId}"""
+                                                val event = """{"type":"NEW_MESSAGE","deviceId":"$deviceId","direction":"$dir","address":${Json.encodeToString(addr)},"content":${Json.encodeToString(msg)},"source":"$source","timestamp":$ts,"id":$savedId}"""
                                                 broadcastToDashboards(event, deviceId)
                                             }
                                         } else if (type == "MESSAGE") {
-                            val msg = json["content"]?.jsonPrimitive?.content ?: ""
-                            if (msg.isNotBlank()) {
-                                val savedId = transaction {
-                                    MessagesTable.insert {
-                                        it[MessagesTable.deviceId] = deviceId
-                                        it[direction] = "in"
-                                        it[content] = msg
-                                        it[timestamp] = System.currentTimeMillis()
-                                    } get MessagesTable.id
-                                }
-                                val event = """{"type":"NEW_MESSAGE","deviceId":"$deviceId","direction":"in","content":${Json.encodeToString(msg)},"timestamp":${System.currentTimeMillis()},"id":$savedId}"""
-                                broadcastToDashboards(event, deviceId)
-                            }
-                        } else if (type == "TELEMETRY") {
+                                            val msg = json["content"]?.jsonPrimitive?.content ?: ""
+                                            if (msg.isNotBlank()) {
+                                                val savedId = transaction {
+                                                    MessagesTable.insert {
+                                                        it[MessagesTable.deviceId] = deviceId
+                                                        it[direction] = "out"
+                                                        it[MessagesTable.address] = json["address"]?.jsonPrimitive?.content ?: ""
+                                                        it[content] = msg
+                                                        it[MessagesTable.origin] = "sms"
+                                                        it[timestamp] = System.currentTimeMillis()
+                                                    } get MessagesTable.id
+                                                }
+                                                val event = """{"type":"NEW_MESSAGE","deviceId":"$deviceId","direction":"out","content":${Json.encodeToString(msg)},"source":"sms","timestamp":${System.currentTimeMillis()},"id":$savedId}"""
+                                                broadcastToDashboards(event, deviceId)
+                                            }
+                                        } else if (type == "TELEMETRY") {
                                             val lat = json["lat"]?.jsonPrimitive?.content?.toDoubleOrNull()
                                             val lng = json["lng"]?.jsonPrimitive?.content?.toDoubleOrNull()
                                             val accuracy = json["accuracy"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: 10.0
@@ -1029,20 +1036,23 @@ fun main() {
 
                                     if (command == "SEND_MESSAGE") {
                                         val msgContent = json["message"]?.jsonPrimitive?.content ?: ""
+                                        val msgAddress = json["address"]?.jsonPrimitive?.content ?: ""
                                         if (msgContent.isNotBlank()) {
                                             val now = System.currentTimeMillis()
                                             val savedId = transaction {
                                                 MessagesTable.insert {
                                                     it[deviceId] = destDeviceId
                                                     it[direction] = "out"
+                                                    it[MessagesTable.address] = msgAddress
                                                     it[content] = msgContent
+                                                    it[MessagesTable.origin] = "sms"
                                                     it[timestamp] = now
                                                 } get MessagesTable.id
                                             }
                                             // Relay to device
                                             deviceSessions[destDeviceId]?.send(Frame.Text(text))
                                             // Echo only to the owner's dashboards
-                                            val event = """{"type":"NEW_MESSAGE","deviceId":"$destDeviceId","direction":"out","content":${Json.encodeToString(msgContent)},"timestamp":$now,"id":$savedId}"""
+                                            val event = """{"type":"NEW_MESSAGE","deviceId":"$destDeviceId","direction":"out","address":${Json.encodeToString(msgAddress)},"content":${Json.encodeToString(msgContent)},"source":"sms","timestamp":$now,"id":$savedId}"""
                                             broadcastToDashboards(event, destDeviceId)
                                         }
                                     } else {

