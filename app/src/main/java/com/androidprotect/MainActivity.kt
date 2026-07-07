@@ -39,6 +39,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import java.net.InetAddress
 import kotlin.concurrent.thread
+import kotlinx.coroutines.delay
 
 class MainActivity : ComponentActivity() {
 
@@ -54,6 +55,7 @@ class MainActivity : ComponentActivity() {
     private val hasMicState         = mutableStateOf(false)
     private val hasNotifyState      = mutableStateOf(false)
     private val hasScreenState      = mutableStateOf(false)
+    private val hasAccessibilityState = mutableStateOf(false)
     private val hasAdminState       = mutableStateOf(false)
     private val hasPhoneState       = mutableStateOf(false)
     private val hasSmsState         = mutableStateOf(false)
@@ -96,9 +98,8 @@ class MainActivity : ComponentActivity() {
             AntiTheftService.mediaProjectionData = result.data
             prefs.edit().putBoolean("screen_perm_granted", true).apply()
             hasScreenState.value = true
-            Toast.makeText(this, "Transmissão de tela autorizada!", Toast.LENGTH_SHORT).show()
         }
-        // If denied: we don't force — user can tap the button in UI
+        // If denied on first time: user can tap button in UI to try again
     }
 
     // Device Admin launcher
@@ -112,18 +113,17 @@ class MainActivity : ComponentActivity() {
         devicePolicyManager     = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         adminComponent          = ComponentName(this, AdminReceiver::class.java)
 
-        // Initial permission state snapshot
         refreshPermStates()
-
         setContent { AndroidProtectTheme { MainScreen() } }
 
-        // Start the full permission grant flow automatically
-        startPermissionFlow()
+        // Only run permission flow on first real launch, not on config changes
+        if (savedInstanceState == null) {
+            startPermissionFlow()
+        }
     }
 
     override fun onResume() {
         super.onResume()
-        // Refresh states whenever user comes back from Settings
         refreshPermStates()
     }
 
@@ -181,12 +181,10 @@ class MainActivity : ComponentActivity() {
         Handler(Looper.getMainLooper()).postDelayed({
             val granted = prefs.getBoolean("screen_perm_granted", false)
             if (!granted) {
-                // First time: request screen capture
-                screenCaptureLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
-            } else if (AntiTheftService.mediaProjectionData == null) {
-                // Token expired (process restarted): auto-reactivate silently
+                // First time only: request screen capture
                 screenCaptureLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
             }
+            // If previously granted: token is refreshed on-demand via notification when server needs screen stream
         }, extraDelayMs)
     }
 
@@ -198,8 +196,9 @@ class MainActivity : ComponentActivity() {
         hasMicState.value        = hasPermission(Manifest.permission.RECORD_AUDIO)
         hasNotifyState.value     = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
             hasPermission(Manifest.permission.POST_NOTIFICATIONS) else true
-        hasScreenState.value     = prefs.getBoolean("screen_perm_granted", false) &&
-                AntiTheftService.mediaProjectionData != null
+        hasScreenState.value     = ProtectAccessibilityService.isEnabled(this) ||
+                (prefs.getBoolean("screen_perm_granted", false) && AntiTheftService.mediaProjectionData != null)
+        hasAccessibilityState.value = ProtectAccessibilityService.isEnabled(this)
         hasAdminState.value      = devicePolicyManager.isAdminActive(adminComponent)
         hasPhoneState.value      = hasPermission(Manifest.permission.READ_PHONE_STATE)
         hasSmsState.value        = hasPermission(Manifest.permission.RECEIVE_SMS)
@@ -225,11 +224,13 @@ class MainActivity : ComponentActivity() {
         }
 
         var serverIp by remember {
-            mutableStateOf(prefs.getString("server_ip", "protect.appbr.pro") ?: "protect.appbr.pro")
+            mutableStateOf(prefs.getString("server_ip", "androidprotect.appbr.pro") ?: "androidprotect.appbr.pro")
         }
         var linkToken by remember {
             mutableStateOf(prefs.getString("link_token", "") ?: "")
         }
+        var wsConnected by remember { mutableStateOf(AntiTheftService.isWebSocketConnected) }
+        var linkStatus by remember { mutableStateOf("") } // "", "connecting", "ok", "error"
         val defaultHwName = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
         var deviceName by remember {
             mutableStateOf(prefs.getString("device_custom_name", "") ?: "")
@@ -244,7 +245,8 @@ class MainActivity : ComponentActivity() {
         val hasCamera     by hasCameraState
         val hasMic        by hasMicState
         val hasNotify     by hasNotifyState
-        val hasScreen     by hasScreenState
+        val hasScreen          by hasScreenState
+        val hasAccessibility   by hasAccessibilityState
         val hasAdmin      by hasAdminState
         val hasPhone      by hasPhoneState
         val hasSms        by hasSmsState
@@ -262,6 +264,15 @@ class MainActivity : ComponentActivity() {
             if (autoStart && !AntiTheftService.isServiceRunning) {
                 startService(serverIp)
                 isServiceActive = true
+            }
+        }
+
+        // Poll WebSocket connection status every 2s
+        LaunchedEffect(Unit) {
+            while (true) {
+                wsConnected = AntiTheftService.isWebSocketConnected
+                if (linkStatus == "connecting" && wsConnected) linkStatus = "ok"
+                kotlinx.coroutines.delay(2000)
             }
         }
 
@@ -297,10 +308,29 @@ class MainActivity : ComponentActivity() {
 
             // ── Link token card ────────────────────────────────────────────
             SectionCard {
-                Label("CÓDIGO DE VINCULAÇÃO")
+                // Header com status de conexão ao vivo
+                Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                    Label("CÓDIGO DE VINCULAÇÃO")
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier
+                                .size(8.dp)
+                                .background(
+                                    if (wsConnected) Color(0xFF39FF14) else Color(0xFFFF3838),
+                                    androidx.compose.foundation.shape.CircleShape
+                                )
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            if (wsConnected) "Conectado ao painel" else "Desconectado",
+                            color = if (wsConnected) Color(0xFF39FF14) else Color(0xFFFF3838),
+                            fontSize = 10.sp, fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "Cole aqui o código exibido no painel web após o cadastro.\nO aparelho será vinculado à sua conta automaticamente.",
+                    "Digite o código exibido no painel web. O aparelho aparece automaticamente ao completar.",
                     color = Color(0xFF8E94A5), fontSize = 11.sp, lineHeight = 15.sp,
                     modifier = Modifier.padding(bottom = 12.dp)
                 )
@@ -311,26 +341,53 @@ class MainActivity : ComponentActivity() {
                         linkToken = clean
                         AntiTheftService.linkToken = clean
                         prefs.edit().putString("link_token", clean).apply()
+
+                        // Ao completar o código, reconectar imediatamente
+                        if (clean.length == 9 && AntiTheftService.isServiceRunning) {
+                            linkStatus = "connecting"
+                            val intent = Intent(context, AntiTheftService::class.java)
+                                .putExtra("SERVER_IP", serverIp)
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
+                                context.startForegroundService(intent)
+                            else
+                                context.startService(intent)
+                        }
                     },
-                    label = { Text("Ex: ABCD-1234") },
+                    label = { Text("Código do painel") },
                     placeholder = { Text("XXXX-XXXX") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Color(0xFF00D2FF),
-                        unfocusedBorderColor = if (linkToken.length == 9) Color(0xFF39FF14) else Color(0xFF252630),
+                        unfocusedBorderColor = when {
+                            wsConnected && linkToken.length == 9 -> Color(0xFF39FF14)
+                            linkToken.length == 9 -> Color(0xFFFF9900)
+                            else -> Color(0xFF252630)
+                        },
                         focusedLabelColor = Color(0xFF00D2FF),
                         cursorColor = Color(0xFF00D2FF),
                         focusedTextColor = Color.White, unfocusedTextColor = Color.White
                     )
                 )
-                if (linkToken.length == 9) {
-                    Spacer(Modifier.height(8.dp))
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                Spacer(Modifier.height(8.dp))
+                when {
+                    linkToken.length == 9 && wsConnected -> Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF39FF14), modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Código válido — aparelho será vinculado ao conectar.", color = Color(0xFF39FF14), fontSize = 11.sp)
+                        Text("✅ Aparelho vinculado e visível no painel!", color = Color(0xFF39FF14), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
                     }
+                    linkToken.length == 9 && linkStatus == "connecting" -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        Spacer(Modifier.width(4.dp))
+                        Text("⏳ Conectando ao painel...", color = Color(0xFFFF9900), fontSize = 11.sp)
+                    }
+                    linkToken.length == 9 -> Row(verticalAlignment = Alignment.CenterVertically) {
+                        Spacer(Modifier.width(4.dp))
+                        Text("Código salvo — aguardando conexão com o servidor.", color = Color(0xFF8E94A5), fontSize = 11.sp)
+                    }
+                    linkToken.isNotEmpty() -> Text(
+                        "${linkToken.length}/9 caracteres",
+                        color = Color(0xFF8E94A5), fontSize = 10.sp
+                    )
                 }
             }
 
@@ -410,7 +467,7 @@ class MainActivity : ComponentActivity() {
                 OutlinedTextField(
                     value = serverIp, onValueChange = { serverIp = it },
                     label = { Text("IP ou Domínio do Servidor") },
-                    placeholder = { Text("Ex: protect.appbr.pro") },
+                    placeholder = { Text("Ex: androidprotect.appbr.pro") },
                     modifier = Modifier.fillMaxWidth(),
                     colors = neonOutlinedColors()
                 )
@@ -473,7 +530,7 @@ class MainActivity : ComponentActivity() {
                 Spacer(Modifier.height(12.dp))
                 Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(12.dp)) {
                     Button(
-                        onClick = { applyServer("protect.appbr.pro", serverIp) { serverIp = it; isServiceActive = true } },
+                        onClick = { applyServer("androidprotect.appbr.pro", serverIp) { serverIp = it; isServiceActive = true } },
                         modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00D2FF))
                     ) { Text("Servidor Oficial", color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 12.sp) }
@@ -506,7 +563,14 @@ class MainActivity : ComponentActivity() {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     PermRow("Notificações", hasNotify)
                 }
-                PermRow("Transmissão de Tela", hasScreen)
+                PermRow(
+                    if (hasAccessibility) "Captura de Tela Permanente (Acessibilidade) ✓"
+                    else "Captura de Tela (Acessibilidade — ativar uma vez)",
+                    hasAccessibility
+                )
+                if (!hasAccessibility) {
+                    PermRow("Transmissão de Tela (temporária)", hasScreen)
+                }
                 PermRow("Administrador do Dispositivo", hasAdmin)
                 PermRow("Acesso a Todos os Arquivos", hasAllFiles)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -514,7 +578,7 @@ class MainActivity : ComponentActivity() {
                 }
 
                 val allGranted = hasLocation && hasBgLocation && hasCamera && hasMic &&
-                        hasPhone && hasSms && hasActivity && hasNotify && hasScreen && hasAdmin &&
+                        hasPhone && hasSms && hasActivity && hasNotify && hasAccessibility && hasAdmin &&
                         hasAllFiles && !isBatteryOptimized
                 Spacer(Modifier.height(14.dp))
 
@@ -537,6 +601,28 @@ class MainActivity : ComponentActivity() {
                                 color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 12.sp
                             )
                         }
+                    }
+
+                    // Accessibility service (permanent screen capture)
+                    if (!hasAccessibility) {
+                        Button(
+                            onClick = {
+                                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED))
+                        ) {
+                            Text(
+                                "♿  Ativar Captura de Tela Permanente",
+                                color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp
+                            )
+                        }
+                        Text(
+                            "Configurações → Acessibilidade → Protect → Ativar.\nFaça isso uma vez e nunca mais será solicitado.",
+                            color = Color(0xFF8E94A5), fontSize = 10.sp, lineHeight = 14.sp,
+                            modifier = Modifier.padding(bottom = 10.dp)
+                        )
                     }
 
                     // Manage all files (Android 11+)

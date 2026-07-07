@@ -8,10 +8,10 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
     <!-- FontAwesome for Premium Icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Leaflet.js — open-source maps, no API key required -->
+    <!-- Leaflet.js + Mapbox tiles -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <link rel="stylesheet" href="style.css?v=15">
+    <link rel="stylesheet" href="style.css?v=20">
     <script>
       // Auth guard — redirect to login if no valid session
       (function(){
@@ -116,6 +116,10 @@
                 <button class="mbn-tab" data-tab="media" onclick="switchTab('media')">
                     <i class="fa-solid fa-photo-film"></i>
                     <span>Mídia</span>
+                </button>
+                <button class="mbn-tab" data-tab="sms" onclick="switchTab('sms')">
+                    <i class="fa-solid fa-comments"></i>
+                    <span>SMS</span>
                 </button>
                 <button class="mbn-tab" data-tab="more" onclick="switchTab('more')">
                     <i class="fa-solid fa-ellipsis"></i>
@@ -254,56 +258,116 @@
                     </div>
                 </div>
 
-                <!-- Live Camera Stream -->
-                <div class="grid-card camera-card" data-tab="cameras">
-                    <div class="card-header">
-                        <h3><i class="fa-solid fa-camera neon-text-blue"></i> Câmera Ao Vivo</h3>
-                        <div style="display:flex;gap:8px;align-items:center;">
-                            <span id="cam-active-badge" class="badge" style="display:none;background:rgba(0,210,255,.15);border:1px solid var(--neon-blue);color:var(--neon-blue);"><span class="pulse-dot" style="background:var(--neon-blue)"></span> <span id="cam-badge-label">FRONTAL</span></span>
-                            <span id="cam-audio-badge" class="badge" style="display:none;background:rgba(255,42,133,.15);border:1px solid var(--neon-pink);color:var(--neon-pink);"><i class="fa-solid fa-volume-high fa-beat"></i> ÁUDIO AO VIVO</span>
+                <!-- ── Live Streams Panel (Screen + Front + Back) ── -->
+                <div class="grid-card streams-card" data-tab="cameras">
+                    <div class="card-header streams-header">
+                        <h3><i class="fa-solid fa-video neon-text-blue"></i> Transmissão ao Vivo</h3>
+                        <div class="streams-header-badges">
+                            <span id="cam-audio-badge" class="badge" style="display:none;background:rgba(255,42,133,.15);border:1px solid var(--neon-pink);color:var(--neon-pink);">
+                                <i class="fa-solid fa-volume-high fa-beat"></i> ÁUDIO
+                            </span>
+                            <button class="btn btn-sm btn-secondary" onclick="toggleAudioStream()" title="Áudio ao vivo">
+                                <i id="btn-audio-live-icon" class="fa-solid fa-headphones"></i>
+                                <span id="btn-audio-live-txt">Áudio</span>
+                            </button>
                         </div>
                     </div>
-                    <div class="card-body cam-stream-body">
-                        <div class="phone-mockup cam-mockup">
-                            <div class="phone-speaker"></div>
-                            <div class="phone-screen">
-                                <div id="cam-placeholder" class="screen-placeholder">
-                                    <i class="fa-solid fa-camera fa-3x"></i>
-                                    <p>Câmera desligada</p>
-                                    <div style="display:flex;gap:8px;">
-                                        <button class="btn btn-sm btn-primary" onclick="toggleCameraStream('front')">Frontal</button>
-                                        <button class="btn btn-sm btn-secondary" onclick="toggleCameraStream('back')">Traseira</button>
-                                    </div>
-                                </div>
-                                <img id="cam-stream-img" class="screen-stream-img" src="" alt="Camera" style="display:none;">
-                            </div>
-                            <div class="phone-home"></div>
-                        </div>
-                    </div>
-                </div>
 
-                <!-- Live Screen Stream -->
-                <div class="grid-card screen-card" data-tab="cameras">
-                    <div class="card-header">
-                        <h3><i class="fa-solid fa-tv neon-text-blue"></i> Tela ao Vivo</h3>
-                        <span id="screen-stream-badge" class="badge red-badge" style="display: none;"><span class="pulse-dot"></span> AO VIVO</span>
-                    </div>
-                    <div class="card-body screen-stream-container">
-                        <!-- Smartphone mockup frame -->
-                        <div class="phone-mockup">
-                            <div class="phone-speaker"></div>
-                            <div class="phone-screen">
-                                <div id="screen-placeholder" class="screen-placeholder">
-                                    <i class="fa-solid fa-desktop fa-3x"></i>
-                                    <p>Transmissão Desligada</p>
-                                    <button class="btn btn-sm btn-primary" onclick="toggleScreenStream()">Iniciar</button>
-                                </div>
-                                <img id="screen-stream-img" class="screen-stream-img" src="" alt="Live Stream" style="display: none;">
+                    <div class="streams-grid">
+
+                        <!-- Tela -->
+                        <div class="stream-panel" id="panel-screen">
+                            <div class="stream-panel-header">
+                                <span class="stream-label"><i class="fa-solid fa-desktop"></i> Tela</span>
+                                <span id="screen-stream-badge" class="stream-live-badge" style="display:none">
+                                    <span class="pulse-dot"></span> AO VIVO
+                                </span>
                             </div>
-                            <div class="phone-home"></div>
+                            <div class="stream-viewport" id="viewport-screen">
+                                <div class="stream-placeholder" id="screen-placeholder">
+                                    <i class="fa-solid fa-desktop fa-2x"></i>
+                                    <p>Tela desligada</p>
+                                    <button class="btn btn-sm btn-primary" onclick="toggleScreenStream()">
+                                        <i class="fa-solid fa-play"></i> Iniciar
+                                    </button>
+                                </div>
+                                <img id="screen-stream-img" class="stream-img" src="" alt="Tela ao vivo" style="display:none">
+                                <!-- Hover controls -->
+                                <div class="stream-controls">
+                                    <button class="sc-btn" onclick="toggleScreenStream()" id="sc-screen-toggle" title="Iniciar/Parar">
+                                        <i class="fa-solid fa-play" id="sc-screen-icon"></i>
+                                    </button>
+                                    <button class="sc-btn sc-btn-fullscreen" onclick="openFullscreen('screen')" title="Tela cheia">
+                                        <i class="fa-solid fa-expand"></i>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
-                    </div>
-                </div>
+
+                        <!-- Câmera Frontal -->
+                        <div class="stream-panel" id="panel-front">
+                            <div class="stream-panel-header">
+                                <span class="stream-label"><i class="fa-solid fa-camera-rotate"></i> Câmera Frontal</span>
+                                <span id="cam-front-badge" class="stream-live-badge" style="display:none">
+                                    <span class="pulse-dot" style="background:var(--neon-blue)"></span> AO VIVO
+                                </span>
+                            </div>
+                            <div class="stream-viewport" id="viewport-front">
+                                <div class="stream-placeholder" id="cam-front-placeholder">
+                                    <i class="fa-solid fa-camera-rotate fa-2x"></i>
+                                    <p>Câmera frontal desligada</p>
+                                    <button class="btn btn-sm btn-primary" onclick="toggleCameraStream('front')">
+                                        <i class="fa-solid fa-play"></i> Iniciar
+                                    </button>
+                                </div>
+                                <img id="cam-stream-img" class="stream-img" src="" alt="Câmera frontal" style="display:none">
+                                <div class="stream-controls">
+                                    <button class="sc-btn" onclick="toggleCameraStream('front')" id="sc-front-toggle" title="Iniciar/Parar">
+                                        <i class="fa-solid fa-play" id="sc-front-icon"></i>
+                                    </button>
+                                    <button class="sc-btn" onclick="toggleCameraStream('back')" title="Alternar câmera">
+                                        <i class="fa-solid fa-arrows-rotate"></i>
+                                    </button>
+                                    <button class="sc-btn sc-btn-fullscreen" onclick="openFullscreen('front')" title="Tela cheia">
+                                        <i class="fa-solid fa-expand"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Câmera Traseira -->
+                        <div class="stream-panel" id="panel-back">
+                            <div class="stream-panel-header">
+                                <span class="stream-label"><i class="fa-solid fa-camera"></i> Câmera Traseira</span>
+                                <span id="cam-back-badge" class="stream-live-badge" style="display:none">
+                                    <span class="pulse-dot" style="background:var(--neon-blue)"></span> AO VIVO
+                                </span>
+                            </div>
+                            <div class="stream-viewport" id="viewport-back">
+                                <div class="stream-placeholder" id="cam-back-placeholder">
+                                    <i class="fa-solid fa-camera fa-2x"></i>
+                                    <p>Câmera traseira desligada</p>
+                                    <button class="btn btn-sm btn-primary" onclick="toggleCameraStream('back')">
+                                        <i class="fa-solid fa-play"></i> Iniciar
+                                    </button>
+                                </div>
+                                <img id="cam-back-stream-img" class="stream-img" src="" alt="Câmera traseira" style="display:none">
+                                <div class="stream-controls">
+                                    <button class="sc-btn" onclick="toggleCameraStream('back')" id="sc-back-toggle" title="Iniciar/Parar">
+                                        <i class="fa-solid fa-play" id="sc-back-icon"></i>
+                                    </button>
+                                    <button class="sc-btn" onclick="toggleCameraStream('front')" title="Alternar câmera">
+                                        <i class="fa-solid fa-arrows-rotate"></i>
+                                    </button>
+                                    <button class="sc-btn sc-btn-fullscreen" onclick="openFullscreen('back')" title="Tela cheia">
+                                        <i class="fa-solid fa-expand"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                    </div><!-- /streams-grid -->
+                </div><!-- /streams-card -->
 
                 <!-- Captured Photos Gallery -->
                 <div class="grid-card gallery-card" data-tab="media">
@@ -343,21 +407,49 @@
                     </div>
                 </div>
 
-                <!-- Messages Panel -->
-                <div class="grid-card messages-card" data-tab="more">
+                <!-- Messages Panel — WhatsApp Web style -->
+                <div class="grid-card messages-card" data-tab="sms">
                     <div class="card-header">
-                        <h3><i class="fa-solid fa-comments neon-text-blue"></i> Mensagens</h3>
+                        <h3><i class="fa-solid fa-comments neon-text-blue"></i> Mensagens SMS</h3>
                         <span class="card-subtitle" id="messages-device-label">Nenhum dispositivo</span>
                     </div>
-                    <div class="card-body messages-body">
-                        <div class="messages-list" id="messages-list">
-                            <div class="messages-empty"><i class="fa-solid fa-comment-slash"></i><p>Nenhuma mensagem ainda.</p></div>
-                        </div>
-                        <div class="messages-input-row">
-                            <input type="text" id="message-input" class="messages-input" placeholder="Digite uma mensagem para o dispositivo..." maxlength="500" onkeydown="if(event.key==='Enter') sendMessage()">
-                            <button class="btn-send-msg" onclick="sendMessage()" title="Enviar">
-                                <i class="fa-solid fa-paper-plane"></i>
-                            </button>
+                    <div class="card-body wa-body">
+                        <div class="wa-wrap">
+                            <!-- Sidebar: conversation list -->
+                            <div class="wa-sidebar">
+                                <div class="wa-search-box">
+                                    <i class="fa-solid fa-magnifying-glass"></i>
+                                    <input type="text" id="wa-search" placeholder="Buscar conversa..." oninput="waFilter(this.value)">
+                                </div>
+                                <div class="wa-convlist" id="wa-convlist">
+                                    <div class="wa-convlist-empty">
+                                        <i class="fa-solid fa-comment-slash"></i>
+                                        <p>Nenhuma conversa</p>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Chat pane: selected conversation -->
+                            <div class="wa-chat-pane">
+                                <div class="wa-chat-header" id="wa-chat-header">
+                                    <div class="wa-avatar" id="wa-avatar">?</div>
+                                    <div class="wa-chat-info">
+                                        <div class="wa-chat-name" id="wa-chat-name">Selecione uma conversa</div>
+                                        <div class="wa-chat-sub" id="wa-chat-sub">SMS monitorados do dispositivo</div>
+                                    </div>
+                                </div>
+                                <div class="wa-messages" id="wa-messages">
+                                    <div class="wa-no-conv">
+                                        <i class="fa-solid fa-comments fa-3x"></i>
+                                        <p>Selecione uma conversa à esquerda</p>
+                                    </div>
+                                </div>
+                                <div class="wa-footer" id="wa-footer" style="display:none;">
+                                    <input type="text" id="message-input" class="wa-input" placeholder="Enviar mensagem ao dispositivo..." maxlength="500" onkeydown="if(event.key==='Enter') sendMessage()">
+                                    <button class="wa-send-btn" onclick="sendMessage()">
+                                        <i class="fa-solid fa-paper-plane"></i>
+                                    </button>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -393,27 +485,44 @@
                     </div>
                 </div>
 
-                <!-- AI Assistant Card (ProtegeAI) -->
-                <div class="grid-card ai-card" data-tab="more">
-                    <div class="card-header">
-                        <h3><i class="fa-solid fa-brain neon-text-pink"></i> ProtegeAI - Assistente de Segurança</h3>
-                        <span class="card-subtitle">Gemini AI</span>
-                    </div>
-                    <div class="card-body ai-assistant-body">
-                        <div class="ai-chat-messages" id="ai-chat-messages">
-                            <div class="ai-message assistant">
-                                Olá! Sou o **ProtegeAI**, o assistente inteligente do seu AndroidProtect. 
-                                Posso ajudar você a analisar a situação do seu aparelho conectado, explicar os logs de segurança e dar dicas para recuperá-lo em segurança. Como posso ajudar você agora?
-                            </div>
-                        </div>
-                        <div class="ai-chat-input-container">
-                            <input type="text" id="ai-chat-input" placeholder="Pergunte ao ProtegeAI sobre o aparelho..." onkeydown="if(event.key === 'Enter') sendAiMessage()">
-                            <button id="btn-send-ai" onclick="sendAiMessage()"><i class="fa-solid fa-paper-plane"></i></button>
-                        </div>
-                    </div>
-                </div>
+                <!-- AI Assistant removido (Gemini desativado) -->
+
             </div>
         </main>
+    </div>
+
+    <!-- Fullscreen Stream Modal -->
+    <div id="fullscreen-modal" class="fullscreen-modal" style="display:none" onclick="closeFullscreen()">
+        <div class="fs-topbar" onclick="event.stopPropagation()">
+            <span class="fs-title" id="fs-title"><i class="fa-solid fa-video"></i> Transmissão ao Vivo</span>
+            <div class="fs-controls">
+                <span id="fs-live-badge" class="stream-live-badge"><span class="pulse-dot"></span> AO VIVO</span>
+                <button class="fs-btn" id="fs-pip-btn" onclick="togglePiP()" title="Picture-in-Picture">
+                    <i class="fa-solid fa-window-restore"></i>
+                </button>
+                <button class="fs-btn" id="fs-stop-btn" onclick="fsStopStream()" title="Parar stream">
+                    <i class="fa-solid fa-stop"></i>
+                </button>
+                <button class="fs-btn fs-close-btn" onclick="closeFullscreen()" title="Fechar">
+                    <i class="fa-solid fa-compress"></i>
+                </button>
+            </div>
+        </div>
+        <div class="fs-viewport" onclick="event.stopPropagation()">
+            <img id="fs-stream-img" class="fs-img" src="" alt="Stream">
+            <div id="fs-placeholder" class="fs-placeholder">
+                <i class="fa-solid fa-video-slash fa-3x"></i>
+                <p>Stream encerrado</p>
+            </div>
+        </div>
+        <div class="fs-bottombar" onclick="event.stopPropagation()">
+            <div class="fs-info" id="fs-info">Iniciando transmissão...</div>
+            <div class="fs-actions">
+                <button class="fs-btn" onclick="sendCommand('TAKE_PHOTO',{camera:currentFsType==='front'?'front':'back'})" title="Tirar foto">
+                    <i class="fa-solid fa-camera"></i>
+                </button>
+            </div>
+        </div>
     </div>
 
     <!-- Photo Lightbox Modal -->
@@ -456,6 +565,6 @@
         <div class="pm-thumbs" id="pm-thumbs"></div>
     </div>
     
-    <script src="app.js?v=17"></script>
+    <script src="app.js?v=21"></script>
 </body>
 </html>

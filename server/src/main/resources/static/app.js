@@ -1,6 +1,7 @@
 // Global variables
 let socket = null;
 let map = null;
+let currentFsType = null; // 'screen' | 'front' | 'back'
 let deviceMarker = null;
 let deviceAccuracyCircle = null;
 let trailPolylines = [];
@@ -26,19 +27,20 @@ let audioCtx = null;
 let audioNextTime = 0;
 const AUDIO_SAMPLE_RATE = 16000;
 
-// ─── Leaflet tile layers (no API key needed) ─────────────────────────────────
+// ─── Leaflet tile layers (Mapbox) ───────────────────────────────────────────
+let MAPBOX_TOKEN = '';
 const TILES = {
     dark: {
-        url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-        attr: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/">CartoDB</a>'
+        url: 'https://api.mapbox.com/styles/v1/mapbox/dark-v11/tiles/{z}/{x}/{y}{r}?access_token={accessToken}',
+        attr: '&copy; <a href="https://www.mapbox.com/">Mapbox</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
     },
     satellite: {
-        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-        attr: '&copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP'
+        url: 'https://api.mapbox.com/styles/v1/mapbox/satellite-v9/tiles/{z}/{x}/{y}{r}?access_token={accessToken}',
+        attr: '&copy; <a href="https://www.mapbox.com/">Mapbox</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
     },
     roads: {
-        url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-        attr: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+        url: 'https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/{z}/{x}/{y}{r}?access_token={accessToken}',
+        attr: '&copy; <a href="https://www.mapbox.com/">Mapbox</a> &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
     }
 };
 
@@ -123,10 +125,17 @@ function copyLinkCode() {
 }
 
 // ─── Initialize Dashboard ─────────────────────────────────────────────────────
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
     const nameEl = document.getElementById('user-name-display');
     if (nameEl) nameEl.textContent = getUsername();
-    initMapIfReady();   // Leaflet is synchronous — init immediately
+    try {
+        const cfgResp = await fetch('/api/config');
+        if (cfgResp.ok) {
+            const cfg = await cfgResp.json();
+            if (cfg.mapboxToken) MAPBOX_TOKEN = cfg.mapboxToken;
+        }
+    } catch (e) { console.warn('Failed to load /api/config', e); }
+    initMapIfReady();   // Leaflet is synchronous — init after token is loaded
     connectWebSocket();
     initMobileTabs();
     window.addEventListener('resize', () => {
@@ -374,8 +383,8 @@ function initMap() {
     // Load dark tile layer by default
     currentTileLayer = L.tileLayer(TILES.dark.url, {
         attribution: TILES.dark.attr,
-        maxZoom: 19,
-        subdomains: 'abcd'
+        maxZoom: 22,
+        accessToken: MAPBOX_TOKEN
     }).addTo(map);
 
     // Disable follow mode on manual pan
@@ -385,7 +394,7 @@ function initMap() {
         if (btn) btn.classList.remove('active');
     });
 
-    console.log('Leaflet map initialized (OpenStreetMap, no API key).');
+    console.log('Leaflet map initialized (Mapbox).');
 }
 
 // Called on DOMContentLoaded (Leaflet is synchronous, no callback needed)
@@ -426,8 +435,8 @@ function setMapType(type) {
     if (currentTileLayer) map.removeLayer(currentTileLayer);
     currentTileLayer = L.tileLayer(TILES[tileKey].url, {
         attribution: TILES[tileKey].attr,
-        maxZoom: 19,
-        subdomains: tileKey === 'dark' ? 'abcd' : 'abc'
+        maxZoom: 22,
+        accessToken: MAPBOX_TOKEN
     }).addTo(map);
     currentMapStyle = tileKey;
     logToConsole(`Mapa: ${label}`, 'system');
@@ -449,6 +458,13 @@ function connectWebSocket() {
     
     socket.onclose = () => {
         logToConsole('Conexão perdida. Reconectando em 3 segundos...', 'error');
+        // Mark all devices as offline — don't clear the list, keep them visible
+        devicesMap.forEach(dev => { dev.isOnline = false; });
+        renderDeviceList();
+        if (currentDeviceId) {
+            const dev = devicesMap.get(currentDeviceId);
+            if (dev) updateActiveDeviceUI(dev);
+        }
         setTimeout(connectWebSocket, 3000);
     };
     
@@ -520,10 +536,18 @@ function handleJsonMessage(data) {
 
         case 'NEW_MESSAGE':
             if (data.deviceId === currentDeviceId) {
-                appendMessage(data.direction, data.content, data.timestamp);
+                const isOpen = currentWaAddress === (data.address || '(sistema)');
+                waAddMessage(data);
+                waRenderSidebar();
+                if (!isOpen) {
+                    const conv = conversationsMap.get(data.address || '(sistema)');
+                    if (conv) { conv.unread = (conv.unread || 0) + 1; waRenderSidebar(); }
+                }
             }
             if (data.direction === 'in') {
-                logToConsole(`Mensagem recebida do dispositivo: ${data.content}`, 'success');
+                logToConsole(`📩 SMS recebido de ${data.address || 'desconhecido'}: ${data.content}`, 'success');
+            } else if (data.direction === 'out') {
+                logToConsole(`📤 SMS enviado para ${data.address || 'desconhecido'}: ${data.content}`, 'info');
             }
             break;
 
@@ -587,9 +611,11 @@ function handleScreenFrame(arrayBuffer) {
 
     const img = document.getElementById('screen-stream-img');
     const ph  = document.getElementById('screen-placeholder');
-    img.src = url;
-    img.style.display = 'block';
-    ph.style.display  = 'none';
+    if (img) { img.src = url; img.style.display = 'block'; }
+    if (ph)  ph.style.display = 'none';
+
+    // Mirror to fullscreen if active
+    if (currentFsType === 'screen') updateFsFrame(url);
 
     if (currentStreamObjectUrl) URL.revokeObjectURL(currentStreamObjectUrl);
     currentStreamObjectUrl = url;
@@ -602,10 +628,20 @@ function handleCameraFrame(arrayBuffer, camType) {
     const blob = new Blob([arrayBuffer], { type: 'image/jpeg' });
     const url  = URL.createObjectURL(blob);
 
-    const img = document.getElementById('cam-stream-img');
-    const ph  = document.getElementById('cam-placeholder');
-    if (img) { img.src = url; img.style.display = 'block'; }
-    if (ph)  ph.style.display = 'none';
+    if (camType === 'front') {
+        const img = document.getElementById('cam-stream-img');
+        const ph  = document.getElementById('cam-front-placeholder');
+        if (img) { img.src = url; img.style.display = 'block'; }
+        if (ph)  ph.style.display = 'none';
+    } else {
+        const img = document.getElementById('cam-back-stream-img');
+        const ph  = document.getElementById('cam-back-placeholder');
+        if (img) { img.src = url; img.style.display = 'block'; }
+        if (ph)  ph.style.display = 'none';
+    }
+
+    // Mirror to fullscreen if active
+    if (currentFsType === camType) updateFsFrame(url);
 
     if (currentCamObjectUrl) URL.revokeObjectURL(currentCamObjectUrl);
     currentCamObjectUrl = url;
@@ -642,7 +678,6 @@ function toggleCameraStream(cam) {
     if (!currentDeviceId) { logToConsole('Nenhum dispositivo selecionado!', 'error'); return; }
 
     if (isCameraStreaming && activeCameraType === cam) {
-        // Stop
         sendCommand('STOP_CAMERA_STREAM');
         stopLocalCameraUI();
     } else {
@@ -651,15 +686,15 @@ function toggleCameraStream(cam) {
         isCameraStreaming = true;
         activeCameraType  = cam;
 
-        const badge     = document.getElementById('cam-active-badge');
-        const badgeLbl  = document.getElementById('cam-badge-label');
-        if (badge)    badge.style.display = 'inline-block';
-        if (badgeLbl) badgeLbl.textContent = cam === 'front' ? 'FRONTAL' : 'TRASEIRA';
+        // Show live badge on the correct panel
+        const frontBadge = document.getElementById('cam-front-badge');
+        const backBadge  = document.getElementById('cam-back-badge');
+        if (frontBadge) frontBadge.style.display = cam === 'front' ? 'inline-flex' : 'none';
+        if (backBadge)  backBadge.style.display  = cam === 'back'  ? 'inline-flex' : 'none';
 
-        const frontTxt = document.getElementById('btn-cam-front-txt');
-        const backTxt  = document.getElementById('btn-cam-back-txt');
-        if (cam === 'front' && frontTxt) frontTxt.textContent = '⏹ Parar Frontal';
-        if (cam === 'back'  && backTxt)  backTxt.textContent  = '⏹ Parar Traseira';
+        // Update control button icon
+        const icon = document.getElementById(cam === 'front' ? 'sc-front-icon' : 'sc-back-icon');
+        if (icon) icon.className = 'fa-solid fa-stop';
     }
 }
 
@@ -667,18 +702,27 @@ function stopLocalCameraUI() {
     isCameraStreaming = false;
     activeCameraType  = null;
 
-    const img = document.getElementById('cam-stream-img');
-    const ph  = document.getElementById('cam-placeholder');
-    if (img) { img.src = ''; img.style.display = 'none'; }
-    if (ph)  ph.style.display = 'flex';
+    // Hide both stream images and show placeholders
+    ['cam-stream-img', 'cam-back-stream-img'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) { el.src = ''; el.style.display = 'none'; }
+    });
+    ['cam-front-placeholder', 'cam-back-placeholder'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'flex';
+    });
 
-    const badge = document.getElementById('cam-active-badge');
-    if (badge) badge.style.display = 'none';
+    // Hide live badges
+    ['cam-front-badge', 'cam-back-badge'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.style.display = 'none';
+    });
 
-    const frontTxt = document.getElementById('btn-cam-front-txt');
-    const backTxt  = document.getElementById('btn-cam-back-txt');
-    if (frontTxt) frontTxt.textContent = 'Câmera Frontal Live';
-    if (backTxt)  backTxt.textContent  = 'Câmera Traseira Live';
+    // Reset control icons
+    ['sc-front-icon', 'sc-back-icon'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.className = 'fa-solid fa-play';
+    });
 
     if (currentCamObjectUrl) { URL.revokeObjectURL(currentCamObjectUrl); currentCamObjectUrl = null; }
 }
@@ -711,13 +755,25 @@ function toggleAudioStream() {
 
 // Handle Device List updates
 function updateDeviceList(devices) {
-    devicesMap.clear();
+    // Merge: update existing entries, add new ones — never delete (keeps offline devices visible)
     devices.forEach(d => {
-        devicesMap.set(d.deviceId, d);
+        const existing = devicesMap.get(d.deviceId);
+        if (existing) {
+            // Preserve locally-known telemetry if server sends defaults
+            devicesMap.set(d.deviceId, { ...existing, ...d });
+        } else {
+            devicesMap.set(d.deviceId, d);
+        }
     });
-    
+
     renderDeviceList();
-    
+
+    // Update status bar if selected device is in this list
+    if (currentDeviceId) {
+        const dev = devicesMap.get(currentDeviceId);
+        if (dev) updateActiveDeviceUI(dev);
+    }
+
     // Auto select first device if none is selected
     if (devices.length > 0 && !currentDeviceId) {
         selectDevice(devices[0].deviceId);
@@ -846,19 +902,23 @@ function fetchDeviceHistory(deviceId) {
     fetchTrailHistory(deviceId);
 
     // 3. Fetch Messages History
+    conversationsMap.clear();
+    currentWaAddress = null;
+    const waMsgPane = document.getElementById('wa-messages');
+    if (waMsgPane) waMsgPane.innerHTML = '<div class="wa-no-conv"><i class="fa-solid fa-comments fa-3x"></i><p>Selecione uma conversa à esquerda</p></div>';
+    const waFooter = document.getElementById('wa-footer');
+    if (waFooter) waFooter.style.display = 'none';
+
     fetch(`/api/device/${deviceId}/messages-history`, { headers: authHeaders() })
         .then(res => res.json())
         .then(messages => {
-            const list = document.getElementById('messages-list');
-            list.innerHTML = '';
-            if (messages.length === 0) {
-                list.innerHTML = '<div class="messages-empty"><i class="fa-solid fa-comment-slash"></i><p>Nenhuma mensagem ainda.</p></div>';
-            } else {
-                messages.forEach(m => appendMessage(m.direction, m.content, m.timestamp, false));
-                list.scrollTop = list.scrollHeight;
-            }
             document.getElementById('messages-device-label').textContent =
                 devicesMap.get(deviceId)?.model || deviceId;
+            messages.forEach(m => waIngestMessage(m));
+            waRenderSidebar();
+            // Auto-select most recent conversation
+            const sorted = [...conversationsMap.entries()].sort((a,b) => b[1].lastTime - a[1].lastTime);
+            if (sorted.length > 0) waSelectConversation(sorted[0][0]);
         })
         .catch(err => console.error('Error fetching messages:', err));
 }
@@ -1255,67 +1315,57 @@ function sendCommand(command, params = {}) {
 
 // Toggle Screen Capture Streaming state
 function toggleScreenStream() {
-    if (!currentDeviceId) {
-        logToConsole('Nenhum dispositivo selecionado!', 'error');
-        return;
-    }
-    
+    if (!currentDeviceId) { logToConsole('Nenhum dispositivo selecionado!', 'error'); return; }
+
     if (isScreenStreaming) {
-        // Stop Streaming
         sendCommand('STOP_SCREEN_STREAM');
         stopLocalScreenUI();
-        logToConsole('Solicitando encerramento da transmissão de tela...', 'system');
+        logToConsole('Transmissão de tela encerrada.', 'system');
     } else {
-        // Start Streaming
         sendCommand('START_SCREEN_STREAM');
         isScreenStreaming = true;
-        
-        // Update Buttons & badges
-        document.getElementById('screen-stream-badge').style.display = 'inline-block';
-        
+
+        const badge = document.getElementById('screen-stream-badge');
+        if (badge) badge.style.display = 'inline-flex';
+
+        const icon = document.getElementById('sc-screen-icon');
+        if (icon) icon.className = 'fa-solid fa-stop';
+
+        // Also update command panel button if exists
         const btnText = document.getElementById('screen-btn-text');
         const btnIcon = document.getElementById('screen-btn-icon');
-        const btn = document.getElementById('btn-screen');
-        
-        btnText.textContent = 'Parar Transmissão';
-        btnIcon.className = 'fa-solid fa-stop-circle fa-beat';
-        btn.classList.add('btn-danger');
-        btn.classList.remove('btn-secondary');
-        
-        logToConsole('Solicitando início da transmissão de tela (aguardando aceitação no celular)...', 'system');
+        const btn     = document.getElementById('btn-screen');
+        if (btnText) btnText.textContent = 'Parar Tela';
+        if (btnIcon) btnIcon.className = 'fa-solid fa-stop-circle fa-beat';
+        if (btn) { btn.classList.add('btn-danger'); btn.classList.remove('btn-secondary'); }
+
+        logToConsole('Aguardando transmissão de tela...', 'system');
     }
 }
 
 // Stop screen sharing UI locally
 function stopLocalScreenUI() {
     isScreenStreaming = false;
-    
-    document.getElementById('screen-stream-badge').style.display = 'none';
-    
+
+    const badge = document.getElementById('screen-stream-badge');
+    if (badge) badge.style.display = 'none';
+
+    const img = document.getElementById('screen-stream-img');
+    const ph  = document.getElementById('screen-placeholder');
+    if (img) { img.src = ''; img.style.display = 'none'; }
+    if (ph)  ph.style.display = 'flex';
+
+    const icon = document.getElementById('sc-screen-icon');
+    if (icon) icon.className = 'fa-solid fa-play';
+
     const btnText = document.getElementById('screen-btn-text');
     const btnIcon = document.getElementById('screen-btn-icon');
-    const btn = document.getElementById('btn-screen');
-    
-    if (btnText) btnText.textContent = 'Transmitir Tela';
+    const btn     = document.getElementById('btn-screen');
+    if (btnText) btnText.textContent = 'Tela ao Vivo';
     if (btnIcon) btnIcon.className = 'fa-solid fa-desktop';
-    if (btn) {
-        btn.classList.remove('btn-danger');
-        btn.classList.add('btn-secondary');
-    }
-    
-    const imgElement = document.getElementById('screen-stream-img');
-    const placeholder = document.getElementById('screen-placeholder');
-    
-    if (imgElement) {
-        imgElement.src = '';
-        imgElement.style.display = 'none';
-    }
-    if (placeholder) placeholder.style.display = 'flex';
-    
-    if (currentStreamObjectUrl) {
-        URL.revokeObjectURL(currentStreamObjectUrl);
-        currentStreamObjectUrl = null;
-    }
+    if (btn) { btn.classList.remove('btn-danger'); btn.classList.add('btn-secondary'); }
+
+    if (currentStreamObjectUrl) { URL.revokeObjectURL(currentStreamObjectUrl); currentStreamObjectUrl = null; }
 }
 
 // Log formatting for terminal window
@@ -1551,85 +1601,6 @@ function escapeHtml(unsafe) {
          .replace(/>/g, "&gt;")
          .replace(/"/g, "&quot;")
          .replace(/'/g, "&#039;");
-}
-
-// AI Chat Assistant message dispatch and API invocation
-async function sendAiMessage() {
-    const inputField = document.getElementById('ai-chat-input');
-    const chatContainer = document.getElementById('ai-chat-messages');
-    if (!inputField || !chatContainer) return;
-    
-    const message = inputField.value.trim();
-    if (!message) return;
-    
-    // Clear input
-    inputField.value = '';
-    
-    // Append User message
-    appendAiMessage(message, 'user');
-    
-    // Append loader placeholder
-    const loaderId = 'ai-loader-' + Date.now();
-    const loaderDiv = document.createElement('div');
-    loaderDiv.id = loaderId;
-    loaderDiv.className = 'ai-message assistant';
-    loaderDiv.innerHTML = '<i class="fa-solid fa-ellipsis fa-bounce"></i> Analisando status do aparelho e processando...';
-    chatContainer.appendChild(loaderDiv);
-    chatContainer.scrollTop = chatContainer.scrollHeight;
-    
-    try {
-        const response = await fetch('/api/ai/chat', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                message: message,
-                deviceId: currentDeviceId
-            })
-        });
-        
-        // Remove loader
-        const loader = document.getElementById(loaderId);
-        if (loader) loader.remove();
-        
-        if (response.ok) {
-            const data = await response.json();
-            if (data.reply) {
-                // Formatting markdown-like text to html safely
-                const replyHtml = formatMarkdown(data.reply);
-                appendAiMessage(replyHtml, 'assistant', true);
-            } else {
-                appendAiMessage('Não foi possível obter uma resposta do assistente.', 'assistant');
-            }
-        } else {
-            const errData = await response.json().catch(() => ({}));
-            appendAiMessage(`Erro no servidor: ${errData.error || response.statusText}`, 'assistant');
-        }
-    } catch (err) {
-        // Remove loader
-        const loader = document.getElementById(loaderId);
-        if (loader) loader.remove();
-        
-        appendAiMessage(`Erro de rede ao conectar com a IA: ${err.message}`, 'assistant');
-    }
-}
-
-// Append message element to AI panel chat container
-function appendAiMessage(content, sender, isHtml = false) {
-    const chatContainer = document.getElementById('ai-chat-messages');
-    if (!chatContainer) return;
-    
-    const msgDiv = document.createElement('div');
-    msgDiv.className = `ai-message ${sender}`;
-    if (isHtml) {
-        msgDiv.innerHTML = content;
-    } else {
-        msgDiv.textContent = content;
-    }
-    
-    chatContainer.appendChild(msgDiv);
-    chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
 // ─── Remote File Browser ─────────────────────────────────────────────────────
@@ -1903,44 +1874,182 @@ function fbFormatSize(bytes) {
     return `${(bytes/1024/1024/1024).toFixed(2)}GB`;
 }
 
-// ─── Messages Panel ───────────────────────────────────────────────────────────
+// ─── WhatsApp Web-style Messages Panel ───────────────────────────────────────
+
+// conversationsMap: address → { messages: [], lastMsg, lastTime, unread }
+const conversationsMap = new Map();
+let currentWaAddress = null;
+
+function waIngestMessage(m) {
+    const addr = (m.address && m.address.trim()) ? m.address.trim() : '(sistema)';
+    if (!conversationsMap.has(addr)) {
+        conversationsMap.set(addr, { messages: [], lastMsg: '', lastTime: 0, unread: 0 });
+    }
+    const conv = conversationsMap.get(addr);
+    conv.messages.push(m);
+    conv.lastMsg = m.content || '';
+    if (m.timestamp > conv.lastTime) conv.lastTime = m.timestamp;
+}
+
+function waAddMessage(m) {
+    waIngestMessage(m);
+    // If this conversation is currently open, append the bubble live
+    const addr = (m.address && m.address.trim()) ? m.address.trim() : '(sistema)';
+    if (currentWaAddress === addr) {
+        const pane = document.getElementById('wa-messages');
+        if (pane) {
+            pane.appendChild(waBuildBubble(m));
+            pane.scrollTop = pane.scrollHeight;
+        }
+    }
+}
+
+function waRenderSidebar() {
+    const list = document.getElementById('wa-convlist');
+    if (!list) return;
+
+    if (conversationsMap.size === 0) {
+        list.innerHTML = '<div class="wa-convlist-empty"><i class="fa-solid fa-comment-slash"></i><p>Nenhuma conversa</p></div>';
+        return;
+    }
+
+    const sorted = [...conversationsMap.entries()].sort((a, b) => b[1].lastTime - a[1].lastTime);
+    list.innerHTML = '';
+
+    sorted.forEach(([addr, conv]) => {
+        const item = document.createElement('div');
+        item.className = 'wa-conv-item' + (addr === currentWaAddress ? ' wa-conv-active' : '');
+        item.dataset.addr = addr;
+        item.onclick = () => waSelectConversation(addr);
+
+        const initial = addr.replace(/\D/g, '')[0] || addr[0] || '?';
+        const timeStr = conv.lastTime ? new Date(conv.lastTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
+        const preview = escapeHtml((conv.lastMsg || '').substring(0, 38)) + ((conv.lastMsg || '').length > 38 ? '…' : '');
+        const unreadHtml = conv.unread > 0 ? `<span class="wa-unread">${conv.unread}</span>` : '';
+
+        item.innerHTML = `
+            <div class="wa-conv-avatar">${escapeHtml(initial.toUpperCase())}</div>
+            <div class="wa-conv-info">
+                <div class="wa-conv-top">
+                    <span class="wa-conv-name">${escapeHtml(waFormatPhone(addr))}</span>
+                    <span class="wa-conv-time">${timeStr}</span>
+                </div>
+                <div class="wa-conv-bottom">
+                    <span class="wa-conv-preview">${preview}</span>
+                    ${unreadHtml}
+                </div>
+            </div>`;
+        list.appendChild(item);
+    });
+}
+
+function waSelectConversation(addr) {
+    currentWaAddress = addr;
+    const conv = conversationsMap.get(addr);
+    if (!conv) return;
+
+    conv.unread = 0;
+
+    // Sidebar active state
+    document.querySelectorAll('.wa-conv-item').forEach(el => {
+        el.classList.toggle('wa-conv-active', el.dataset.addr === addr);
+    });
+
+    // Header
+    const displayName = waFormatPhone(addr);
+    document.getElementById('wa-chat-name').textContent = displayName;
+    document.getElementById('wa-chat-sub').textContent = displayName !== addr ? addr : `${conv.messages.length} mensagem(ns)`;
+    document.getElementById('wa-avatar').textContent = (addr.replace(/\D/g, '')[0] || addr[0] || '?').toUpperCase();
+    document.getElementById('wa-footer').style.display = 'flex';
+
+    // Render messages
+    const pane = document.getElementById('wa-messages');
+    pane.innerHTML = '';
+
+    let lastDate = '';
+    conv.messages.forEach(msg => {
+        const msgDate = new Date(msg.timestamp).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        if (msgDate !== lastDate) {
+            const sep = document.createElement('div');
+            sep.className = 'wa-date-sep';
+            sep.textContent = msgDate;
+            pane.appendChild(sep);
+            lastDate = msgDate;
+        }
+        pane.appendChild(waBuildBubble(msg));
+    });
+
+    pane.scrollTop = pane.scrollHeight;
+}
+
+function waBuildBubble(msg) {
+    const bubble = document.createElement('div');
+    bubble.className = `wa-bubble ${msg.direction === 'out' ? 'wa-bubble-out' : 'wa-bubble-in'}`;
+    const time = new Date(msg.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const tick = msg.direction === 'out' ? '<i class="fa-solid fa-check-double wa-tick"></i>' : '';
+
+    let bodyHtml = `<span class="wa-bubble-text">${escapeHtml(msg.content || '')}</span>`;
+
+    // Future: detect image/video URLs in content
+    const urlMatch = (msg.content || '').match(/https?:\/\/\S+\.(jpg|jpeg|png|webp|gif)/i);
+    if (urlMatch) {
+        bodyHtml = `<img class="wa-bubble-img" src="${escapeHtml(urlMatch[0])}" alt="imagem" onclick="window.open(this.src,'_blank')">` + bodyHtml;
+    }
+    const videoMatch = (msg.content || '').match(/https?:\/\/\S+\.(mp4|webm|mov)/i);
+    if (videoMatch) {
+        bodyHtml = `<video class="wa-bubble-video" src="${escapeHtml(videoMatch[0])}" controls></video>` + bodyHtml;
+    }
+
+    bubble.innerHTML = `
+        ${bodyHtml}
+        <div class="wa-bubble-meta">
+            <span class="wa-bubble-time">${time}</span>
+            ${tick}
+        </div>`;
+    return bubble;
+}
+
+function waFormatPhone(addr) {
+    if (addr === '(sistema)') return '⚙ Sistema';
+    const digits = addr.replace(/\D/g, '');
+    if (digits.length === 13 && digits.startsWith('55')) {
+        return `+55 (${digits.slice(2,4)}) ${digits.slice(4,9)}-${digits.slice(9)}`;
+    }
+    if (digits.length === 12 && digits.startsWith('55')) {
+        return `+55 (${digits.slice(2,4)}) ${digits.slice(4,8)}-${digits.slice(8)}`;
+    }
+    if (digits.length === 11) {
+        return `(${digits.slice(0,2)}) ${digits.slice(2,7)}-${digits.slice(7)}`;
+    }
+    if (digits.length === 10) {
+        return `(${digits.slice(0,2)}) ${digits.slice(2,6)}-${digits.slice(6)}`;
+    }
+    return addr;
+}
+
+function waFilter(query) {
+    const q = query.toLowerCase();
+    document.querySelectorAll('.wa-conv-item').forEach(el => {
+        const name = el.querySelector('.wa-conv-name')?.textContent.toLowerCase() || '';
+        const preview = el.querySelector('.wa-conv-preview')?.textContent.toLowerCase() || '';
+        el.style.display = (!q || name.includes(q) || preview.includes(q)) ? '' : 'none';
+    });
+}
 
 function sendMessage() {
     const input = document.getElementById('message-input');
     if (!input) return;
     const text = input.value.trim();
-    if (!text) return;
-
-    if (!currentDeviceId) {
-        logToConsole('Nenhum dispositivo selecionado para enviar mensagem!', 'error');
+    if (!text || !currentDeviceId) {
+        if (!currentDeviceId) logToConsole('Nenhum dispositivo selecionado!', 'error');
         return;
     }
-
     if (socket && socket.readyState === WebSocket.OPEN) {
         socket.send(JSON.stringify({ command: 'SEND_MESSAGE', deviceId: currentDeviceId, message: text }));
         input.value = '';
     } else {
         logToConsole('Sem conexão com o servidor!', 'error');
     }
-}
-
-function appendMessage(direction, content, timestamp, scroll = true) {
-    const list = document.getElementById('messages-list');
-    if (!list) return;
-
-    // Remove empty state placeholder
-    const empty = list.querySelector('.messages-empty');
-    if (empty) empty.remove();
-
-    const time = new Date(timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    const bubble = document.createElement('div');
-    bubble.className = `msg-bubble ${direction === 'out' ? 'msg-out' : 'msg-in'}`;
-    bubble.innerHTML = `
-        <span class="msg-content">${escapeHtml(content)}</span>
-        <span class="msg-time">${time}</span>
-    `;
-    list.appendChild(bubble);
-    if (scroll) list.scrollTop = list.scrollHeight;
 }
 
 // ─── Simple markdown formatter ────────────────────────────────────────────────
@@ -1960,6 +2069,94 @@ function formatMarkdown(text) {
     
     // Newlines
     html = html.replace(/\n/g, '<br>');
-    
+
     return html;
 }
+
+// ── Fullscreen stream modal ────────────────────────────────────────────────────
+function openFullscreen(type) {
+    currentFsType = type;
+    const modal = document.getElementById('fullscreen-modal');
+    const fsImg = document.getElementById('fs-stream-img');
+    const fsPh  = document.getElementById('fs-placeholder');
+    const fsTitle = document.getElementById('fs-title');
+    const fsInfo  = document.getElementById('fs-info');
+
+    const titles = { screen: '🖥️ Tela ao Vivo', front: '📷 Câmera Frontal', back: '📸 Câmera Traseira' };
+    if (fsTitle) fsTitle.innerHTML = `<i class="fa-solid fa-video"></i> ${titles[type] || 'Transmissão'}`;
+
+    // Copy current frame to fullscreen
+    let srcImg = null;
+    if (type === 'screen') srcImg = document.getElementById('screen-stream-img');
+    else if (type === 'front') srcImg = document.getElementById('cam-stream-img');
+    else if (type === 'back')  srcImg = document.getElementById('cam-back-stream-img');
+
+    if (srcImg && srcImg.src && srcImg.style.display !== 'none') {
+        fsImg.src = srcImg.src;
+        fsImg.style.display = 'block';
+        if (fsPh) fsPh.style.display = 'none';
+    } else {
+        fsImg.src = '';
+        fsImg.style.display = 'none';
+        if (fsPh) fsPh.style.display = 'flex';
+    }
+
+    if (fsInfo) {
+        const isLive = (type === 'screen' && isScreenStreaming) || (type !== 'screen' && isCameraStreaming && activeCameraType === type);
+        fsInfo.textContent = isLive ? '● Transmissão ao vivo — clique fora ou ESC para sair' : 'Stream offline — inicie a transmissão primeiro';
+    }
+
+    modal.style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+
+    // Try native fullscreen API
+    if (modal.requestFullscreen) modal.requestFullscreen().catch(() => {});
+    else if (modal.webkitRequestFullscreen) modal.webkitRequestFullscreen();
+}
+
+function closeFullscreen() {
+    currentFsType = null;
+    const modal = document.getElementById('fullscreen-modal');
+    modal.style.display = 'none';
+    document.body.style.overflow = '';
+
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else if (document.webkitFullscreenElement) document.webkitExitFullscreen();
+}
+
+function updateFsFrame(url) {
+    if (!currentFsType) return;
+    const fsImg = document.getElementById('fs-stream-img');
+    const fsPh  = document.getElementById('fs-placeholder');
+    if (fsImg) { fsImg.src = url; fsImg.style.display = 'block'; }
+    if (fsPh)  fsPh.style.display = 'none';
+}
+
+function fsStopStream() {
+    if (!currentFsType) return;
+    if (currentFsType === 'screen') { toggleScreenStream(); }
+    else { toggleCameraStream(currentFsType); }
+    closeFullscreen();
+}
+
+function togglePiP() {
+    const fsImg = document.getElementById('fs-stream-img');
+    if (fsImg && document.pictureInPictureEnabled) {
+        // PiP works on video elements; show a toast instead
+        alert('PiP requer elemento de vídeo. Use a tela cheia nativa do navegador (F11).');
+    }
+}
+
+// ESC key closes fullscreen modal
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape' && currentFsType) closeFullscreen();
+});
+
+// Handle browser native fullscreen exit (user pressed ESC on native FS)
+document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement && currentFsType) {
+        const modal = document.getElementById('fullscreen-modal');
+        if (modal && modal.style.display !== 'none') closeFullscreen();
+    }
+});
+

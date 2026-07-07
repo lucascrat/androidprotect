@@ -130,27 +130,6 @@ data class LogItem(
     val timestamp: Long
 )
 
-@Serializable
-data class GeminiPart(val text: String)
-
-@Serializable
-data class GeminiContent(val parts: List<GeminiPart>)
-
-@Serializable
-data class GeminiRequest(val contents: List<GeminiContent>)
-
-@Serializable
-data class GeminiResponsePart(val text: String? = null)
-
-@Serializable
-data class GeminiResponseContent(val parts: List<GeminiResponsePart>? = null)
-
-@Serializable
-data class GeminiCandidate(val content: GeminiResponseContent? = null)
-
-@Serializable
-data class GeminiResponse(val candidates: List<GeminiCandidate>? = null)
-
 // SQL Tables Definitions using Exposed
 object UsersTable : Table("users") {
     val id        = integer("id").autoIncrement()
@@ -205,7 +184,8 @@ object LogsTable : Table("security_logs") {
 object MessagesTable : Table("messages") {
     val id = integer("id").autoIncrement()
     val deviceId = varchar("device_id", 50)
-    val direction = varchar("direction", 10) // "out" = dashboard→device, "in" = device→dashboard
+    val direction = varchar("direction", 10) // "out" = sent, "in" = received
+    val address = varchar("address", 50).default("") // phone number or contact
     val content = text("content")
     val timestamp = long("timestamp")
 
@@ -274,52 +254,10 @@ fun getSessionUserId(call: io.ktor.server.application.ApplicationCall): Int? {
 data class MessageItem(
     val id: Int,
     val direction: String,
+    val address: String = "",
     val content: String,
     val timestamp: Long
 )
-
-// Call Gemini API using Java HttpClient securely loading GEMINI_API_KEY from environment
-fun callGeminiApi(prompt: String): String {
-    val apiKey = System.getenv("GEMINI_API_KEY")
-    if (apiKey.isNullOrBlank()) {
-        return "Erro: A chave de API do Gemini não foi configurada no servidor (variável de ambiente GEMINI_API_KEY)."
-    }
-
-    try {
-        val client = java.net.http.HttpClient.newHttpClient()
-        val requestBody = packetJson.encodeToString(
-            GeminiRequest(
-                contents = listOf(
-                    GeminiContent(
-                        parts = listOf(
-                            GeminiPart(text = prompt)
-                        )
-                    )
-                )
-            )
-        )
-
-        val request = java.net.http.HttpRequest.newBuilder()
-            .uri(java.net.URI.create("https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=$apiKey"))
-            .header("Content-Type", "application/json")
-            .POST(java.net.http.HttpRequest.BodyPublishers.ofString(requestBody))
-            .build()
-
-        val response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString())
-        if (response.statusCode() == 200) {
-            val resObj = packetJson.decodeFromString<GeminiResponse>(response.body())
-            val replyText = resObj.candidates?.firstOrNull()?.content?.parts?.firstOrNull()?.text
-            if (!replyText.isNullOrBlank()) {
-                return replyText
-            }
-        }
-        println("GEMINI AI ERROR: Status ${response.statusCode()} | Body: ${response.body()}")
-        return "Erro: Falha ao obter resposta do Gemini AI (Status: ${response.statusCode()})."
-    } catch (e: Exception) {
-        println("GEMINI AI EXCEPTION: ${e.message}")
-        return "Erro: Ocorreu uma exceção ao conectar com a IA: ${e.message}"
-    }
-}
 
 // Database Connection Manager (PostgreSQL with HikariCP, falling back to local SQLite)
 fun initDatabase() {
@@ -360,7 +298,7 @@ fun initDatabase() {
 
     transaction {
         SchemaUtils.create(UsersTable, SessionsTable, DevicesTable, TelemetryTable, LogsTable, MessagesTable)
-        SchemaUtils.createMissingTablesAndColumns(DevicesTable) // adds ownerId to existing installs
+        SchemaUtils.createMissingTablesAndColumns(DevicesTable, MessagesTable) // migrate new columns on existing installs
 
         // Reset all devices to offline state initially on server start
         DevicesTable.update {
@@ -497,12 +435,14 @@ fun main() {
             get("/api/config") {
                 // Reads from env var; falls back to built-in key if not configured
                 val mapsKey = System.getenv("GOOGLE_MAPS_API_KEY") ?: ""
-                call.respond(mapOf("mapsKey" to mapsKey))
+                val mapboxToken = System.getenv("MAPBOX_TOKEN") ?: ""
+                call.respond(mapOf("mapsKey" to mapsKey, "mapboxToken" to mapboxToken))
             }
 
             // REST endpoint to list photos and audios for a device (returns full URLs)
             get("/uploads/{id}/media-list") {
                 val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
+                if (!assertDeviceOwner(call, id)) return@get
 
                 val client = s3Client
                 if (client != null) {
@@ -597,6 +537,7 @@ fun main() {
             // REST Endpoint to fetch historical coordinates for routing (up to 30 days, max 5000 points)
             get("/api/device/{id}/telemetry-history") {
                 val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
+                if (!assertDeviceOwner(call, id)) return@get
                 val days = call.request.queryParameters["days"]?.toIntOrNull()?.coerceIn(1, 30) ?: 30
                 val since = System.currentTimeMillis() - days.toLong() * 24 * 60 * 60 * 1000
 
@@ -621,6 +562,7 @@ fun main() {
             // REST Endpoint to fetch message history
             get("/api/device/{id}/messages-history") {
                 val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
+                if (!assertDeviceOwner(call, id)) return@get
                 val history = transaction {
                     MessagesTable.select { MessagesTable.deviceId eq id }
                         .orderBy(MessagesTable.timestamp to SortOrder.ASC)
@@ -629,6 +571,7 @@ fun main() {
                             MessageItem(
                                 id = it[MessagesTable.id],
                                 direction = it[MessagesTable.direction],
+                                address = it[MessagesTable.address],
                                 content = it[MessagesTable.content],
                                 timestamp = it[MessagesTable.timestamp]
                             )
@@ -640,6 +583,7 @@ fun main() {
             // REST Endpoint to fetch historical security console logs
             get("/api/device/{id}/logs-history") {
                 val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
+                if (!assertDeviceOwner(call, id)) return@get
                 val history = transaction {
                     LogsTable.select { LogsTable.deviceId eq id }
                         .orderBy(LogsTable.timestamp to SortOrder.DESC)
@@ -654,89 +598,6 @@ fun main() {
                         .reversed()
                 }
                 call.respond(history)
-            }
-
-            // REST Endpoint for AI chat assistant contextualized with device status
-            post("/api/ai/chat") {
-                try {
-                    val params = call.receive<Map<String, String>>()
-                    val userMsg = params["message"] ?: return@post call.respond(mapOf("error" to "Missing message"))
-                    val deviceId = params["deviceId"]
-                    
-                    // Construct contextual information about the device
-                    val contextBuilder = StringBuilder()
-                    contextBuilder.append("Você é o 'ProtegeAI', o Assistente de Inteligência Artificial Anti-Furto integrado ao AndroidProtect.\n")
-                    contextBuilder.append("Você ajuda o dono do celular a rastreá-lo, monitorá-lo e analisar o status de segurança do dispositivo.\n")
-                    contextBuilder.append("Responda sempre de forma prestativa, direta, profissional, em português brasileiro.\n")
-                    contextBuilder.append("Mantenha as respostas concisas e foque na segurança física do usuário (ex: alertar para não tentar recuperar o celular pessoalmente face ao risco de agressão, orientar a registrar um Boletim de Ocorrência).\n\n")
-                    
-                    if (!deviceId.isNullOrBlank()) {
-                        val device = transaction {
-                            DevicesTable.select { DevicesTable.id eq deviceId }.map {
-                                DeviceInfo(
-                                    deviceId = it[DevicesTable.id],
-                                    model = it[DevicesTable.model],
-                                    battery = it[DevicesTable.battery],
-                                    isCharging = it[DevicesTable.isCharging],
-                                    isOnline = it[DevicesTable.isOnline]
-                                )
-                            }.firstOrNull()
-                        }
-                        
-                        if (device != null) {
-                            contextBuilder.append("DADOS DO APARELHO MONITORADO:\n")
-                            contextBuilder.append("- ID: ${device.deviceId}\n")
-                            contextBuilder.append("- Modelo: ${device.model}\n")
-                            contextBuilder.append("- Estado: ${if (device.isOnline) "ONLINE (Conectado ao painel)" else "OFFLINE (Desconectado)"}\n")
-                            contextBuilder.append("- Bateria: ${device.battery}% (${if (device.isCharging) "Carregando" else "Descarregando"})\n")
-                            
-                            // Get latest telemetry coordinates
-                            val telemetry = transaction {
-                                TelemetryTable.select { TelemetryTable.deviceId eq deviceId }
-                                    .orderBy(TelemetryTable.timestamp to SortOrder.DESC)
-                                    .limit(1)
-                                    .map {
-                                        mapOf(
-                                            "lat" to it[TelemetryTable.lat],
-                                            "lng" to it[TelemetryTable.lng],
-                                            "accuracy" to it[TelemetryTable.accuracy]
-                                        )
-                                    }.firstOrNull()
-                            }
-                            if (telemetry != null) {
-                                contextBuilder.append("- Última Localização: Latitude ${telemetry["lat"]}, Longitude ${telemetry["lng"]} (Precisão: ${telemetry["accuracy"]}m)\n")
-                            } else {
-                                contextBuilder.append("- Última Localização: Nenhuma coordenada recebida ainda.\n")
-                            }
-                            
-                            // Get latest 10 security logs
-                            val logs = transaction {
-                                LogsTable.select { LogsTable.deviceId eq deviceId }
-                                    .orderBy(LogsTable.timestamp to SortOrder.DESC)
-                                    .limit(10)
-                                    .map { it[LogsTable.message] }
-                                    .reversed()
-                            }
-                            if (logs.isNotEmpty()) {
-                                contextBuilder.append("\nÚLTIMOS EVENTOS DE SEGURANÇA REGISTRADOS:\n")
-                                logs.forEach { logMsg ->
-                                    contextBuilder.append("* $logMsg\n")
-                                }
-                            }
-                        }
-                    } else {
-                        contextBuilder.append("Nenhum aparelho foi selecionado ainda pelo usuário no painel.\n")
-                    }
-                    
-                    contextBuilder.append("\nMENSAGEM DO USUÁRIO: $userMsg\n")
-                    contextBuilder.append("PROTEGEAI:")
-                    
-                    val aiReply = callGeminiApi(contextBuilder.toString())
-                    call.respond(mapOf("reply" to aiReply))
-                } catch (e: Exception) {
-                    println("API AI CHAT EXCEPTION: ${e.message}")
-                    call.respond(io.ktor.http.HttpStatusCode.InternalServerError, mapOf("error" to "Failed to process request: ${e.message}"))
-                }
             }
 
             // REST Endpoint for Photo Upload from Android
@@ -791,7 +652,7 @@ fun main() {
                     }
 
                     val event = """{"type":"PHOTO_UPLOADED","deviceId":"$id","url":"$fileUrl"}"""
-                    broadcastToDashboards(event)
+                    broadcastToDashboards(event, id)
                     call.respond(mapOf("success" to true, "fileName" to savedFile!!.name))
                 } else {
                     call.respond(mapOf("success" to false, "error" to "No file received"))
@@ -850,7 +711,7 @@ fun main() {
                     }
 
                     val event = """{"type":"AUDIO_UPLOADED","deviceId":"$id","url":"$fileUrl"}"""
-                    broadcastToDashboards(event)
+                    broadcastToDashboards(event, id)
                     call.respond(mapOf("success" to true, "fileName" to savedFile!!.name))
                 } else {
                     call.respond(mapOf("success" to false, "error" to "No file received"))
@@ -987,8 +848,8 @@ fun main() {
                     DeviceInfo(deviceId, model, battery, isCharging, isOnline = true)
                 }
 
-                // Notify dashboards
-                broadcastToDashboards(packetJson.encodeToString(DeviceConnectedPacket(device = info)))
+                // Notify only the owner's dashboards
+                broadcastToDashboards(packetJson.encodeToString(DeviceConnectedPacket(device = info)), deviceId)
 
                 try {
                     for (frame in incoming) {
@@ -1000,7 +861,25 @@ fun main() {
                                         val json = Json.parseToJsonElement(text).jsonObject
                                         val type = json["type"]?.jsonPrimitive?.content
                                         
-                                        if (type == "MESSAGE") {
+                                        if (type == "SMS") {
+                                            val msg  = json["content"]?.jsonPrimitive?.content ?: ""
+                                            val dir  = json["direction"]?.jsonPrimitive?.content?.let { if (it == "out") "out" else "in" } ?: "in"
+                                            val addr = json["address"]?.jsonPrimitive?.content ?: ""
+                                            val ts   = json["timestamp"]?.jsonPrimitive?.content?.toLongOrNull() ?: System.currentTimeMillis()
+                                            if (msg.isNotBlank()) {
+                                                val savedId = transaction {
+                                                    MessagesTable.insert {
+                                                        it[MessagesTable.deviceId] = deviceId
+                                                        it[direction] = dir
+                                                        it[MessagesTable.address] = addr
+                                                        it[content] = msg
+                                                        it[timestamp] = ts
+                                                    } get MessagesTable.id
+                                                }
+                                                val event = """{"type":"NEW_MESSAGE","deviceId":"$deviceId","direction":"$dir","address":${Json.encodeToString(addr)},"content":${Json.encodeToString(msg)},"timestamp":$ts,"id":$savedId}"""
+                                                broadcastToDashboards(event, deviceId)
+                                            }
+                                        } else if (type == "MESSAGE") {
                             val msg = json["content"]?.jsonPrimitive?.content ?: ""
                             if (msg.isNotBlank()) {
                                 val savedId = transaction {
@@ -1012,7 +891,7 @@ fun main() {
                                     } get MessagesTable.id
                                 }
                                 val event = """{"type":"NEW_MESSAGE","deviceId":"$deviceId","direction":"in","content":${Json.encodeToString(msg)},"timestamp":${System.currentTimeMillis()},"id":$savedId}"""
-                                broadcastToDashboards(event)
+                                broadcastToDashboards(event, deviceId)
                             }
                         } else if (type == "TELEMETRY") {
                                             val lat = json["lat"]?.jsonPrimitive?.content?.toDoubleOrNull()
@@ -1053,14 +932,13 @@ fun main() {
                                             }
                                         }
 
-                                        // Relay JSON telemetry directly to dashboards
-                                        broadcastToDashboards(text)
+                                        // Relay JSON telemetry only to the owner's dashboards
+                                        broadcastToDashboards(text, deviceId)
                                     } catch (e: Exception) {
-                                        // Fallback relay in case of parsing errors
-                                        broadcastToDashboards(text)
+                                        broadcastToDashboards(text, deviceId)
                                     }
                                 } else {
-                                    broadcastToDashboards(text)
+                                    broadcastToDashboards(text, deviceId)
                                 }
                             }
                             is Frame.Binary -> {
@@ -1092,7 +970,7 @@ fun main() {
                         }
                     }
 
-                    broadcastToDashboards(packetJson.encodeToString(DeviceDisconnectedPacket(deviceId = deviceId)))
+                    broadcastToDashboards(packetJson.encodeToString(DeviceDisconnectedPacket(deviceId = deviceId)), deviceId)
                 }
             }
 
@@ -1140,6 +1018,15 @@ fun main() {
                                 val command = json["command"]?.jsonPrimitive?.content
 
                                 if (destDeviceId != null) {
+                                    // Verify the dashboard user owns this device before relaying any command
+                                    val devOwner = deviceOwnerCache[destDeviceId] ?: transaction {
+                                        DevicesTable.select { DevicesTable.id eq destDeviceId }.firstOrNull()?.get(DevicesTable.ownerId)
+                                    }
+                                    if (userId > 0 && devOwner != null && devOwner != userId) {
+                                        send(packetJson.encodeToString(ErrorPacket(message = "Acesso negado ao dispositivo $destDeviceId")))
+                                        continue
+                                    }
+
                                     if (command == "SEND_MESSAGE") {
                                         val msgContent = json["message"]?.jsonPrimitive?.content ?: ""
                                         if (msgContent.isNotBlank()) {
@@ -1154,9 +1041,9 @@ fun main() {
                                             }
                                             // Relay to device
                                             deviceSessions[destDeviceId]?.send(Frame.Text(text))
-                                            // Echo to all dashboards so everyone sees the sent message
+                                            // Echo only to the owner's dashboards
                                             val event = """{"type":"NEW_MESSAGE","deviceId":"$destDeviceId","direction":"out","content":${Json.encodeToString(msgContent)},"timestamp":$now,"id":$savedId}"""
-                                            broadcastToDashboards(event)
+                                            broadcastToDashboards(event, destDeviceId)
                                         }
                                     } else {
                                         val devSession = deviceSessions[destDeviceId]
@@ -1184,12 +1071,16 @@ fun main() {
     }.start(wait = true)
 }
 
-// Broadcast to dashboards that own the given deviceId (or all if deviceId unknown)
+// Broadcast only to the dashboard(s) that own the given device
 suspend fun broadcastToDashboards(event: String, deviceId: String? = null) {
     val ownerId = if (deviceId != null) deviceOwnerCache[deviceId] else null
     for ((dash, userId) in dashboardSessions) {
-        // Send if: owner matches, or dashboard is unauthenticated (userId=0), or device has no owner
-        if (ownerId == null || userId == 0 || userId == ownerId) {
+        val canReceive = when {
+            userId == 0 -> ownerId == null        // unauthenticated: only see unlinked devices
+            ownerId == null -> false               // device not linked yet: nobody sees it
+            else -> userId == ownerId              // authenticated: only their own devices
+        }
+        if (canReceive) {
             try { dash.send(Frame.Text(event)) }
             catch (e: Exception) { dashboardSessions.remove(dash) }
         }
@@ -1197,14 +1088,35 @@ suspend fun broadcastToDashboards(event: String, deviceId: String? = null) {
 }
 
 // Broadcast binary screen frame only to dashboards belonging to device owner
+
+// Broadcast binary screen/camera frame only to the device owner's dashboards
 suspend fun broadcastBinaryToDashboards(data: ByteArray, deviceId: String) {
     val ownerId = deviceOwnerCache[deviceId]
     for ((dash, userId) in dashboardSessions) {
-        if (ownerId == null || userId == 0 || userId == ownerId) {
+        val canReceive = when {
+            userId == 0  -> false           // unauthenticated dashboards never receive binary frames
+            ownerId == null -> false        // unlinked device: nobody sees it
+            else -> userId == ownerId       // only the owner
+        }
+        if (canReceive) {
             try { dash.send(Frame.Binary(true, data)) }
             catch (e: Exception) { dashboardSessions.remove(dash) }
         }
     }
+}
+
+// Verify the authenticated caller owns the given device — responds 401/403 and returns false if not
+suspend fun assertDeviceOwner(call: io.ktor.server.application.ApplicationCall, deviceId: String): Boolean {
+    val userId = getSessionUserId(call)
+        ?: run { call.respond(io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado")); return false }
+    val ownerId = deviceOwnerCache[deviceId] ?: transaction {
+        DevicesTable.select { DevicesTable.id eq deviceId }.firstOrNull()?.get(DevicesTable.ownerId)
+    }
+    if (ownerId == null || ownerId != userId) {
+        call.respond(io.ktor.http.HttpStatusCode.Forbidden, mapOf("error" to "Acesso negado"))
+        return false
+    }
+    return true
 }
 
 // Helper extension

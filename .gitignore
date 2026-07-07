@@ -11,3 +11,6 @@ build/
 .gradle/
 .system_generated/
 *.log
+.claude/
+*.keystore
+protect.keystore

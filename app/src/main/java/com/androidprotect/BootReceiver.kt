@@ -22,10 +22,13 @@ class BootReceiver : BroadcastReceiver() {
                 } else {
                     context.startService(serviceIntent)
                 }
-                Log.d("BootReceiver", "Successfully scheduled AntiTheftService at Boot")
+                Log.d("BootReceiver", "Successfully started AntiTheftService at Boot")
             } catch (e: Exception) {
                 Log.e("BootReceiver", "Failed to start AntiTheftService at Boot: ${e.message}")
             }
+
+            // Schedule watchdog to keep service alive after boot
+            ServiceWatchdogWorker.schedule(context)
         }
     }
 }

