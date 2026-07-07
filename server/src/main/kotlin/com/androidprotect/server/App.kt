@@ -742,16 +742,16 @@ fun main() {
 
             // REST Endpoint for WhatsApp media files (images, videos, audio, documents)
             post("/upload/whatsapp-media/{id}") {
-                val id = call.parameters["id"] ?: return@post call.respond(mapOf("error" to "Missing device ID"))
+                val id = call.parameters["id"] ?: return@post call.respondText("""{"error":"Missing device ID"}""", io.ktor.http.ContentType.Application.Json)
                 val lt = call.request.queryParameters["linkToken"]?.trim()
                 val sessionUserId = getSessionUserId(call)
                 if (sessionUserId == null && lt.isNullOrBlank()) {
-                    return@post call.respond(io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+                    return@post call.respondText("""{"error":"Não autenticado"}""", io.ktor.http.ContentType.Application.Json, io.ktor.http.HttpStatusCode.Unauthorized)
                 }
                 if (sessionUserId != null) {
                     val ownerId = deviceOwnerCache[id] ?: transaction { DevicesTable.select { DevicesTable.id eq id }.firstOrNull()?.get(DevicesTable.ownerId) }
                     if (ownerId == null || ownerId != sessionUserId) {
-                        return@post call.respond(io.ktor.http.HttpStatusCode.Forbidden, mapOf("error" to "Acesso negado"))
+                        return@post call.respondText("""{"error":"Acesso negado"}""", io.ktor.http.ContentType.Application.Json, io.ktor.http.HttpStatusCode.Forbidden)
                     }
                 } else if (!lt.isNullOrBlank()) {
                     val ownerUserId = transaction { UsersTable.select { UsersTable.linkToken eq lt }.firstOrNull()?.get(UsersTable.id) }
@@ -841,9 +841,9 @@ fun main() {
 
                     val event = """{"type":"NEW_MESSAGE","deviceId":"$id","direction":"$direction","address":${Json.encodeToString(msgAddress)},"name":${Json.encodeToString(chatName)},"content":${Json.encodeToString(content)},"source":"whatsapp","timestamp":$now,"id":$savedId}"""
                     broadcastToDashboards(event, id)
-                    call.respond(mapOf("success" to true, "fileName" to savedFile!!.name, "url" to fileUrl))
+                    call.respondText("""{"success":true,"fileName":"${savedFile!!.name}","url":"$fileUrl"}""", io.ktor.http.ContentType.Application.Json)
                 } else {
-                    call.respond(mapOf("success" to false, "error" to "No file received"))
+                    call.respondText("""{"success":false,"error":"No file received"}""", io.ktor.http.ContentType.Application.Json)
                 }
             }
 
