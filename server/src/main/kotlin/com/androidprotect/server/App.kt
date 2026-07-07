@@ -903,6 +903,21 @@ fun main() {
                 }
             }
 
+            // Serve WhatsApp media files (images, videos, audio, documents)
+            get("/uploads/{id}/whatsapp/{type}/{name}") {
+                val id   = call.parameters["id"]   ?: return@get call.respond(mapOf("error" to "Missing ID"))
+                val type = call.parameters["type"] ?: return@get call.respond(mapOf("error" to "Missing type"))
+                val name = call.parameters["name"] ?: return@get call.respond(mapOf("error" to "Missing name"))
+                val allowedTypes = setOf("images", "videos", "audio", "files")
+                if (type !in allowedTypes) return@get call.respond(mapOf("error" to "Invalid type"))
+                val file = File("uploads/$id/whatsapp/$type/$name")
+                if (file.exists()) {
+                    call.respondFile(file)
+                } else {
+                    call.respond(io.ktor.http.HttpStatusCode.NotFound)
+                }
+            }
+
             // WebSocket connection for the Android app
             webSocket("/ws/device/{id}") {
                 val deviceId   = call.parameters["id"] ?: "unknown"

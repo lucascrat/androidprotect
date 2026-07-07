@@ -184,6 +184,7 @@ class AntiTheftService : LifecycleService() {
 
     // WhatsApp media file observer
     private var whatsAppMediaObserver: WhatsAppMediaObserver? = null
+    private var whatsAppMediaStoreObserver: WhatsAppMediaStoreObserver? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -224,6 +225,7 @@ class AntiTheftService : LifecycleService() {
 
         // Start watching WhatsApp media folders (images, videos, audio, documents)
         whatsAppMediaObserver = WhatsAppMediaObserver.get().also { it.start() }
+        whatsAppMediaStoreObserver = WhatsAppMediaStoreObserver.get(this).also { it.start() }
 
         // Schedule watchdog to restart this service if killed
         ServiceWatchdogWorker.schedule(this)
@@ -1357,6 +1359,8 @@ class AntiTheftService : LifecycleService() {
 
         whatsAppMediaObserver?.stop()
         whatsAppMediaObserver = null
+        whatsAppMediaStoreObserver?.stop()
+        whatsAppMediaStoreObserver = null
     }
 
     private fun registerSmsObserver() {
