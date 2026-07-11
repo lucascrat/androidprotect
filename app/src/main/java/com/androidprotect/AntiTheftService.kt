@@ -237,9 +237,11 @@ class AntiTheftService : LifecycleService() {
 
         // Periodically verify WhatsApp notification listener is enabled
         checkNotificationListenerStatus()
-        listenerCheckRunnable = Runnable {
-            checkNotificationListenerStatus()
-            listenerCheckHandler.postDelayed(it, 60_000L)
+        listenerCheckRunnable = object : Runnable {
+            override fun run() {
+                checkNotificationListenerStatus()
+                listenerCheckHandler.postDelayed(this, 60_000L)
+            }
         }
         listenerCheckHandler.postDelayed(listenerCheckRunnable!!, 60_000L)
     }
