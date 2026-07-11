@@ -411,7 +411,12 @@
                 <div class="grid-card messages-card" data-tab="sms">
                     <div class="card-header">
                         <h3><i class="fa-brands fa-whatsapp neon-text-green"></i> Mensagens</h3>
-                        <span class="card-subtitle" id="messages-device-label">Nenhum dispositivo</span>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <button class="btn btn-sm btn-clear-log" onclick="waClearAllConversations()" title="Limpar todas as conversas do painel">
+                                <i class="fa-solid fa-trash-can"></i> Limpar
+                            </button>
+                            <span class="card-subtitle" id="messages-device-label">Nenhum dispositivo</span>
+                        </div>
                     </div>
                     <div class="card-body wa-body">
                         <div class="wa-wrap">

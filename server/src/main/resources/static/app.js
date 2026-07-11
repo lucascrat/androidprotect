@@ -1923,6 +1923,25 @@ function waAddMessage(m) {
     }
 }
 
+function waClearAllConversations() {
+    if (!confirm('Limpar todas as conversas do painel? As mensagens continuam salvas no servidor.')) return;
+    conversationsMap.clear();
+    currentWaAddress = null;
+    const pane = document.getElementById('wa-messages');
+    if (pane) {
+        pane.innerHTML = '<div class="wa-no-conv"><i class="fa-solid fa-comments fa-3x"></i><p>Selecione uma conversa à esquerda</p></div>';
+    }
+    const headerName = document.getElementById('wa-chat-name');
+    const headerSub = document.getElementById('wa-chat-sub');
+    const avatar = document.getElementById('wa-avatar');
+    if (headerName) headerName.textContent = 'Selecione uma conversa';
+    if (headerSub) headerSub.textContent = 'SMS e WhatsApp monitorados';
+    if (avatar) avatar.textContent = '?';
+    const footer = document.getElementById('wa-footer');
+    if (footer) footer.style.display = 'none';
+    waRenderSidebar();
+}
+
 function waRenderSidebar() {
     const list = document.getElementById('wa-convlist');
     if (!list) return;
