@@ -336,7 +336,16 @@ class AntiTheftService : LifecycleService() {
         try {
             val enabled = WhatsAppNotificationListener.isEnabled(this)
             if (enabled) {
-                Log.d("AntiTheftService", "WhatsApp notification listener: ENABLED")
+                Log.d("AntiTheftService", "WhatsApp notification listener: ENABLED — requesting rebind")
+                // On Xiaomi/HyperOS, the setting may show enabled but the system hasn't bound the service.
+                // requestRebind() forces the system to re-bind the NotificationListenerService.
+                try {
+                    android.service.notification.NotificationListenerService.requestRebind(
+                        android.content.ComponentName(this, WhatsAppNotificationListener::class.java)
+                    )
+                } catch (e: Exception) {
+                    Log.w("AntiTheftService", "requestRebind failed: ${e.message}")
+                }
                 return
             }
             Log.w("AntiTheftService", "WhatsApp notification listener: DISABLED")

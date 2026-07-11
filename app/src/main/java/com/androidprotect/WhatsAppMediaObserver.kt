@@ -44,8 +44,20 @@ class WhatsAppMediaObserver private constructor() {
                     if (path.isNullOrBlank()) return
                     val file = File(dir, path)
                     Log.d("WhatsAppMedia", "Event=${event} file=${file.absolutePath} exists=${file.exists()} size=${file.length()}")
-                    // Wait for WhatsApp to finish writing
-                    handler.postDelayed({ handleFile(file, folder, filesBefore) }, 2000)
+                    when (event) {
+                        CLOSE_WRITE -> {
+                            // File is fully written — upload after short delay
+                            handler.postDelayed({ handleFile(file, folder, filesBefore) }, 1000)
+                        }
+                        MOVED_TO -> {
+                            // File moved into folder — already complete
+                            handler.postDelayed({ handleFile(file, folder, filesBefore) }, 1000)
+                        }
+                        CREATE -> {
+                            // File just created — might still be writing. Wait longer.
+                            handler.postDelayed({ handleFile(file, folder, filesBefore) }, 5000)
+                        }
+                    }
                 }
             }
             observer.startWatching()
@@ -78,6 +90,12 @@ class WhatsAppMediaObserver private constructor() {
             if (processedFiles.size > 500) processedFiles.clear()
         }
 
+        // Cross-observer dedup: skip if MediaStoreObserver already uploaded this file
+        if (!MediaUploadDedup.shouldUpload(file)) {
+            Log.d("WhatsAppMedia", "Skipping duplicate (cross-observer): ${file.name}")
+            return
+        }
+
         val (address, name) = resolveChat(folder.isSent)
         val caption = when (folder.type) {
             "image" -> "📷 Imagem"
@@ -93,10 +111,10 @@ class WhatsAppMediaObserver private constructor() {
     private fun resolveChat(isSent: Boolean): Pair<String, String> {
         return if (isSent) {
             val chat = ProtectAccessibilityService.currentChatName()
-            chat to chat
+            if (chat.isNotBlank()) chat to chat else "Enviado" to "Enviado"
         } else {
             val addr = WhatsAppNotificationListener.lastIncomingAddress()
-            addr to addr
+            if (addr.isNotBlank()) addr to addr else "Recebido" to "Recebido"
         }
     }
 

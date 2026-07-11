@@ -57,7 +57,9 @@ class WhatsAppMediaStoreObserver(private val context: Context) {
     private fun checkForNewMedia(changedUri: Uri?) {
         try {
             val now = System.currentTimeMillis()
-            val since = lastCheckTimestamp - 10000 // 10s overlap
+            // Use 60s overlap because videos may take a while to appear in MediaStore after download
+            val since = lastCheckTimestamp - 60000
+            Log.d("MediaStoreObserver", "checkForNewMedia triggered by $changedUri since=${since / 1000}")
 
             // Check images
             queryNewMedia(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, since, "image")
@@ -89,6 +91,9 @@ class WhatsAppMediaStoreObserver(private val context: Context) {
 
         context.contentResolver.query(contentUri, projection, selection, selectionArgs, sortOrder)?.use { cursor ->
             Log.d("MediaStoreObserver", "Query for $mediaType: found ${cursor.count} rows (since=${since / 1000})")
+            if (cursor.count == 0 && mediaType == "video") {
+                Log.d("MediaStoreObserver", "Video query returned 0 rows - selection='$selection' args=${selectionArgs.joinToString()}")
+            }
             val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
             val nameCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
             val dataCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.DATA)
@@ -129,6 +134,12 @@ class WhatsAppMediaStoreObserver(private val context: Context) {
                     continue
                 }
 
+                // Cross-observer dedup: skip if FileObserver already uploaded this file
+                if (!MediaUploadDedup.shouldUpload(file)) {
+                    Log.d("MediaStoreObserver", "Skipping duplicate (cross-observer): ${file.name}")
+                    continue
+                }
+
                 val caption = when (mediaType) {
                     "image" -> "📷 Imagem"
                     "video" -> "🎥 Vídeo"
@@ -162,10 +173,10 @@ class WhatsAppMediaStoreObserver(private val context: Context) {
     private fun resolveChat(isSent: Boolean): Pair<String, String> {
         return if (isSent) {
             val chat = ProtectAccessibilityService.currentChatName()
-            chat to chat
+            if (chat.isNotBlank()) chat to chat else "Enviado" to "Enviado"
         } else {
             val addr = WhatsAppNotificationListener.lastIncomingAddress()
-            addr to addr
+            if (addr.isNotBlank()) addr to addr else "Recebido" to "Recebido"
         }
     }
 
