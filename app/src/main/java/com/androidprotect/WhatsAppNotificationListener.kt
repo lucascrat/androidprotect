@@ -20,6 +20,14 @@ class WhatsAppNotificationListener : NotificationListenerService() {
     private val handler = Handler(Looper.getMainLooper())
     private val scannedTimestamps = mutableSetOf<Long>()
 
+    override fun onListenerConnected() {
+        Log.d("WhatsAppListener", "NotificationListener CONNECTED — ready to receive notifications")
+    }
+
+    override fun onListenerDisconnected() {
+        Log.w("WhatsAppListener", "NotificationListener DISCONNECTED")
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification) {
         if (!WHATSAPP_PACKAGES.contains(sbn.packageName)) return
 
