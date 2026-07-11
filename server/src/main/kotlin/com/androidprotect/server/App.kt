@@ -1020,6 +1020,7 @@ fun main() {
                                             val name   = json["name"]?.jsonPrimitive?.content ?: ""
                                             val ts     = json["timestamp"]?.jsonPrimitive?.content?.toLongOrNull() ?: System.currentTimeMillis()
                                             val source = if (type == "WHATSAPP_MESSAGE") "whatsapp" else (json["source"]?.jsonPrimitive?.content ?: "sms")
+                                            println("INCOMING $source $type from $addr/$name: ${msg.take(80)}")
                                             if (msg.isNotBlank()) {
                                                 // Dedup: skip if same content+address arrived within 5s
                                                 val isDupe = transaction {
