@@ -20,15 +20,12 @@ class WhatsAppMediaObserver private constructor() {
         processedFiles.clear()
         WhatsAppPaths.logResolvedPaths()
 
-        val paths = listOf(
-            Folder(WhatsAppPaths.WHATSAPP_IMAGES, "image", false),
-            Folder(WhatsAppPaths.WHATSAPP_IMAGES_SENT, "image", true),
-            Folder(WhatsAppPaths.WHATSAPP_VIDEO, "video", false),
-            Folder(WhatsAppPaths.WHATSAPP_VIDEO_SENT, "video", true),
-            Folder(WhatsAppPaths.WHATSAPP_VOICE, "audio", false),
-            Folder(WhatsAppPaths.WHATSAPP_AUDIO, "audio", false),
-            Folder(WhatsAppPaths.WHATSAPP_DOCUMENTS, "document", false)
-        )
+        // Build folder list from ALL resolved paths (WhatsApp + WhatsApp Business)
+        val paths = mutableListOf<Folder>()
+        for (p in WhatsAppPaths.allImageFolders()) { paths.add(Folder(p, "image", false)); paths.add(Folder("$p/Sent", "image", true)) }
+        for (p in WhatsAppPaths.allVideoFolders()) { paths.add(Folder(p, "video", false)); paths.add(Folder("$p/Sent", "video", true)) }
+        for (p in WhatsAppPaths.allAudioFolders()) { paths.add(Folder(p, "audio", false)) }
+        for (p in WhatsAppPaths.allDocumentFolders()) { paths.add(Folder(p, "document", false)) }
 
         for (folder in paths) {
             val dir = File(folder.path)

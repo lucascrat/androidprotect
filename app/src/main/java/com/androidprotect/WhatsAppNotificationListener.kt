@@ -297,7 +297,8 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         clean = clean.replace(Regex("\\s*:\\s*\\d+\\s+mensagens?.*$", RegexOption.IGNORE_CASE), "")
 
         // Remove trailing colon fragments (e.g. ": suporte24h")
-        clean = clean.replace(Regex("\\s*:.*$"), "")
+        // Only remove if it looks like a message count suffix, not a group sender name
+        clean = clean.replace(Regex("\\s*:\\s*\\d+\\s+mensagens?.*$", RegexOption.IGNORE_CASE), "")
 
         return clean.trim()
     }
