@@ -16,7 +16,9 @@ object MediaUploadDedup {
      * subsequent calls return false.
      */
     fun shouldUpload(file: File): Boolean {
-        val key = "${file.absolutePath}:${file.length()}"
+        // Use path + size + lastModified for more robust dedup
+        // Same file can have same path+size if modified, so include lastModified
+        val key = "${file.absolutePath}:${file.length()}:${file.lastModified()}"
         synchronized(uploaded) {
             if (uploaded.contains(key)) return false
             uploaded.add(key)

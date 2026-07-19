@@ -1912,13 +1912,13 @@ function waIngestMessage(m) {
 
 function waAddMessage(m) {
     waIngestMessage(m);
-    // If this conversation is currently open, append the bubble live
     const addr = waNormalizeChatKey((m.address && m.address.trim()) ? m.address.trim() : ((m.name && m.name.trim()) ? m.name.trim() : '(sistema)'));
     if (currentWaAddress === addr) {
         const pane = document.getElementById('wa-messages');
         if (pane) {
+            const isAtBottom = pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 60;
             pane.appendChild(waBuildBubble(m));
-            pane.scrollTop = pane.scrollHeight;
+            if (isAtBottom) pane.scrollTop = pane.scrollHeight;
         }
     }
 }

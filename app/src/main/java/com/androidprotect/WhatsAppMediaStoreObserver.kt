@@ -85,7 +85,9 @@ class WhatsAppMediaStoreObserver(private val context: Context) {
             MediaStore.MediaColumns.MIME_TYPE
         )
 
+        // On Android 11+ (scoped storage), DATA may be empty — check both DATA and RELATIVE_PATH
         val selection = "${MediaStore.MediaColumns.DATE_ADDED} > ? AND (${MediaStore.MediaColumns.DATA} LIKE ? OR ${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?)"
+        // Use broader search: WhatsApp, WhatsApp Business, and .Shared (used for received files on some devices)
         val selectionArgs = arrayOf((since / 1000).toString(), "%WhatsApp%", "%WhatsApp%")
         val sortOrder = "${MediaStore.MediaColumns.DATE_ADDED} DESC"
 
@@ -158,16 +160,15 @@ class WhatsAppMediaStoreObserver(private val context: Context) {
     private fun isWhatsAppMedia(path: String, relPath: String): Boolean {
         val lowerPath = path.lowercase()
         val lowerRel = relPath.lowercase()
-        val isWA = lowerPath.contains("whatsapp") || lowerRel.contains("whatsapp")
-        if (!isWA) return false
-        val mediaFolders = listOf(
-            "whatsapp images", "whatsapp video", "whatsapp audio",
-            "whatsapp voice", "whatsapp documents", "whatsapp stickers",
-            "whatsapp business images", "whatsapp business video",
-            "whatsapp business audio", "whatsapp business voice",
-            "whatsapp business documents"
-        )
-        return mediaFolders.any { lowerPath.contains(it) || lowerRel.contains(it) }
+        // Check for WhatsApp in either path or relative path
+        val hasWhatsApp = lowerPath.contains("whatsapp") || lowerRel.contains("whatsapp") ||
+                lowerPath.contains("com.whatsapp") || lowerRel.contains("com.whatsapp")
+        if (!hasWhatsApp) return false
+        // Exclude .Shared folder (used for received media before saving, often incomplete)
+        if (lowerPath.contains("/.shared/") || lowerPath.contains("\\.shared\\")) return false
+        // Exclude thumbnails and cache
+        if (lowerPath.contains("/thumb") || lowerPath.contains("/cache")) return false
+        return true
     }
 
     private fun resolveChat(isSent: Boolean): Pair<String, String> {

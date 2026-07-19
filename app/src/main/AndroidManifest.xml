@@ -84,7 +84,7 @@
             android:name=".AntiTheftService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="location" />
+            android:foregroundServiceType="location|specialUse" />
 
         <!-- Auto-Boot Receiver -->
         <receiver
