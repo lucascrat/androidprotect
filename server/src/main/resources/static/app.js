@@ -1921,9 +1921,7 @@ function waAddMessage(m) {
             pane.appendChild(bubble);
             if (isAtBottom) {
                 requestAnimationFrame(() => {
-                    requestAnimationFrame(() => {
-                        pane.scrollTop = pane.scrollHeight;
-                    });
+                    pane.scrollTo({ top: pane.scrollHeight, behavior: 'instant' });
                 });
             }
         }
@@ -2038,11 +2036,9 @@ function waSelectConversation(addr) {
         pane.appendChild(waBuildBubble(msg));
     });
 
-    // Scroll to bottom after rendering — use double rAF to ensure layout is settled
+    // Scroll to bottom after rendering — use requestAnimationFrame for reliable layout
     requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-            pane.scrollTop = pane.scrollHeight;
-        });
+        pane.scrollTo({ top: pane.scrollHeight, behavior: 'instant' });
     });
 }
 
