@@ -1917,8 +1917,15 @@ function waAddMessage(m) {
         const pane = document.getElementById('wa-messages');
         if (pane) {
             const isAtBottom = pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 60;
-            pane.appendChild(waBuildBubble(m));
-            if (isAtBottom) pane.scrollTop = pane.scrollHeight;
+            const bubble = waBuildBubble(m);
+            pane.appendChild(bubble);
+            if (isAtBottom) {
+                requestAnimationFrame(() => {
+                    requestAnimationFrame(() => {
+                        pane.scrollTop = pane.scrollHeight;
+                    });
+                });
+            }
         }
     }
 }
@@ -2031,7 +2038,12 @@ function waSelectConversation(addr) {
         pane.appendChild(waBuildBubble(msg));
     });
 
-    pane.scrollTop = pane.scrollHeight;
+    // Scroll to bottom after rendering — use double rAF to ensure layout is settled
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            pane.scrollTop = pane.scrollHeight;
+        });
+    });
 }
 
 function waBuildBubble(msg) {
