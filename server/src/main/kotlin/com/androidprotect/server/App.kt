@@ -51,6 +51,9 @@ val dashboardSessions = ConcurrentHashMap<WebSocketSession, Int>()
 // deviceId -> ownerId cache (avoids repeated DB lookups)
 val deviceOwnerCache = ConcurrentHashMap<String, Int>()
 
+// deviceId -> last connection timestamp (debounce rapid reconnects)
+val deviceConnectTimestamps = ConcurrentHashMap<String, Long>()
+
 // JSON configuration for packets ensuring defaults like packet type are always serialized
 val packetJson = Json { encodeDefaults = true }
 
@@ -944,7 +947,12 @@ fun main() {
                 val deviceId   = call.parameters["id"] ?: "unknown"
                 val linkToken  = call.request.queryParameters["linkToken"]?.trim()
                 deviceSessions[deviceId] = this
-                println("Device connected: $deviceId (linkToken: $linkToken)")
+                val now = System.currentTimeMillis()
+                val lastConn = deviceConnectTimestamps[deviceId] ?: 0L
+                if (lastConn == 0L || now - lastConn > 3000L) {
+                    println("Device connected: $deviceId (linkToken: $linkToken)")
+                    deviceConnectTimestamps[deviceId] = now
+                }
 
                 // Pre-populate device status
                 val model      = call.request.queryParameters["model"] ?: "Android Device"
@@ -1128,24 +1136,27 @@ fun main() {
                 } catch (e: Throwable) {
                     println("Device connection error ($deviceId): ${e.message}")
                 } finally {
-                    deviceSessions.remove(deviceId)
+                    // Only clean up if THIS session is still the active one (not replaced by a reconnect)
+                    val removed = deviceSessions.remove(deviceId, this)
                     
-                    // Mark device offline in SQL Database
-                    transaction {
-                        DevicesTable.update({ DevicesTable.id eq deviceId }) {
-                            it[DevicesTable.isOnline] = false
-                            it[DevicesTable.lastSeen] = System.currentTimeMillis()
+                    if (removed) {
+                        // Mark device offline in SQL Database
+                        transaction {
+                            DevicesTable.update({ DevicesTable.id eq deviceId }) {
+                                it[DevicesTable.isOnline] = false
+                                it[DevicesTable.lastSeen] = System.currentTimeMillis()
+                            }
+                            
+                            LogsTable.insert {
+                                it[LogsTable.deviceId] = deviceId
+                                it[message] = "Aparelho se desconectou do servidor."
+                                it[logType] = "error"
+                                it[timestamp] = System.currentTimeMillis()
+                            }
                         }
-                        
-                        LogsTable.insert {
-                            it[LogsTable.deviceId] = deviceId
-                            it[message] = "Aparelho se desconectou do servidor."
-                            it[logType] = "error"
-                            it[timestamp] = System.currentTimeMillis()
-                        }
-                    }
 
-                    broadcastToDashboards(packetJson.encodeToString(DeviceDisconnectedPacket(deviceId = deviceId)), deviceId)
+                        broadcastToDashboards(packetJson.encodeToString(DeviceDisconnectedPacket(deviceId = deviceId)), deviceId)
+                    }
                 }
             }
 
