@@ -137,7 +137,7 @@ class AntiTheftService : LifecycleService() {
         .readTimeout(0, TimeUnit.MILLISECONDS)   // infinite — required for WebSocket
         .writeTimeout(0, TimeUnit.MILLISECONDS)  // infinite — required for WebSocket
         .pingInterval(25, TimeUnit.SECONDS)      // KEY FIX: sends WS ping every 25s to prevent NAT/firewall from closing idle connection
-        .retryOnConnectionFailure(true)
+        .retryOnConnectionFailure(false)         // never auto-retry WS handshakes (prevents duplicate server-side sessions)
         .build()
 
     // Active resources
@@ -485,8 +485,12 @@ class AntiTheftService : LifecycleService() {
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                Log.d("AntiTheftService", "WS closed. Retry in ${reconnectDelay}ms")
+                Log.d("AntiTheftService", "WS closed (code=$code reason=$reason)")
                 isWebSocketConnected = false
+                // Ignore intentional closes triggered by connectToServer() — a fresh
+                // connection is already being created, so scheduling another reconnect
+                // here would tear down the healthy new socket (self-perpetuating loop).
+                if (reason == "Reconnecting") return
                 scheduleReconnect()
             }
         })
@@ -1133,7 +1137,11 @@ class AntiTheftService : LifecycleService() {
         val packet = ByteArray(1 + payload.size)
         packet[0] = type
         System.arraycopy(payload, 0, packet, 1, payload.size)
-        webSocket?.send(packet.toByteString())
+        try {
+            webSocket?.send(packet.toByteString())
+        } catch (e: Exception) {
+            // Socket closed mid-stream — ignore; next frame uses the reconnected socket.
+        }
     }
 
     // ── Live Camera Stream (CameraX ImageAnalysis) ─────────────────────────────
