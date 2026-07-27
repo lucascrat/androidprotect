@@ -338,8 +338,16 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         for (dir in folders) {
             if (!dir.exists() || !dir.isDirectory) continue
             val isSent = dir.name == "Sent" || dir.absolutePath.contains("/Sent")
-            val files = dir.listFiles() ?: continue
-            for (file in files) {
+            val topFiles = dir.listFiles() ?: continue
+            // Voice Notes are stored in weekly subdirectories (e.g. 202631/PTT-xxx.opus),
+            // so scan recently-modified subdirectories one level deep.
+            val allFiles = topFiles.flatMap { entry ->
+                if (entry.isDirectory && entry.lastModified() >= cutoff) {
+                    entry.listFiles()?.toList() ?: emptyList()
+                } else if (entry.isFile) listOf(entry)
+                else emptyList()
+            }
+            for (file in allFiles) {
                 if (!file.isFile) continue
                 if (file.lastModified() < cutoff) continue
                 if (file.length() < 1000) continue

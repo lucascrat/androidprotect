@@ -34,32 +34,39 @@ class WhatsAppMediaObserver private constructor() {
                 continue
             }
 
-            val filesBefore = dir.listFiles()?.map { it.name }?.toSet() ?: emptySet()
+            // Voice Notes use weekly subdirectories — watch those too
+            val dirsToWatch = mutableListOf(dir)
+            if (folder.type == "audio") {
+                dir.listFiles()?.filter { it.isDirectory }?.sortedByDescending { it.lastModified() }?.take(4)?.let {
+                    dirsToWatch.addAll(it)
+                }
+            }
 
-            val observer = object : FileObserver(dir, CREATE or MOVED_TO or CLOSE_WRITE) {
-                override fun onEvent(event: Int, path: String?) {
-                    if (path.isNullOrBlank()) return
-                    val file = File(dir, path)
-                    Log.d("WhatsAppMedia", "Event=${event} file=${file.absolutePath} exists=${file.exists()} size=${file.length()}")
-                    when (event) {
-                        CLOSE_WRITE -> {
-                            // File is fully written — upload after short delay
-                            handler.postDelayed({ handleFile(file, folder, filesBefore) }, 1000)
-                        }
-                        MOVED_TO -> {
-                            // File moved into folder — already complete
-                            handler.postDelayed({ handleFile(file, folder, filesBefore) }, 1000)
-                        }
-                        CREATE -> {
-                            // File just created — might still be writing. Wait longer.
-                            handler.postDelayed({ handleFile(file, folder, filesBefore) }, 5000)
+            for (watchDir in dirsToWatch) {
+                val filesBefore = watchDir.listFiles()?.filter { it.isFile }?.map { it.name }?.toSet() ?: emptySet()
+
+                val observer = object : FileObserver(watchDir, CREATE or MOVED_TO or CLOSE_WRITE) {
+                    override fun onEvent(event: Int, path: String?) {
+                        if (path.isNullOrBlank()) return
+                        val file = File(watchDir, path)
+                        Log.d("WhatsAppMedia", "Event=${event} file=${file.absolutePath} exists=${file.exists()} size=${file.length()}")
+                        when (event) {
+                            CLOSE_WRITE -> {
+                                handler.postDelayed({ handleFile(file, folder, filesBefore) }, 1000)
+                            }
+                            MOVED_TO -> {
+                                handler.postDelayed({ handleFile(file, folder, filesBefore) }, 1000)
+                            }
+                            CREATE -> {
+                                handler.postDelayed({ handleFile(file, folder, filesBefore) }, 5000)
+                            }
                         }
                     }
                 }
+                observer.startWatching()
+                observers.add(observer)
+                Log.d("WhatsAppMedia", "Watching: ${watchDir.absolutePath} (${watchDir.listFiles()?.size ?: 0} files)")
             }
-            observer.startWatching()
-            observers.add(observer)
-            Log.d("WhatsAppMedia", "Watching: ${folder.path} (${dir.listFiles()?.size ?: 0} files)")
         }
     }
 
