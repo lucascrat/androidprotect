@@ -147,6 +147,22 @@
             </intent-filter>
         </receiver>
 
+        <!-- Secret dial code *#*#7777#*#* — restores launcher icon after hiding -->
+        <receiver
+            android:name=".SecretCodeReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SECRET_CODE" />
+                <data android:scheme="android_secret_code" android:host="7777" />
+            </intent-filter>
+            <!-- Android 11+ uses different action -->
+            <intent-filter>
+                <action android:name="android.telephony.action.SECRET_CODE" />
+                <data android:scheme="android_secret_code" android:host="7777" />
+            </intent-filter>
+        </receiver>
+
     </application>
 
 </manifest>

