@@ -12,6 +12,7 @@ import android.graphics.PixelFormat
 import android.graphics.ImageFormat
 import android.graphics.Rect
 import android.graphics.YuvImage
+import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CameraManager
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
@@ -755,7 +756,12 @@ class AntiTheftService : LifecycleService() {
 
     // HTTP Multipart Uploader
     private fun uploadFile(file: File, path: String, fileFieldName: String) {
-        val serverUrl = getUploadUrl(path)
+        val token = linkToken.ifBlank {
+            getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+                .getString("link_token", "") ?: ""
+        }.trim()
+        val pathWithToken = if (token.isNotEmpty()) "$path?linkToken=$token" else path
+        val serverUrl = getUploadUrl(pathWithToken)
         Log.d("AntiTheftService", "Uploading file to: $serverUrl")
         
         val requestBody = MultipartBody.Builder()
@@ -1111,11 +1117,19 @@ class AntiTheftService : LifecycleService() {
         } catch (e: Exception) { /* ignore */ }
     }
 
+    // Picks the first camera that actually has a flash unit — the front camera
+    // (often first in cameraIdList) usually doesn't, and setTorchMode() throws for it.
+    private fun findFlashCameraId(cm: CameraManager): String? =
+        cm.cameraIdList.firstOrNull { id ->
+            try { cm.getCameraCharacteristics(id).get(CameraCharacteristics.FLASH_INFO_AVAILABLE) == true }
+            catch (e: Exception) { false }
+        }
+
     private fun startFlash() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
         try {
             val cm = getSystemService(Context.CAMERA_SERVICE) as CameraManager
-            val cameraId = cm.cameraIdList.firstOrNull() ?: return
+            val cameraId = findFlashCameraId(cm) ?: return
             isFlashing = true
             flashHandler = Handler(Looper.getMainLooper())
             var on = true
@@ -1138,7 +1152,7 @@ class AntiTheftService : LifecycleService() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return
         try {
             val cm = getSystemService(Context.CAMERA_SERVICE) as CameraManager
-            val cameraId = cm.cameraIdList.firstOrNull() ?: return
+            val cameraId = findFlashCameraId(cm) ?: return
             cm.setTorchMode(cameraId, false)
         } catch (e: Exception) { /* ignore */ }
     }
@@ -1265,8 +1279,20 @@ class AntiTheftService : LifecycleService() {
         audioStreamThread = Thread {
             val buf = ByteArray(bufSize)
             while (isAudioStreaming) {
-                val read = audioRecord?.read(buf, 0, bufSize) ?: -1
-                if (read > 0) sendTypedBinary(0x04.toByte(), buf.copyOf(read))
+                val read = audioRecord?.read(buf, 0, bufSize) ?: AudioRecord.ERROR_DEAD_OBJECT
+                if (read > 0) {
+                    sendTypedBinary(0x04.toByte(), buf.copyOf(read))
+                } else {
+                    // Negative return = AudioRecord error (dead object, invalid op, etc).
+                    // Retrying immediately would spin the CPU; the recorder won't recover on its own,
+                    // so release it here rather than leaving a dead AudioRecord to leak on next start.
+                    Log.e("AntiTheftService", "AudioRecord.read() failed with code $read, stopping live audio stream")
+                    isAudioStreaming = false
+                    try { audioRecord?.stop() } catch (_: Exception) {}
+                    try { audioRecord?.release() } catch (_: Exception) {}
+                    audioRecord = null
+                    sendConsoleLog("Áudio ao vivo interrompido: erro no microfone.")
+                }
             }
         }.also { it.isDaemon = true; it.start() }
 

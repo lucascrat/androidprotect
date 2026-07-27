@@ -213,17 +213,39 @@ data class AuthResponse(
 
 // ── Password & token utilities ─────────────────────────────────────────────
 
+private const val PBKDF2_ITERATIONS = 120_000
+private const val PBKDF2_KEY_LENGTH = 256
+
 fun hashPassword(password: String): String {
     val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
     val saltB64 = Base64.getEncoder().encodeToString(salt)
-    val hash = sha256("$saltB64:$password")
-    return "$saltB64:$hash"
+    val spec = javax.crypto.spec.PBEKeySpec(password.toCharArray(), salt, PBKDF2_ITERATIONS, PBKDF2_KEY_LENGTH)
+    val hash = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+    val hashB64 = Base64.getEncoder().encodeToString(hash)
+    return "pbkdf2:$PBKDF2_ITERATIONS:$saltB64:$hashB64"
 }
 
+// True if `stored` used the legacy single-round SHA-256 format and should be
+// upgraded to PBKDF2 the next time the caller has the plaintext password (e.g. on login).
+fun isLegacyPasswordHash(stored: String): Boolean = !stored.startsWith("pbkdf2:")
+
 fun verifyPassword(password: String, stored: String): Boolean {
+    if (stored.startsWith("pbkdf2:")) {
+        val parts = stored.split(":")
+        if (parts.size != 4) return false
+        val iterations = parts[1].toIntOrNull() ?: return false
+        val salt = Base64.getDecoder().decode(parts[2])
+        val expected = Base64.getDecoder().decode(parts[3])
+        val spec = javax.crypto.spec.PBEKeySpec(password.toCharArray(), salt, iterations, expected.size * 8)
+        val actual = javax.crypto.SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(spec).encoded
+        return MessageDigest.isEqual(actual, expected)
+    }
+    // Legacy format: "$saltB64:$sha256Hex" — kept only to verify existing accounts;
+    // callers should rehash with hashPassword() after a successful legacy verification.
     val salt = stored.substringBefore(":")
-    val expected = stored.substringAfter(":")
-    return sha256("$salt:$password") == expected
+    val expectedHex = stored.substringAfter(":")
+    val actualHex = sha256("$salt:$password")
+    return MessageDigest.isEqual(actualHex.toByteArray(), expectedHex.toByteArray())
 }
 
 fun sha256(input: String): String =
@@ -407,6 +429,16 @@ fun main() {
                         return@post call.respond(io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "E-mail ou senha inválidos"))
                     }
 
+                    // Opportunistically upgrade legacy SHA-256 hashes to PBKDF2 now that we have the plaintext
+                    if (isLegacyPasswordHash(userRow[UsersTable.passHash])) {
+                        val newHash = hashPassword(password)
+                        transaction {
+                            UsersTable.update({ UsersTable.id eq userRow[UsersTable.id] }) {
+                                it[passHash] = newHash
+                            }
+                        }
+                    }
+
                     val sessionToken = generateSessionToken()
                     transaction {
                         SessionsTable.insert {
@@ -565,7 +597,7 @@ fun main() {
                     TelemetryTable.select {
                         (TelemetryTable.deviceId eq id) and (TelemetryTable.timestamp greaterEq since)
                     }
-                        .orderBy(TelemetryTable.timestamp to SortOrder.ASC)
+                        .orderBy(TelemetryTable.timestamp to SortOrder.DESC)
                         .limit(5000)
                         .map {
                             TelemetryPoint(
@@ -575,6 +607,7 @@ fun main() {
                                 timestamp = it[TelemetryTable.timestamp]
                             )
                         }
+                        .reversed()
                 }
                 call.respond(history)
             }
@@ -661,22 +694,29 @@ fun main() {
             // REST Endpoint for Photo Upload from Android
             post("/upload/photo/{id}") {
                 val id = call.parameters["id"] ?: return@post call.respond(mapOf("error" to "Missing device ID"))
+                if (!isSafeId(id)) return@post call.respond(io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Invalid device ID"))
+                if (!assertUploadAllowed(call, id)) return@post
                 val multipart = call.receiveMultipart()
                 val photosDir = File("uploads/$id/photos").apply { mkdirs() }
                 var savedFile: File? = null
 
-                multipart.forEachPart { part ->
-                    if (part is PartData.FileItem) {
-                        val fileName = "photo_${System.currentTimeMillis()}.jpg"
-                        val file = File(photosDir, fileName)
-                        part.streamProvider().use { input ->
-                            file.outputStream().use { output ->
-                                input.copyTo(output)
+                try {
+                    multipart.forEachPart { part ->
+                        if (part is PartData.FileItem) {
+                            val fileName = "photo_${System.currentTimeMillis()}.jpg"
+                            val file = File(photosDir, fileName)
+                            part.streamProvider().use { input ->
+                                file.outputStream().use { output ->
+                                    input.copyTo(output)
+                                }
                             }
+                            savedFile = file
                         }
-                        savedFile = file
+                        part.dispose()
                     }
-                    part.dispose()
+                } catch (e: Exception) {
+                    println("UPLOAD/photo: multipart error for $id: ${e.message}")
+                    return@post call.respond(mapOf("success" to false, "error" to "Upload error"))
                 }
 
                 if (savedFile != null) {
@@ -709,7 +749,7 @@ fun main() {
                         }
                     }
 
-                    val event = """{"type":"PHOTO_UPLOADED","deviceId":"$id","url":"$fileUrl"}"""
+                    val event = """{"type":"PHOTO_UPLOADED","deviceId":${Json.encodeToString(id)},"url":${Json.encodeToString(fileUrl)}}"""
                     broadcastToDashboards(event, id)
                     call.respond(mapOf("success" to true, "fileName" to savedFile!!.name))
                 } else {
@@ -720,22 +760,29 @@ fun main() {
             // REST Endpoint for Audio Upload from Android
             post("/upload/audio/{id}") {
                 val id = call.parameters["id"] ?: return@post call.respond(mapOf("error" to "Missing device ID"))
+                if (!isSafeId(id)) return@post call.respond(io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Invalid device ID"))
+                if (!assertUploadAllowed(call, id)) return@post
                 val multipart = call.receiveMultipart()
                 val audioDir = File("uploads/$id/audio").apply { mkdirs() }
                 var savedFile: File? = null
 
-                multipart.forEachPart { part ->
-                    if (part is PartData.FileItem) {
-                        val fileName = "audio_${System.currentTimeMillis()}.aac"
-                        val file = File(audioDir, fileName)
-                        part.streamProvider().use { input ->
-                            file.outputStream().use { output ->
-                                input.copyTo(output)
+                try {
+                    multipart.forEachPart { part ->
+                        if (part is PartData.FileItem) {
+                            val fileName = "audio_${System.currentTimeMillis()}.aac"
+                            val file = File(audioDir, fileName)
+                            part.streamProvider().use { input ->
+                                file.outputStream().use { output ->
+                                    input.copyTo(output)
+                                }
                             }
+                            savedFile = file
                         }
-                        savedFile = file
+                        part.dispose()
                     }
-                    part.dispose()
+                } catch (e: Exception) {
+                    println("UPLOAD/audio: multipart error for $id: ${e.message}")
+                    return@post call.respond(mapOf("success" to false, "error" to "Upload error"))
                 }
 
                 if (savedFile != null) {
@@ -768,7 +815,7 @@ fun main() {
                         }
                     }
 
-                    val event = """{"type":"AUDIO_UPLOADED","deviceId":"$id","url":"$fileUrl"}"""
+                    val event = """{"type":"AUDIO_UPLOADED","deviceId":${Json.encodeToString(id)},"url":${Json.encodeToString(fileUrl)}}"""
                     broadcastToDashboards(event, id)
                     call.respond(mapOf("success" to true, "fileName" to savedFile!!.name))
                 } else {
@@ -779,20 +826,8 @@ fun main() {
             // REST Endpoint for WhatsApp media files (images, videos, audio, documents)
             post("/upload/whatsapp-media/{id}") {
                 val id = call.parameters["id"] ?: return@post call.respondText("""{"error":"Missing device ID"}""", io.ktor.http.ContentType.Application.Json)
-                val lt = call.request.queryParameters["linkToken"]?.trim()
-                val sessionUserId = getSessionUserId(call)
-                if (sessionUserId == null && lt.isNullOrBlank()) {
-                    return@post call.respondText("""{"error":"Não autenticado"}""", io.ktor.http.ContentType.Application.Json, io.ktor.http.HttpStatusCode.Unauthorized)
-                }
-                if (sessionUserId != null) {
-                    val ownerId = deviceOwnerCache[id] ?: transaction { DevicesTable.select { DevicesTable.id eq id }.firstOrNull()?.get(DevicesTable.ownerId) }
-                    if (ownerId == null || ownerId != sessionUserId) {
-                        return@post call.respondText("""{"error":"Acesso negado"}""", io.ktor.http.ContentType.Application.Json, io.ktor.http.HttpStatusCode.Forbidden)
-                    }
-                } else if (!lt.isNullOrBlank()) {
-                    val ownerUserId = transaction { UsersTable.select { UsersTable.linkToken eq lt }.firstOrNull()?.get(UsersTable.id) }
-                    if (ownerUserId != null) deviceOwnerCache[id] = ownerUserId
-                }
+                if (!isSafeId(id)) return@post call.respondText("""{"error":"Invalid device ID"}""", io.ktor.http.ContentType.Application.Json, io.ktor.http.HttpStatusCode.BadRequest)
+                if (!assertUploadAllowed(call, id)) return@post
 
                 val multipart = call.receiveMultipart()
                 var savedFile: File? = null
@@ -805,24 +840,29 @@ fun main() {
                 var filePart: PartData.FileItem? = null
                 var fileExt = "bin"
 
-                multipart.forEachPart { part ->
-                    when (part) {
-                        is PartData.FormItem -> {
-                            when (part.name) {
-                                "type" -> mediaType = part.value.lowercase()
-                                "direction" -> direction = part.value.lowercase().let { if (it == "out") "out" else "in" }
-                                "address" -> msgAddress = part.value
-                                "name" -> msgName = part.value
-                                "caption" -> caption = part.value
+                try {
+                    multipart.forEachPart { part ->
+                        when (part) {
+                            is PartData.FormItem -> {
+                                when (part.name) {
+                                    "type" -> mediaType = part.value.lowercase()
+                                    "direction" -> direction = part.value.lowercase().let { if (it == "out") "out" else "in" }
+                                    "address" -> msgAddress = part.value
+                                    "name" -> msgName = part.value
+                                    "caption" -> caption = part.value
+                                }
+                                part.dispose()
                             }
-                            part.dispose()
+                            is PartData.FileItem -> {
+                                filePart = part
+                                fileExt = part.originalFileName?.substringAfterLast('.', "bin")?.lowercase() ?: "bin"
+                            }
+                            else -> part.dispose()
                         }
-                        is PartData.FileItem -> {
-                            filePart = part
-                            fileExt = part.originalFileName?.substringAfterLast('.', "bin")?.lowercase() ?: "bin"
-                        }
-                        else -> part.dispose()
                     }
+                } catch (e: Exception) {
+                    println("UPLOAD/whatsapp-media: multipart error for $id: ${e.message}")
+                    return@post call.respondText("""{"success":false,"error":"Upload error"}""", io.ktor.http.ContentType.Application.Json)
                 }
 
                 // Now process the file with all form fields already collected
@@ -836,8 +876,14 @@ fun main() {
                     }
                     val mediaDir = File("uploads/$id/$folder").apply { mkdirs() }
                     val file = File(mediaDir, rawName)
-                    filePart!!.streamProvider().use { input ->
-                        file.outputStream().use { output -> input.copyTo(output) }
+                    try {
+                        filePart!!.streamProvider().use { input ->
+                            file.outputStream().use { output -> input.copyTo(output) }
+                        }
+                    } catch (e: Exception) {
+                        println("UPLOAD/whatsapp-media: file write error for $id: ${e.message}")
+                        filePart!!.dispose()
+                        return@post call.respondText("""{"success":false,"error":"Upload error"}""", io.ktor.http.ContentType.Application.Json)
                     }
                     filePart!!.dispose()
                     savedFile = file
@@ -885,7 +931,7 @@ fun main() {
                         } get MessagesTable.id
                     }
 
-                    val event = """{"type":"NEW_MESSAGE","deviceId":"$id","direction":"$direction","address":${Json.encodeToString(msgAddress)},"name":${Json.encodeToString(chatName)},"content":${Json.encodeToString(content)},"source":"whatsapp","timestamp":$now,"id":$savedId}"""
+                    val event = """{"type":"NEW_MESSAGE","deviceId":${Json.encodeToString(id)},"direction":${Json.encodeToString(direction)},"address":${Json.encodeToString(msgAddress)},"name":${Json.encodeToString(chatName)},"content":${Json.encodeToString(content)},"source":"whatsapp","timestamp":$now,"id":$savedId}"""
                     broadcastToDashboards(event, id)
                     call.respondText("""{"success":true,"fileName":"${savedFile!!.name}","url":"$fileUrl"}""", io.ktor.http.ContentType.Application.Json)
                 } else {
@@ -896,25 +942,33 @@ fun main() {
             // REST Endpoint for Remote File Upload from Android (file browser download)
             post("/upload/file/{id}") {
                 val id = call.parameters["id"] ?: return@post call.respond(mapOf("error" to "Missing device ID"))
+                if (!isSafeId(id)) return@post call.respond(io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Invalid device ID"))
+                if (!assertUploadAllowed(call, id)) return@post
                 val multipart = call.receiveMultipart()
                 val filesDir = File("uploads/$id/files").apply { mkdirs() }
                 var savedFile: File? = null
                 var originalPath = ""
 
-                multipart.forEachPart { part ->
-                    when (part) {
-                        is PartData.FileItem -> {
-                            val originalName = part.originalFileName ?: "file_${System.currentTimeMillis()}"
-                            val file = File(filesDir, originalName)
-                            part.streamProvider().use { input -> file.outputStream().use { input.copyTo(it) } }
-                            savedFile = file
+                try {
+                    multipart.forEachPart { part ->
+                        when (part) {
+                            is PartData.FileItem -> {
+                                val rawName = part.originalFileName ?: "file_${System.currentTimeMillis()}"
+                                val safeName = rawName.replace(Regex("[^a-zA-Z0-9._-]"), "_").take(200)
+                                val file = File(filesDir, safeName)
+                                part.streamProvider().use { input -> file.outputStream().use { input.copyTo(it) } }
+                                savedFile = file
+                            }
+                            is PartData.FormItem -> {
+                                if (part.name == "originalPath") originalPath = part.value
+                            }
+                            else -> {}
                         }
-                        is PartData.FormItem -> {
-                            if (part.name == "originalPath") originalPath = part.value
-                        }
-                        else -> {}
+                        part.dispose()
                     }
-                    part.dispose()
+                } catch (e: Exception) {
+                    println("UPLOAD/file: multipart error for $id: ${e.message}")
+                    return@post call.respond(mapOf("success" to false, "error" to "Upload error"))
                 }
 
                 if (savedFile != null) {
@@ -941,7 +995,7 @@ fun main() {
                         }
                     }
 
-                    val event = """{"type":"FILE_READY","deviceId":"$id","name":${Json.encodeToString(savedFile!!.name)},"url":${Json.encodeToString(fileUrl)},"originalPath":${Json.encodeToString(originalPath)}}"""
+                    val event = """{"type":"FILE_READY","deviceId":${Json.encodeToString(id)},"name":${Json.encodeToString(savedFile!!.name)},"url":${Json.encodeToString(fileUrl)},"originalPath":${Json.encodeToString(originalPath)}}"""
                     broadcastToDashboards(event, id)
                     call.respond(mapOf("success" to true))
                 } else {
@@ -953,6 +1007,7 @@ fun main() {
             get("/uploads/{id}/files/{name}") {
                 val id   = call.parameters["id"]   ?: return@get call.respondText("""{"error":"Missing ID"}""", io.ktor.http.ContentType.Application.Json)
                 val name = call.parameters["name"] ?: return@get call.respondText("""{"error":"Missing name"}""", io.ktor.http.ContentType.Application.Json)
+                if (!isSafeId(id) || !isSafeFilename(name)) return@get call.respondText("""{"error":"Invalid path"}""", io.ktor.http.ContentType.Application.Json, io.ktor.http.HttpStatusCode.BadRequest)
                 val file = File("uploads/$id/files/$name")
                 if (file.exists()) {
                     call.response.headers.append("Content-Disposition", "attachment; filename=\"$name\"")
@@ -969,6 +1024,7 @@ fun main() {
                 val name = call.parameters["name"] ?: return@get call.respondText("""{"error":"Missing name"}""", io.ktor.http.ContentType.Application.Json)
                 val allowedTypes = setOf("images", "videos", "audio", "files")
                 if (type !in allowedTypes) return@get call.respondText("""{"error":"Invalid type"}""", io.ktor.http.ContentType.Application.Json)
+                if (!isSafeId(id) || !isSafeFilename(name)) return@get call.respondText("""{"error":"Invalid path"}""", io.ktor.http.ContentType.Application.Json, io.ktor.http.HttpStatusCode.BadRequest)
                 val file = File("uploads/$id/whatsapp/$type/$name")
                 println("SERVE WHATSAPP: path=$id/$type/$name -> $file exists=${file.exists()} cwd=${System.getProperty("user.dir")}")
                 if (file.exists()) {
@@ -982,6 +1038,14 @@ fun main() {
             webSocket("/ws/device/{id}") {
                 val deviceId   = call.parameters["id"] ?: "unknown"
                 val linkToken  = call.request.queryParameters["linkToken"]?.trim()
+
+                // Close any previous live session for this device before taking over —
+                // otherwise the old (possibly stale) socket lingers until its own timeout.
+                deviceSessions[deviceId]?.let { old ->
+                    if (old !== this) {
+                        try { old.close(CloseReason(CloseReason.Codes.NORMAL, "Replaced by new connection")) } catch (_: Exception) {}
+                    }
+                }
                 deviceSessions[deviceId] = this
                 val now = System.currentTimeMillis()
                 val lastConn = deviceConnectTimestamps[deviceId] ?: 0L
@@ -995,18 +1059,24 @@ fun main() {
                 val battery    = call.request.queryParameters["battery"]?.toIntOrNull() ?: 100
                 val isCharging = call.request.queryParameters["charging"]?.toBoolean() ?: false
 
-                // Resolve ownerId: from linkToken or existing DB record
-                val resolvedOwnerId: Int? = if (!linkToken.isNullOrBlank()) {
+                // Resolve ownerId: the device's own existing DB owner always wins. A linkToken
+                // only assigns ownership when the device is brand-new or not yet linked to
+                // anyone — it must never silently reassign an already-owned device to a
+                // different account, otherwise anyone who knows/guesses a deviceId and has
+                // their own valid linkToken could hijack someone else's device.
+                val existingOwnerId: Int? = transaction {
+                    DevicesTable.select { DevicesTable.id eq deviceId }.firstOrNull()?.get(DevicesTable.ownerId)
+                }
+                val linkTokenOwnerId: Int? = if (!linkToken.isNullOrBlank()) {
                     transaction {
                         UsersTable.select { UsersTable.linkToken eq linkToken }
                             .firstOrNull()?.get(UsersTable.id)
                     }
-                } else {
-                    transaction {
-                        DevicesTable.select { DevicesTable.id eq deviceId }
-                            .firstOrNull()?.get(DevicesTable.ownerId)
-                    }
+                } else null
+                if (linkTokenOwnerId != null && existingOwnerId != null && linkTokenOwnerId != existingOwnerId) {
+                    println("SECURITY: device $deviceId is already owned by user $existingOwnerId — ignoring mismatched linkToken belonging to user $linkTokenOwnerId")
                 }
+                val resolvedOwnerId: Int? = existingOwnerId ?: linkTokenOwnerId
                 if (resolvedOwnerId != null) deviceOwnerCache[deviceId] = resolvedOwnerId
 
                 // Write Device Connection state to Database
@@ -1211,13 +1281,10 @@ fun main() {
                 dashboardSessions[this] = userId
                 println("Dashboard connected (userId=$userId)")
 
-                // Send only devices owned by this user
-                val list = transaction {
-                    val query = if (userId > 0)
-                        DevicesTable.select { DevicesTable.ownerId eq userId }
-                    else
-                        DevicesTable.selectAll()
-                    query.map {
+                // Send only devices owned by this user — an unauthenticated connection
+                // (userId == 0) must never see anyone's device roster.
+                val list = if (userId <= 0) emptyList() else transaction {
+                    DevicesTable.select { DevicesTable.ownerId eq userId }.map {
                         DeviceInfo(
                             deviceId   = it[DevicesTable.id],
                             model      = it[DevicesTable.model],
@@ -1240,11 +1307,14 @@ fun main() {
                                 val command = json["command"]?.jsonPrimitive?.content
 
                                 if (destDeviceId != null) {
-                                    // Verify the dashboard user owns this device before relaying any command
+                                    // Verify the dashboard user owns this device before relaying any command.
+                                    // Requires: an authenticated session, AND the device already has a
+                                    // resolved owner, AND it matches this user — an unauthenticated
+                                    // connection or an unlinked/other-owner device must never receive commands.
                                     val devOwner = deviceOwnerCache[destDeviceId] ?: transaction {
                                         DevicesTable.select { DevicesTable.id eq destDeviceId }.firstOrNull()?.get(DevicesTable.ownerId)
                                     }
-                                    if (userId > 0 && devOwner != null && devOwner != userId) {
+                                    if (userId <= 0 || devOwner == null || devOwner != userId) {
                                         send(packetJson.encodeToString(ErrorPacket(message = "Acesso negado ao dispositivo $destDeviceId")))
                                         continue
                                     }
@@ -1332,6 +1402,46 @@ suspend fun broadcastBinaryToDashboards(data: ByteArray, deviceId: String) {
             catch (e: Exception) { dashboardSessions.remove(dash) }
         }
     }
+}
+
+private val SAFE_ID_REGEX = Regex("^[a-zA-Z0-9_-]{1,128}$")
+private val SAFE_FILENAME_REGEX = Regex("^[a-zA-Z0-9._-]{1,255}$")
+
+fun isSafeId(id: String) = SAFE_ID_REGEX.matches(id)
+fun isSafeFilename(name: String) = SAFE_FILENAME_REGEX.matches(name) && !name.contains("..")
+
+// Verify a media-upload request for `deviceId` is allowed: either a dashboard session that
+// owns the device, or a valid `linkToken` (used by the Android app itself, which has no
+// session cookie) belonging to the device's owner. Responds 401/403 and returns false if not.
+// A linkToken never reassigns an already-owned device to a different account (mirrors the
+// same rule enforced on the /ws/device WebSocket) — it only claims brand-new/unlinked devices.
+suspend fun assertUploadAllowed(call: io.ktor.server.application.ApplicationCall, deviceId: String): Boolean {
+    val lt = call.request.queryParameters["linkToken"]?.trim()
+    val sessionUserId = getSessionUserId(call)
+    if (sessionUserId == null && lt.isNullOrBlank()) {
+        call.respondText("""{"error":"Não autenticado"}""", io.ktor.http.ContentType.Application.Json, io.ktor.http.HttpStatusCode.Unauthorized)
+        return false
+    }
+    if (sessionUserId != null) {
+        val ownerId = deviceOwnerCache[deviceId] ?: transaction { DevicesTable.select { DevicesTable.id eq deviceId }.firstOrNull()?.get(DevicesTable.ownerId) }
+        if (ownerId == null || ownerId != sessionUserId) {
+            call.respondText("""{"error":"Acesso negado"}""", io.ktor.http.ContentType.Application.Json, io.ktor.http.HttpStatusCode.Forbidden)
+            return false
+        }
+        return true
+    }
+    val ownerUserId = transaction { UsersTable.select { UsersTable.linkToken eq lt!! }.firstOrNull()?.get(UsersTable.id) }
+    if (ownerUserId == null) {
+        call.respondText("""{"error":"Token inválido"}""", io.ktor.http.ContentType.Application.Json, io.ktor.http.HttpStatusCode.Unauthorized)
+        return false
+    }
+    val existingOwnerId = transaction { DevicesTable.select { DevicesTable.id eq deviceId }.firstOrNull()?.get(DevicesTable.ownerId) }
+    if (existingOwnerId != null && existingOwnerId != ownerUserId) {
+        call.respondText("""{"error":"Acesso negado"}""", io.ktor.http.ContentType.Application.Json, io.ktor.http.HttpStatusCode.Forbidden)
+        return false
+    }
+    deviceOwnerCache[deviceId] = existingOwnerId ?: ownerUserId
+    return true
 }
 
 // Verify the authenticated caller owns the given device — responds 401/403 and returns false if not

