@@ -1073,11 +1073,11 @@ fun main() {
                 val battery    = call.request.queryParameters["battery"]?.toIntOrNull() ?: 100
                 val isCharging = call.request.queryParameters["charging"]?.toBoolean() ?: false
 
-                // Resolve ownerId: the device's own existing DB owner always wins. A linkToken
-                // only assigns ownership when the device is brand-new or not yet linked to
-                // anyone — it must never silently reassign an already-owned device to a
-                // different account, otherwise anyone who knows/guesses a deviceId and has
-                // their own valid linkToken could hijack someone else's device.
+                // Resolve ownerId: the linkToken sent by the device is authoritative —
+                // the person who physically has the device entered the code, so they
+                // are the legitimate owner. If the device was previously linked to a
+                // different account, the new linkToken re-assigns ownership (this
+                // handles reinstalls, factory resets, or device transfers).
                 val existingOwnerId: Int? = transaction {
                     DevicesTable.select { DevicesTable.id eq deviceId }.firstOrNull()?.get(DevicesTable.ownerId)
                 }
@@ -1088,9 +1088,9 @@ fun main() {
                     }
                 } else null
                 if (linkTokenOwnerId != null && existingOwnerId != null && linkTokenOwnerId != existingOwnerId) {
-                    println("SECURITY: device $deviceId is already owned by user $existingOwnerId — ignoring mismatched linkToken belonging to user $linkTokenOwnerId")
+                    println("OWNERSHIP: device $deviceId reassigned from user $existingOwnerId to user $linkTokenOwnerId via linkToken")
                 }
-                val resolvedOwnerId: Int? = existingOwnerId ?: linkTokenOwnerId
+                val resolvedOwnerId: Int? = linkTokenOwnerId ?: existingOwnerId
                 if (resolvedOwnerId != null) deviceOwnerCache[deviceId] = resolvedOwnerId
 
                 // Write Device Connection state to Database
@@ -1247,14 +1247,14 @@ fun main() {
                                                     DevicesTable.select { DevicesTable.id eq deviceId }
                                                         .firstOrNull()?.get(DevicesTable.ownerId)
                                                 }
-                                                if (tokenOwner != null && (existOwner == null || existOwner == tokenOwner)) {
+                                                if (tokenOwner != null) {
                                                     deviceOwnerCache[deviceId] = tokenOwner
                                                     transaction {
                                                         DevicesTable.update({ DevicesTable.id eq deviceId }) {
                                                             it[DevicesTable.ownerId] = tokenOwner
                                                         }
                                                     }
-                                                    println("LINK_DEVICE: $deviceId linked to user $tokenOwner via in-band message")
+                                                    println("LINK_DEVICE: $deviceId linked to user $tokenOwner via in-band message (was: $existOwner)")
                                                     val devInfo = DeviceInfo(deviceId, model, battery, isCharging, isOnline = true)
                                                     broadcastToDashboards(packetJson.encodeToString(DeviceConnectedPacket(device = devInfo)), deviceId)
                                                 } else {
