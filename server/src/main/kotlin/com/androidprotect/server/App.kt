@@ -483,21 +483,6 @@ fun main() {
                 call.respond(mapOf("ok" to true))
             }
 
-            // Debug: list all devices for the authenticated user
-            get("/api/debug/devices") {
-                val userId = getSessionUserId(call) ?: return@get call.respond(io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
-                val all = transaction {
-                    DevicesTable.selectAll().map {
-                        val oid = it[DevicesTable.ownerId]
-                        """{"deviceId":"${it[DevicesTable.id]}","model":"${it[DevicesTable.model]}","ownerId":${oid ?: "null"},"isOnline":${it[DevicesTable.isOnline]}}"""
-                    }
-                }
-                val cache = deviceOwnerCache.entries.map { (k, v) -> """{"deviceId":"$k","cachedOwnerId":$v}""" }
-                val sessions = deviceSessions.keys.toList()
-                val json = """{"version":"v3","userId":$userId,"activeSessions":${Json.encodeToString(sessions)},"allDevices":[${all.joinToString(",")}],"ownerCache":[${cache.joinToString(",")}]}"""
-                call.respondText(json, io.ktor.http.ContentType.Application.Json)
-            }
-
             // Serve frontend config (API keys from env vars — never hardcoded in source)
             get("/api/config") {
                 // Reads from env var; falls back to built-in key if not configured
