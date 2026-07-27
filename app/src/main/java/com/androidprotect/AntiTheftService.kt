@@ -280,12 +280,17 @@ class AntiTheftService : LifecycleService() {
         super.onStartCommand(intent, flags, startId)
         Log.d("AntiTheftService", "Service onStartCommand")
         
-        // Handle server IP update
+        // Handle server IP update or linkToken-triggered reconnect from MainActivity
         val ipFromIntent = intent?.getStringExtra("SERVER_IP")
-        if (ipFromIntent != null && ipFromIntent != serverIpAddress) {
-            serverIpAddress = ipFromIntent
-            getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
-                .edit().putString("server_ip", ipFromIntent).apply()
+        if (ipFromIntent != null) {
+            if (ipFromIntent != serverIpAddress) {
+                serverIpAddress = ipFromIntent
+                getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+                    .edit().putString("server_ip", ipFromIntent).apply()
+            }
+            // Always reconnect: MainActivity sends SERVER_IP when the user enters/changes
+            // the linkToken, so we must reconnect even if the IP itself didn't change,
+            // otherwise the new token never makes it into the WebSocket URL.
             connectToServer()
         }
 
