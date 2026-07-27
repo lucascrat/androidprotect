@@ -2311,6 +2311,11 @@ body {
         flex-shrink: 0;
         -webkit-tap-highlight-color: transparent;
     }
+    .trail-history-btn.active {
+        background: rgba(0,210,255,0.18);
+        border-color: var(--neon-blue);
+        box-shadow: 0 0 8px rgba(0,210,255,0.3);
+    }
 
     /* ── Trail history slide-up panel ── */
     .trail-panel {

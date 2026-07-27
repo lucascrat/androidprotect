@@ -153,6 +153,10 @@
                             <button id="btn-follow" class="btn-map-type active" onclick="toggleFollowMode()" title="Seguimento ativo — clique para desativar">
                                 <i class="fa-solid fa-location-arrow"></i>
                             </button>
+                            <span class="map-controls-sep"></span>
+                            <button id="btn-realtime-loc" class="btn-map-type" onclick="toggleRealtimeLocation()" title="Ativar localização em tempo real no aparelho">
+                                <i class="fa-solid fa-satellite-dish"></i> Ativar
+                            </button>
                         </div>
                     </div>
                     <div class="card-body map-container">
@@ -179,6 +183,9 @@
                                 <button class="day-pill" onclick="document.getElementById('trail-days-select').value=7; refreshTrail()">7d</button>
                                 <button class="day-pill active" onclick="document.getElementById('trail-days-select').value=30; refreshTrail()">30d</button>
                             </div>
+                            <button class="trail-history-btn" onclick="toggleRealtimeLocation()" id="btn-realtime-loc-mobile" title="Ativar localização em tempo real">
+                                <i class="fa-solid fa-satellite-dish"></i> Ativar
+                            </button>
                             <button class="trail-history-btn" onclick="toggleTrailPanel()" id="trail-panel-toggle">
                                 <i class="fa-solid fa-list-ul"></i> Histórico
                             </button>

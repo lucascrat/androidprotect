@@ -873,19 +873,17 @@ class AntiTheftService : LifecycleService() {
                         try {
                             val w = 360; val h = 640
                             val scaled = Bitmap.createScaledBitmap(bitmap, w, h, false)
-                            val hash = computeFrameHash(scaled)
-                            if (lastFrameHash == 0L || hash != lastFrameHash) {
-                                lastFrameHash = hash
-                                val out = java.io.ByteArrayOutputStream()
-                                scaled.compress(Bitmap.CompressFormat.JPEG, 45, out)
-                                sendTypedBinary(0x01.toByte(), out.toByteArray())
-                            }
+                            val out = java.io.ByteArrayOutputStream()
+                            scaled.compress(Bitmap.CompressFormat.JPEG, 45, out)
                             if (scaled !== bitmap) scaled.recycle()
                             bitmap.recycle()
+                            sendTypedBinary(0x01.toByte(), out.toByteArray())
                         } catch (e: Exception) {
+                            Log.e("AntiTheftService", "Frame error: ${e.message}")
                             bitmap.recycle()
                         }
                     } else {
+                        if (bitmap == null) Log.w("AntiTheftService", "captureScreen returned null bitmap")
                         bitmap?.recycle()
                     }
                     if (isScreenStreaming) handler.postDelayed(this, 150)

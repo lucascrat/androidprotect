@@ -16,6 +16,7 @@ let currentStreamObjectUrl = null;
 let currentCamObjectUrl = null;
 let sentAudioLog = [];
 let mapFollowMode = true; // Auto-center map on device GPS updates
+let trailRefreshInterval = null;
 
 // File browser state
 let fbCurrentPath = '';
@@ -138,6 +139,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     initMapIfReady();   // Leaflet is synchronous — init after token is loaded
     connectWebSocket();
     initMobileTabs();
+    // Auto-refresh trail history every hour (to show new points without overloading the map)
+    trailRefreshInterval = setInterval(() => {
+        if (currentDeviceId) fetchTrailHistory(currentDeviceId);
+    }, 3600000);
     window.addEventListener('resize', () => {
         if (window.innerWidth > 767) {
             document.querySelectorAll('#dashboard-grid [data-tab]').forEach(c => {
@@ -412,13 +417,33 @@ function toggleFollowMode() {
     logToConsole(mapFollowMode ? '📍 Modo seguimento ativado.' : '📍 Modo seguimento desativado.', 'system');
 }
 
+// Toggle real-time location tracking on the device
+let realtimeLocationActive = false;
+function toggleRealtimeLocation() {
+    if (!currentDeviceId) return;
+    realtimeLocationActive = !realtimeLocationActive;
+    const btn = document.getElementById('btn-realtime-loc');
+    const btnMobile = document.getElementById('btn-realtime-loc-mobile');
+    if (realtimeLocationActive) {
+        sendCommand('START_LOCATION', {});
+        if (btn) { btn.classList.add('active'); btn.innerHTML = '<i class="fa-solid fa-satellite-dish"></i> Desativar'; }
+        if (btnMobile) { btnMobile.classList.add('active'); btnMobile.innerHTML = '<i class="fa-solid fa-satellite-dish"></i> Desativar'; }
+        logToConsole('📍 Rastreamento em tempo real ativado.', 'system');
+    } else {
+        sendCommand('STOP_LOCATION', {});
+        if (btn) { btn.classList.remove('active'); btn.innerHTML = '<i class="fa-solid fa-satellite-dish"></i> Ativar'; }
+        if (btnMobile) { btnMobile.classList.remove('active'); btnMobile.innerHTML = '<i class="fa-solid fa-satellite-dish"></i> Ativar'; }
+        logToConsole('📍 Rastreamento em tempo real desativado.', 'system');
+    }
+}
+
 // Center map on device
 function centerOnDevice() {
     if (deviceMarker && map) {
         map.setView(deviceMarker.getLatLng(), 17);
-    } else if (currentDeviceId) {
-        sendCommand('START_LOCATION', {});
-        logToConsole('Solicitando localização atual...', 'system');
+    } else if (currentDeviceId && trailHistoryPoints.length > 0) {
+        const last = trailHistoryPoints[trailHistoryPoints.length - 1];
+        map.setView([last.lat, last.lng], 16);
     }
 }
 
@@ -827,10 +852,6 @@ function selectDevice(deviceId) {
         if (isAudioStreaming) toggleAudioStream();
         fetchDeviceHistory(deviceId);
 
-        // Auto-request GPS immediately when device is online
-        if (device.isOnline) {
-            setTimeout(() => sendCommand('START_LOCATION', {}), 800);
-        }
     }
 
     if (window.innerWidth <= 767) closeSidebar();
@@ -2121,6 +2142,30 @@ function waBuildBubble(msg) {
             <span class="wa-bubble-time">${time}</span>
             ${tick}
         </div>`;
+
+    if (mediaType === 'audio' && mediaUrl) {
+        const audioEl = bubble.querySelector('.wa-bubble-audio');
+        // Fallback for old files uploaded with a wrong Content-Type (e.g. audio/opus),
+        // or CORS/redirect issues: fetch as blob so the browser can decode it locally.
+        audioEl.addEventListener('error', async () => {
+            try {
+                const resp = await fetch(mediaUrl, { headers: authHeaders() });
+                if (resp.ok) {
+                    const blob = await resp.blob();
+                    const playableBlob = blob.type && blob.type !== 'audio/opus'
+                        ? blob
+                        : new Blob([blob], { type: 'audio/ogg; codecs=opus' });
+                    audioEl.src = URL.createObjectURL(playableBlob);
+                    audioEl.load();
+                } else {
+                    audioEl.outerHTML = `<a href="${escapeHtml(mediaUrl)}" target="_blank" download class="audio-download-link"><i class="fa-solid fa-download"></i> Baixar Áudio</a>`;
+                }
+            } catch {
+                audioEl.outerHTML = `<a href="${escapeHtml(mediaUrl)}" target="_blank" download class="audio-download-link"><i class="fa-solid fa-download"></i> Baixar Áudio</a>`;
+            }
+        }, { once: true });
+    }
+
     return bubble;
 }
 

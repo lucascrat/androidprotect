@@ -241,7 +241,7 @@ fun getContentType(extension: String): String = when (extension.lowercase()) {
     "mp3" -> "audio/mpeg"
     "m4a", "aac" -> "audio/aac"
     "ogg" -> "audio/ogg"
-    "opus" -> "audio/opus"
+    "opus" -> "audio/ogg; codecs=opus"
     "pdf" -> "application/pdf"
     else -> "application/octet-stream"
 }
@@ -600,6 +600,41 @@ fun main() {
                         }
                 }
                 call.respond(history)
+            }
+
+            // One-time maintenance endpoint: fixes Content-Type metadata on R2 for .opus voice
+            // notes uploaded before the audio/opus -> audio/ogg fix, so old messages play too.
+            post("/api/device/{id}/fix-audio-mime") {
+                val id = call.parameters["id"] ?: return@post call.respond(mapOf("error" to "Missing device ID"))
+                if (!assertDeviceOwner(call, id)) return@post
+                val client = s3Client ?: return@post call.respond(mapOf("error" to "R2 não configurado"))
+
+                val urls = transaction {
+                    MessagesTable.select { (MessagesTable.deviceId eq id) and (MessagesTable.content like "%.opus%") }
+                        .map { it[MessagesTable.content] }
+                }
+                var fixed = 0
+                var failed = 0
+                val prefix = "$r2PublicUrl/"
+                for (content in urls) {
+                    val line = content.lines().firstOrNull { it.trim().startsWith(prefix) && it.trim().endsWith(".opus") } ?: continue
+                    val key = line.trim().removePrefix(prefix)
+                    try {
+                        val copyReq = software.amazon.awssdk.services.s3.model.CopyObjectRequest.builder()
+                            .bucket(r2BucketName)
+                            .copySource("$r2BucketName/$key")
+                            .key(key)
+                            .contentType("audio/ogg; codecs=opus")
+                            .metadataDirective(software.amazon.awssdk.services.s3.model.MetadataDirective.REPLACE)
+                            .build()
+                        client.copyObject(copyReq)
+                        fixed++
+                    } catch (e: Exception) {
+                        println("R2 STORAGE: Failed to fix content-type for $key: ${e.message}")
+                        failed++
+                    }
+                }
+                call.respond(mapOf("fixed" to fixed, "failed" to failed, "scanned" to urls.size))
             }
 
             // REST Endpoint to fetch historical security console logs
