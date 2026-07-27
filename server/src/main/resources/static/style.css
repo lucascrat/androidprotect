@@ -2470,6 +2470,62 @@ body {
         flex-shrink: 0;
     }
 
+    /* ── Street history section (inside trail panel) ── */
+    .street-history-section {
+        border-top: 1px solid var(--border-color);
+        padding: 12px 16px 8px;
+    }
+    .street-history-header {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        font-size: 0.78rem;
+        font-weight: 600;
+        color: var(--text-secondary);
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        margin-bottom: 10px;
+    }
+    .street-history-header i { color: var(--accent-blue); }
+    .street-history-hint {
+        margin-left: auto;
+        font-size: 0.68rem;
+        font-weight: 400;
+        color: rgba(255,255,255,0.3);
+        text-transform: none;
+        letter-spacing: 0;
+    }
+    .street-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 0;
+        border-bottom: 1px solid rgba(255,255,255,0.04);
+        font-size: 0.82rem;
+    }
+    .street-item:last-child { border-bottom: none; }
+    .street-idx {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: rgba(0,210,255,0.12);
+        color: var(--accent-blue);
+        font-size: 0.68rem;
+        font-weight: 700;
+        display: flex; align-items: center; justify-content: center;
+        flex-shrink: 0;
+    }
+    .street-item i { color: rgba(255,255,255,0.25); font-size: 0.75rem; }
+    .street-name { color: var(--text-primary); flex: 1; }
+    .street-empty {
+        font-size: 0.8rem;
+        color: rgba(255,255,255,0.3);
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 4px 0 8px;
+    }
+
     /* hide GPS bar and trail bar on desktop */
 }
 

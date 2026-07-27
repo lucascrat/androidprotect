@@ -18,6 +18,11 @@ let sentAudioLog = [];
 let mapFollowMode = true; // Auto-center map on device GPS updates
 let trailRefreshInterval = null;
 
+// Street name history (reverse geocoding)
+let recentStreets = [];       // last 10 unique street names
+let lastGeocodeTime = 0;      // throttle: ms timestamp of last geocode call
+let streetUpdateInterval = null; // hourly update timer
+
 // File browser state
 let fbCurrentPath = '';
 let fbHistory     = [];
@@ -328,6 +333,56 @@ function haversineKm(lat1, lng1, lat2, lng2) {
     const dLng = (lng2 - lng1) * Math.PI / 180;
     const a = Math.sin(dLat/2)**2 + Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLng/2)**2;
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+// ─── Street History (Nominatim reverse geocoding) ────────────────────────────
+
+async function reverseGeocode(lat, lng) {
+    try {
+        const res = await fetch(
+            `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
+            { headers: { 'Accept-Language': 'pt-BR,pt', 'User-Agent': 'AndroidProtect/1.0' } }
+        );
+        const data = await res.json();
+        const addr = data.address || {};
+        return addr.road || addr.pedestrian || addr.path || addr.neighbourhood || addr.suburb
+            || (data.display_name || '').split(',')[0] || null;
+    } catch { return null; }
+}
+
+async function updateStreetHistory(lat, lng) {
+    const now = Date.now();
+    if (now - lastGeocodeTime < 90_000) return; // at most once per 90 s
+    lastGeocodeTime = now;
+    const street = await reverseGeocode(lat, lng);
+    if (!street) return;
+    if (recentStreets.length > 0 && recentStreets[0] === street) return;
+    recentStreets.unshift(street);
+    if (recentStreets.length > 10) recentStreets.pop();
+    renderStreetHistory();
+}
+
+function renderStreetHistory() {
+    const el = document.getElementById('street-history-list');
+    if (!el) return;
+    if (recentStreets.length === 0) {
+        el.innerHTML = '<div class="street-empty"><i class="fa-solid fa-map-pin"></i> Nenhuma rua registrada ainda.</div>';
+        return;
+    }
+    el.innerHTML = recentStreets.map((s, i) =>
+        `<div class="street-item"><span class="street-idx">${i + 1}</span><i class="fa-solid fa-road"></i><span class="street-name">${escapeHtml(s)}</span></div>`
+    ).join('');
+}
+
+function startStreetUpdateScheduler() {
+    if (streetUpdateInterval) clearInterval(streetUpdateInterval);
+    streetUpdateInterval = setInterval(() => {
+        if (!currentDeviceId || realtimeLocationActive) return;
+        if (trailHistoryPoints.length === 0) return;
+        const last = trailHistoryPoints[trailHistoryPoints.length - 1];
+        lastGeocodeTime = 0; // force update
+        updateStreetHistory(last.lat, last.lng);
+    }, 3_600_000); // every 1 hour
 }
 
 // ─── GPS Bar Update ───────────────────────────────────────────────────────────
@@ -876,6 +931,12 @@ function selectDevice(deviceId) {
     const accEl = document.getElementById('location-accuracy');
     if (accEl) accEl.textContent = 'Precisão: --';
 
+    // Reset street history for new device
+    recentStreets = [];
+    lastGeocodeTime = 0;
+    renderStreetHistory();
+    startStreetUpdateScheduler();
+
     const device = devicesMap.get(deviceId);
     if (device) {
         updateActiveDeviceUI(device);
@@ -1071,9 +1132,12 @@ function fetchTrailHistory(deviceId) {
                 fillColor: '#00d2ff', fillOpacity: 0.1
             }).addTo(map);
 
-            // Fit bounds
-            const allLatLngs = points.map(p => [p.lat, p.lng]);
-            if (allLatLngs.length > 0) map.fitBounds(allLatLngs, { padding: [20, 20] });
+            // Fly to last known position at street-level zoom
+            map.flyTo([lastPt.lat, lastPt.lng], 16, { duration: 1.2 });
+
+            // Trigger street name for last known position
+            lastGeocodeTime = 0;
+            updateStreetHistory(lastPt.lat, lastPt.lng);
         })
         .catch(err => console.error('Error fetching trail:', err));
 }
@@ -1198,6 +1262,9 @@ function handleTelemetry(data) {
             map.panTo([lat, lng]);
             if (map.getZoom() < 15) map.setZoom(16);
         }
+
+        // Update street history (throttled to 90s)
+        updateStreetHistory(lat, lng);
     }
 
 }

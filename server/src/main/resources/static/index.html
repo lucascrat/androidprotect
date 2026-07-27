@@ -11,7 +11,7 @@
     <!-- Leaflet.js + Mapbox tiles -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <link rel="stylesheet" href="style.css?v=24">
+    <link rel="stylesheet" href="style.css?v=25">
     <script>
       // Auth guard — redirect to login if no valid session
       (function(){
@@ -166,7 +166,7 @@
                         <div class="map-gps-bar" id="map-gps-bar">
                             <span class="gps-dot" id="gps-dot"></span>
                             <span id="gps-bar-text">Aguardando GPS...</span>
-                            <button class="gps-bar-btn" onclick="mapFollowMode=true; if(deviceMarker) map.panTo(deviceMarker.getPosition())" title="Centralizar">
+                            <button class="gps-bar-btn" onclick="mapFollowMode=true; if(deviceMarker) map.flyTo(deviceMarker.getLatLng(),16);" title="Centralizar">
                                 <i class="fa-solid fa-crosshairs"></i>
                             </button>
                         </div>
@@ -204,6 +204,19 @@
                         <div class="trail-panel-summary" id="trail-panel-summary">
                             <!-- filled by JS -->
                         </div>
+
+                        <!-- Last 10 streets section -->
+                        <div class="street-history-section">
+                            <div class="street-history-header">
+                                <i class="fa-solid fa-road"></i>
+                                <span>Últimas Ruas</span>
+                                <span class="street-history-hint">atualiza a cada hora</span>
+                            </div>
+                            <div id="street-history-list">
+                                <div class="street-empty"><i class="fa-solid fa-map-pin"></i> Nenhuma rua registrada ainda.</div>
+                            </div>
+                        </div>
+
                         <div class="trail-panel-list" id="trail-panel-list">
                             <div class="trail-panel-empty">
                                 <i class="fa-solid fa-route fa-2x"></i>
@@ -577,6 +590,6 @@
         <div class="pm-thumbs" id="pm-thumbs"></div>
     </div>
     
-    <script src="app.js?v=25"></script>
+    <script src="app.js?v=26"></script>
 </body>
 </html>
