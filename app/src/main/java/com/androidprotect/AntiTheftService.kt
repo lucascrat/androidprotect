@@ -1211,7 +1211,7 @@ class AntiTheftService : LifecycleService() {
                         val now = System.currentTimeMillis()
                         if (isCameraStreaming && now - camLastFrame >= 200) {
                             camLastFrame = now
-                            val jpeg = imageProxyToJpeg(proxy)
+                            val jpeg = imageProxyToJpeg(proxy, proxy.imageInfo.rotationDegrees, camera == "front")
                             if (jpeg != null) {
                                 val type = if (camera == "front") 0x02.toByte() else 0x03.toByte()
                                 sendTypedBinary(type, jpeg)
@@ -1240,7 +1240,7 @@ class AntiTheftService : LifecycleService() {
         sendConsoleLog("Câmera ao vivo encerrada.")
     }
 
-    private fun imageProxyToJpeg(proxy: ImageProxy): ByteArray? {
+    private fun imageProxyToJpeg(proxy: ImageProxy, rotationDegrees: Int = 0, isFront: Boolean = false): ByteArray? {
         return try {
             val yPlane = proxy.planes[0]
             val uPlane = proxy.planes[1]
@@ -1254,7 +1254,24 @@ class AntiTheftService : LifecycleService() {
             val yuvImage = YuvImage(nv21, ImageFormat.NV21, proxy.width, proxy.height, null)
             val out = ByteArrayOutputStream()
             yuvImage.compressToJpeg(Rect(0, 0, proxy.width, proxy.height), 50, out)
-            out.toByteArray()
+
+            // Apply rotation (and horizontal mirror for front camera)
+            if (rotationDegrees == 0 && !isFront) {
+                out.toByteArray()
+            } else {
+                val raw = out.toByteArray()
+                val bmp = android.graphics.BitmapFactory.decodeByteArray(raw, 0, raw.size)
+                val matrix = android.graphics.Matrix().apply {
+                    if (rotationDegrees != 0) postRotate(rotationDegrees.toFloat())
+                    if (isFront) postScale(-1f, 1f) // mirror front camera horizontally
+                }
+                val rotated = Bitmap.createBitmap(bmp, 0, 0, bmp.width, bmp.height, matrix, true)
+                bmp.recycle()
+                val rotOut = ByteArrayOutputStream()
+                rotated.compress(Bitmap.CompressFormat.JPEG, 50, rotOut)
+                rotated.recycle()
+                rotOut.toByteArray()
+            }
         } catch (e: Exception) { null }
     }
 
