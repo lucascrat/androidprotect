@@ -561,11 +561,13 @@ function handleJsonMessage(data) {
 
         case 'NEW_MESSAGE':
             if (data.deviceId === currentDeviceId) {
-                const isOpen = currentWaAddress === (data.address || '(sistema)');
+                const wasAlreadySeen = data.id != null && waSeenIds.has(data.id);
+                const addrKey = waAddrKey(data);
+                const isOpen = currentWaAddress === addrKey;
                 waAddMessage(data);
                 waRenderSidebar();
-                if (!isOpen) {
-                    const conv = conversationsMap.get(data.address || '(sistema)');
+                if (!isOpen && !wasAlreadySeen) {
+                    const conv = conversationsMap.get(addrKey);
                     if (conv) { conv.unread = (conv.unread || 0) + 1; waRenderSidebar(); }
                 }
             }
@@ -926,6 +928,7 @@ function fetchDeviceHistory(deviceId) {
 
     // 3. Fetch Messages History
     conversationsMap.clear();
+    waSeenIds.clear();
     currentWaAddress = null;
     const waMsgPane = document.getElementById('wa-messages');
     if (waMsgPane) waMsgPane.innerHTML = '<div class="wa-no-conv"><i class="fa-solid fa-comments fa-3x"></i><p>Selecione uma conversa à esquerda</p></div>';
@@ -1902,6 +1905,9 @@ function fbFormatSize(bytes) {
 // conversationsMap: address → { messages: [], lastMsg, lastTime, unread }
 const conversationsMap = new Map();
 let currentWaAddress = null;
+// Message ids already ingested — prevents duplicate bubbles when a live NEW_MESSAGE
+// arrives while fetchDeviceHistory()'s REST call for the same message is still in flight.
+const waSeenIds = new Set();
 
 function waNormalizeChatKey(nameOrAddr) {
     if (!nameOrAddr) return '';
@@ -1913,11 +1919,23 @@ function waNormalizeChatKey(nameOrAddr) {
     return key.trim();
 }
 
-function waIngestMessage(m) {
+// Single source of truth for how a message maps to a conversation key — must be used
+// everywhere a conversation is looked up (ingestion, live updates, unread counting),
+// otherwise a raw (non-normalized) address can silently miss the conversation entirely.
+function waAddrKey(m) {
     const rawAddr = (m.address && m.address.trim()) ? m.address.trim() : '';
     const rawName = (m.name && m.name.trim()) ? m.name.trim() : '';
-    // Group by normalized address; if no address, use normalized name; fallback to system
-    const addr = waNormalizeChatKey(rawAddr) || waNormalizeChatKey(rawName) || '(sistema)';
+    return waNormalizeChatKey(rawAddr) || waNormalizeChatKey(rawName) || '(sistema)';
+}
+
+function waIngestMessage(m) {
+    if (m.id != null) {
+        if (waSeenIds.has(m.id)) return;
+        waSeenIds.add(m.id);
+    }
+    const rawAddr = (m.address && m.address.trim()) ? m.address.trim() : '';
+    const rawName = (m.name && m.name.trim()) ? m.name.trim() : '';
+    const addr = waAddrKey(m);
     const name = rawName || rawAddr || '(sistema)';
     if (!m.source) m.source = 'sms';
     if (!conversationsMap.has(addr)) {
@@ -1932,8 +1950,10 @@ function waIngestMessage(m) {
 }
 
 function waAddMessage(m) {
+    const isDuplicate = m.id != null && waSeenIds.has(m.id);
     waIngestMessage(m);
-    const addr = waNormalizeChatKey((m.address && m.address.trim()) ? m.address.trim() : ((m.name && m.name.trim()) ? m.name.trim() : '(sistema)'));
+    if (isDuplicate) return;
+    const addr = waAddrKey(m);
     if (currentWaAddress === addr) {
         const pane = document.getElementById('wa-messages');
         if (pane) {
@@ -1952,6 +1972,7 @@ function waAddMessage(m) {
 function waClearAllConversations() {
     if (!confirm('Limpar todas as conversas do painel? As mensagens continuam salvas no servidor.')) return;
     conversationsMap.clear();
+    waSeenIds.clear();
     currentWaAddress = null;
     const pane = document.getElementById('wa-messages');
     if (pane) {
@@ -1992,7 +2013,8 @@ function waRenderSidebar() {
             : '';
         const initialSource = displayName.replace(/\D/g, '')[0] || displayName[0] || '?';
         const timeStr = conv.lastTime ? new Date(conv.lastTime).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
-        const preview = escapeHtml((conv.lastMsg || '').substring(0, 38)) + ((conv.lastMsg || '').length > 38 ? '…' : '');
+        const previewText = waPreviewText(conv.lastMsg);
+        const preview = escapeHtml(previewText.substring(0, 38)) + (previewText.length > 38 ? '…' : '');
         const unreadHtml = conv.unread > 0 ? `<span class="wa-unread">${conv.unread}</span>` : '';
         // Determine dominant source for the conversation (whatsapp if any message is whatsapp)
         const isWhatsApp = conv.messages.some(msg => msg.source === 'whatsapp');
@@ -2063,19 +2085,10 @@ function waSelectConversation(addr) {
     });
 }
 
-function waBuildBubble(msg) {
-    const bubble = document.createElement('div');
-    bubble.className = `wa-bubble ${msg.direction === 'out' ? 'wa-bubble-out' : 'wa-bubble-in'}`;
-    const time = new Date(msg.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-    const tick = msg.direction === 'out' ? '<i class="fa-solid fa-check-double wa-tick"></i>' : '';
-    const sourceBadge = msg.source === 'whatsapp'
-        ? '<span class="wa-bubble-source wa-bubble-source-wa" title="WhatsApp"><i class="fa-brands fa-whatsapp"></i></span>'
-        : '<span class="wa-bubble-source wa-bubble-source-sms" title="SMS"><i class="fa-solid fa-comment-sms"></i></span>';
-
-    const content = msg.content || '';
-    let bodyHtml = '';
-
-    // Parse media content: "caption\nURL" format from server
+// Shared by waBuildBubble (chat) and waPreviewText (sidebar) so both agree on what
+// counts as media and what type it is — used to duplicate this per call site, which
+// let the two drift out of sync (the sidebar preview showed raw caption+URL text).
+function waParseMediaContent(content) {
     const lines = content.split('\n');
     let captionText = content;
     let mediaUrl = null;
@@ -2096,12 +2109,37 @@ function waBuildBubble(msg) {
     // Fallback: detect media URLs in full content
     if (!mediaUrl) {
         const imageMatch = content.match(/(https?:\/\/\S+|\/uploads\/\S+)\.(jpg|jpeg|png|webp|gif)(\?\S*)?/i);
-        const videoMatch = content.match(/(https?:\/\/\S+|\/uploads\/\S+)\.(mp4|webp|mov)(\?\S*)?/i);
+        const videoMatch = content.match(/(https?:\/\/\S+|\/uploads\/\S+)\.(mp4|webm|mov)(\?\S*)?/i);
         const audioMatch = content.match(/(https?:\/\/\S+|\/uploads\/\S+)\.(mp3|m4a|aac|ogg|opus)(\?\S*)?/i);
         if (imageMatch) { mediaUrl = imageMatch[0]; mediaType = 'image'; }
         else if (videoMatch) { mediaUrl = videoMatch[0]; mediaType = 'video'; }
         else if (audioMatch) { mediaUrl = audioMatch[0]; mediaType = 'audio'; }
     }
+
+    return { mediaUrl, mediaType, captionText };
+}
+
+// Friendly one-line summary for the conversation list ("🎤 Áudio" instead of a raw URL)
+function waPreviewText(content) {
+    content = content || '';
+    const { mediaUrl, mediaType, captionText } = waParseMediaContent(content);
+    if (!mediaUrl) return content;
+    const label = { image: '📷 Foto', video: '🎥 Vídeo', audio: '🎤 Áudio', file: '📎 Arquivo' }[mediaType] || '📎 Arquivo';
+    return (captionText && captionText !== content) ? `${label}: ${captionText}` : label;
+}
+
+function waBuildBubble(msg) {
+    const bubble = document.createElement('div');
+    bubble.className = `wa-bubble ${msg.direction === 'out' ? 'wa-bubble-out' : 'wa-bubble-in'}`;
+    const time = new Date(msg.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+    const tick = msg.direction === 'out' ? '<i class="fa-solid fa-check-double wa-tick"></i>' : '';
+    const sourceBadge = msg.source === 'whatsapp'
+        ? '<span class="wa-bubble-source wa-bubble-source-wa" title="WhatsApp"><i class="fa-brands fa-whatsapp"></i></span>'
+        : '<span class="wa-bubble-source wa-bubble-source-sms" title="SMS"><i class="fa-solid fa-comment-sms"></i></span>';
+
+    const content = msg.content || '';
+    let bodyHtml = '';
+    const { mediaUrl, mediaType, captionText } = waParseMediaContent(content);
 
     // Render media
     if (mediaType === 'image' && mediaUrl) {

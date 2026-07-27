@@ -585,7 +585,7 @@ fun main() {
                 if (!assertDeviceOwner(call, id)) return@get
                 val history = transaction {
                     MessagesTable.select { MessagesTable.deviceId eq id }
-                        .orderBy(MessagesTable.timestamp to SortOrder.ASC)
+                        .orderBy(MessagesTable.timestamp to SortOrder.DESC)
                         .limit(200)
                         .map {
                             MessageItem(
@@ -598,6 +598,7 @@ fun main() {
                                 timestamp = it[MessagesTable.timestamp]
                             )
                         }
+                        .reversed() // oldest -> newest, so bubbles render in chat order
                 }
                 call.respond(history)
             }
