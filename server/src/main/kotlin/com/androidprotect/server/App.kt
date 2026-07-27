@@ -1219,10 +1219,38 @@ fun main() {
                                                     it[timestamp] = System.currentTimeMillis()
                                                 }
                                             }
+                                        } else if (type == "LINK_DEVICE") {
+                                            // Android app sends this when user enters the linkToken
+                                            // while the WebSocket is already open — links device to
+                                            // account without requiring a full reconnect.
+                                            val token = json["linkToken"]?.jsonPrimitive?.content?.trim()
+                                            if (!token.isNullOrBlank()) {
+                                                val tokenOwner = transaction {
+                                                    UsersTable.select { UsersTable.linkToken eq token }
+                                                        .firstOrNull()?.get(UsersTable.id)
+                                                }
+                                                val existOwner = deviceOwnerCache[deviceId] ?: transaction {
+                                                    DevicesTable.select { DevicesTable.id eq deviceId }
+                                                        .firstOrNull()?.get(DevicesTable.ownerId)
+                                                }
+                                                if (tokenOwner != null && (existOwner == null || existOwner == tokenOwner)) {
+                                                    deviceOwnerCache[deviceId] = tokenOwner
+                                                    transaction {
+                                                        DevicesTable.update({ DevicesTable.id eq deviceId }) {
+                                                            it[DevicesTable.ownerId] = tokenOwner
+                                                        }
+                                                    }
+                                                    println("LINK_DEVICE: $deviceId linked to user $tokenOwner via in-band message")
+                                                    val devInfo = DeviceInfo(deviceId, model, battery, isCharging, isOnline = true)
+                                                    broadcastToDashboards(packetJson.encodeToString(DeviceConnectedPacket(device = devInfo)), deviceId)
+                                                } else {
+                                                    println("LINK_DEVICE: rejected for $deviceId (tokenOwner=$tokenOwner existOwner=$existOwner)")
+                                                }
+                                            }
                                         }
 
-                                        // Relay JSON telemetry only to the owner's dashboards
-                                        broadcastToDashboards(text, deviceId)
+                                        // Relay JSON to the owner's dashboards (skip internal-only messages)
+                                        if (type != "LINK_DEVICE") broadcastToDashboards(text, deviceId)
                                     } catch (e: Exception) {
                                         broadcastToDashboards(text, deviceId)
                                     }
