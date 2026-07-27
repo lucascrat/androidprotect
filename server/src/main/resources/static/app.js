@@ -1027,27 +1027,7 @@ function fetchDeviceHistory(deviceId) {
     fetchTrailHistory(deviceId);
 
     // 3. Fetch Messages History
-    conversationsMap.clear();
-    waSeenIds.clear();
-    currentWaAddress = null;
-    const waMsgPane = document.getElementById('wa-messages');
-    if (waMsgPane) waMsgPane.innerHTML = '<div class="wa-no-conv"><i class="fa-solid fa-comments fa-3x"></i><p>Selecione uma conversa à esquerda</p></div>';
-    const waFooter = document.getElementById('wa-footer');
-    if (waFooter) waFooter.style.display = 'none';
-
-    fetch(`/api/device/${deviceId}/messages-history`, { headers: authHeaders() })
-        .then(res => res.json())
-        .then(messages => {
-            if (deviceId !== currentDeviceId) return;
-            document.getElementById('messages-device-label').textContent =
-                devicesMap.get(deviceId)?.model || deviceId;
-            messages.forEach(m => waIngestMessage(m));
-            waRenderSidebar();
-            // Auto-select most recent conversation
-            const sorted = [...conversationsMap.entries()].sort((a,b) => b[1].lastTime - a[1].lastTime);
-            if (sorted.length > 0) waSelectConversation(sorted[0][0]);
-        })
-        .catch(err => console.error('Error fetching messages:', err));
+    waReloadMessages(deviceId);
 }
 
 // Fetch and draw trail for selected days
@@ -2084,36 +2064,41 @@ function waAddMessage(m) {
     if (currentWaAddress === addr) {
         const pane = document.getElementById('wa-messages');
         if (pane) {
-            const isAtBottom = pane.scrollTop + pane.clientHeight >= pane.scrollHeight - 60;
             const bubble = waBuildBubble(m);
             pane.appendChild(bubble);
-            if (isAtBottom) {
-                requestAnimationFrame(() => {
-                    pane.scrollTo({ top: pane.scrollHeight, behavior: 'instant' });
-                });
-            }
+            requestAnimationFrame(() => {
+                pane.scrollTo({ top: pane.scrollHeight, behavior: 'instant' });
+            });
         }
     }
 }
 
-function waClearAllConversations() {
-    if (!confirm('Limpar todas as conversas do painel? As mensagens continuam salvas no servidor.')) return;
+function waReloadMessages(deviceId) {
     conversationsMap.clear();
     waSeenIds.clear();
     currentWaAddress = null;
-    const pane = document.getElementById('wa-messages');
-    if (pane) {
-        pane.innerHTML = '<div class="wa-no-conv"><i class="fa-solid fa-comments fa-3x"></i><p>Selecione uma conversa à esquerda</p></div>';
-    }
-    const headerName = document.getElementById('wa-chat-name');
-    const headerSub = document.getElementById('wa-chat-sub');
-    const avatar = document.getElementById('wa-avatar');
-    if (headerName) headerName.textContent = 'Selecione uma conversa';
-    if (headerSub) headerSub.textContent = 'SMS e WhatsApp monitorados';
-    if (avatar) avatar.textContent = '?';
-    const footer = document.getElementById('wa-footer');
-    if (footer) footer.style.display = 'none';
-    waRenderSidebar();
+    const waMsgPane = document.getElementById('wa-messages');
+    if (waMsgPane) waMsgPane.innerHTML = '<div class="wa-no-conv"><i class="fa-solid fa-comments fa-3x"></i><p>Selecione uma conversa à esquerda</p></div>';
+    const waFooter = document.getElementById('wa-footer');
+    if (waFooter) waFooter.style.display = 'none';
+
+    fetch(`/api/device/${deviceId}/messages-history`, { headers: authHeaders() })
+        .then(res => res.json())
+        .then(messages => {
+            if (deviceId !== currentDeviceId) return;
+            const label = document.getElementById('messages-device-label');
+            if (label) label.textContent = devicesMap.get(deviceId)?.model || deviceId;
+            messages.forEach(m => waIngestMessage(m));
+            waRenderSidebar();
+            const sorted = [...conversationsMap.entries()].sort((a,b) => b[1].lastTime - a[1].lastTime);
+            if (sorted.length > 0) waSelectConversation(sorted[0][0]);
+        })
+        .catch(err => console.error('Error fetching messages:', err));
+}
+
+function waClearAllConversations() {
+    if (!confirm('Recarregar todas as conversas do servidor?')) return;
+    if (currentDeviceId) waReloadMessages(currentDeviceId);
 }
 
 function waRenderSidebar() {
