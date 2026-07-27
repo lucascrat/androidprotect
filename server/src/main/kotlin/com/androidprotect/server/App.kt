@@ -493,7 +493,8 @@ fun main() {
                     }
                 }
                 val cache = deviceOwnerCache.entries.map { (k, v) -> """{"deviceId":"$k","cachedOwnerId":$v}""" }
-                val json = """{"userId":$userId,"allDevices":[${all.joinToString(",")}],"ownerCache":[${cache.joinToString(",")}]}"""
+                val sessions = deviceSessions.keys.toList()
+                val json = """{"version":"v3","userId":$userId,"activeSessions":${Json.encodeToString(sessions)},"allDevices":[${all.joinToString(",")}],"ownerCache":[${cache.joinToString(",")}]}"""
                 call.respondText(json, io.ktor.http.ContentType.Application.Json)
             }
 
