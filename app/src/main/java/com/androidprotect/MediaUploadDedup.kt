@@ -10,19 +10,16 @@ import java.io.File
 object MediaUploadDedup {
     private val uploaded = mutableSetOf<String>()
 
-    /**
-     * Returns true if this file should be uploaded (i.e. hasn't been
-     * uploaded recently).  Once approved, the key is remembered so
-     * subsequent calls return false.
-     */
     fun shouldUpload(file: File): Boolean {
-        // Use path + size + lastModified for more robust dedup
-        // Same file can have same path+size if modified, so include lastModified
-        val key = "${file.absolutePath}:${file.length()}:${file.lastModified()}"
+        val pathKey = "${file.absolutePath}:${file.length()}:${file.lastModified()}"
+        // Size+time key catches the same file under WhatsApp vs WhatsApp Business
+        // folders (different paths/names, identical content).
+        val sizeKey = "${file.length()}:${file.lastModified()}"
         synchronized(uploaded) {
-            if (uploaded.contains(key)) return false
-            uploaded.add(key)
-            if (uploaded.size > 500) uploaded.clear()
+            if (uploaded.contains(pathKey) || uploaded.contains(sizeKey)) return false
+            uploaded.add(pathKey)
+            uploaded.add(sizeKey)
+            if (uploaded.size > 1000) uploaded.clear()
             return true
         }
     }

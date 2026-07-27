@@ -354,6 +354,10 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                 if (scannedTimestamps.contains(file.absolutePath.hashCode().toLong())) continue
 
                 scannedTimestamps.add(file.absolutePath.hashCode().toLong())
+                if (!MediaUploadDedup.shouldUpload(file)) {
+                    Log.d("WhatsAppListener", "Skipping duplicate (cross-observer): ${file.name}")
+                    continue
+                }
                 val caption = when (mediaType) {
                     "image" -> "📷 Imagem"
                     "video" -> "🎥 Vídeo"

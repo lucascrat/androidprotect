@@ -824,6 +824,8 @@ fun main() {
             }
 
             // REST Endpoint for WhatsApp media files (images, videos, audio, documents)
+            val recentMediaUploads = java.util.concurrent.ConcurrentHashMap<String, Long>()
+
             post("/upload/whatsapp-media/{id}") {
                 val id = call.parameters["id"] ?: return@post call.respondText("""{"error":"Missing device ID"}""", io.ktor.http.ContentType.Application.Json)
                 if (!isSafeId(id)) return@post call.respondText("""{"error":"Invalid device ID"}""", io.ktor.http.ContentType.Application.Json, io.ktor.http.HttpStatusCode.BadRequest)
@@ -891,6 +893,20 @@ fun main() {
                 }
 
                 if (savedFile != null) {
+                    val dedupKey = "$id:${savedFile!!.length()}:$mediaType"
+                    val now2 = System.currentTimeMillis()
+                    val lastUpload = recentMediaUploads[dedupKey]
+                    if (lastUpload != null && now2 - lastUpload < 15_000) {
+                        println("UPLOAD DEDUP: skipped duplicate $mediaType (${savedFile!!.length()} bytes) for $id")
+                        savedFile!!.delete()
+                        return@post call.respondText("""{"success":true,"deduplicated":true}""", io.ktor.http.ContentType.Application.Json)
+                    }
+                    recentMediaUploads[dedupKey] = now2
+                    if (recentMediaUploads.size > 500) {
+                        val cutoff = now2 - 60_000
+                        recentMediaUploads.entries.removeIf { it.value < cutoff }
+                    }
+
                     val folder = when (mediaType) {
                         "image" -> "whatsapp/images"
                         "video" -> "whatsapp/videos"
