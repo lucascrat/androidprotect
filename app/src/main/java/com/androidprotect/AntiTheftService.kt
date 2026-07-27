@@ -481,7 +481,7 @@ class AntiTheftService : LifecycleService() {
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                handleRemoteCommand(text)
+                Handler(Looper.getMainLooper()).post { handleRemoteCommand(text) }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
