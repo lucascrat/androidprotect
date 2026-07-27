@@ -280,7 +280,9 @@ class AntiTheftService : LifecycleService() {
         super.onStartCommand(intent, flags, startId)
         Log.d("AntiTheftService", "Service onStartCommand")
         
-        // Handle server IP update or linkToken-triggered reconnect from MainActivity
+        // Handle server IP update or linkToken-triggered reconnect from MainActivity.
+        // Always reconnect so the current linkToken is included in the WebSocket URL —
+        // the server reads it on connection and links the device to the account.
         val ipFromIntent = intent?.getStringExtra("SERVER_IP")
         if (ipFromIntent != null) {
             if (ipFromIntent != serverIpAddress) {
@@ -288,19 +290,7 @@ class AntiTheftService : LifecycleService() {
                 getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
                     .edit().putString("server_ip", ipFromIntent).apply()
             }
-            val currentToken = linkToken.ifBlank {
-                getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
-                    .getString("link_token", "") ?: ""
-            }
-            if (isWebSocketConnected && currentToken.isNotBlank()) {
-                // WebSocket already open: send in-band LINK_DEVICE so the server can
-                // associate this device to the account without a full reconnect.
-                webSocket?.send("""{"type":"LINK_DEVICE","linkToken":"$currentToken"}""")
-            } else {
-                // Not connected yet (or no token): reconnect so the token is included
-                // in the WebSocket URL where the server reads it on connect.
-                connectToServer()
-            }
+            connectToServer()
         }
 
         // Handle device name update (reconnect to refresh the name on server)
