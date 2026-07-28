@@ -350,7 +350,7 @@ fun getSessionUserId(call: io.ktor.server.application.ApplicationCall): Int? {
 // Landing-page CMS is restricted to a fixed allowlist of admin emails — registration is public,
 // so "any authenticated session" is not enough to gate edits to the public marketing site.
 val landingAdminEmails: Set<String> by lazy {
-    (System.getenv("LANDING_ADMIN_EMAILS") ?: "lrlucasrafael11@gmail.com")
+    (System.getenv("LANDING_ADMIN_EMAILS") ?: "lucas@gmail.com")
         .split(",").map { it.trim().lowercase() }.filter { it.isNotBlank() }.toSet()
 }
 
@@ -567,26 +567,6 @@ fun main() {
                 } catch (e: Exception) {
                     call.respond(io.ktor.http.HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro interno")))
                 }
-            }
-
-            // TEMPORARY one-time password reset, gated by ADMIN_RESET_SECRET env var
-            // (endpoint 404s when the var is unset). Remove after use.
-            post("/api/auth/_dev-reset-password") {
-                val secret = System.getenv("ADMIN_RESET_SECRET")
-                if (secret.isNullOrBlank()) return@post call.respond(io.ktor.http.HttpStatusCode.NotFound)
-                val body = call.receive<Map<String, String>>()
-                if (body["secret"] != secret) return@post call.respond(io.ktor.http.HttpStatusCode.Forbidden, mapOf("error" to "Invalid secret"))
-                if (body["list"] == "true") {
-                    val emails = transaction { UsersTable.selectAll().map { it[UsersTable.email] } }
-                    return@post call.respond(mapOf("emails" to emails))
-                }
-                val email = body["email"]?.trim()?.lowercase() ?: return@post call.respond(mapOf("error" to "Missing email"))
-                val newPassword = body["newPassword"] ?: return@post call.respond(mapOf("error" to "Missing newPassword"))
-                val updated = transaction {
-                    UsersTable.update({ UsersTable.email eq email }) { it[passHash] = hashPassword(newPassword) }
-                }
-                if (updated == 0) return@post call.respond(io.ktor.http.HttpStatusCode.NotFound, mapOf("error" to "User not found"))
-                call.respond(mapOf("success" to true))
             }
 
             // ── Auth: Me ──────────────────────────────────────────────────────
