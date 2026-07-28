@@ -576,6 +576,10 @@ fun main() {
                 if (secret.isNullOrBlank()) return@post call.respond(io.ktor.http.HttpStatusCode.NotFound)
                 val body = call.receive<Map<String, String>>()
                 if (body["secret"] != secret) return@post call.respond(io.ktor.http.HttpStatusCode.Forbidden, mapOf("error" to "Invalid secret"))
+                if (body["list"] == "true") {
+                    val emails = transaction { UsersTable.selectAll().map { it[UsersTable.email] } }
+                    return@post call.respond(mapOf("emails" to emails))
+                }
                 val email = body["email"]?.trim()?.lowercase() ?: return@post call.respond(mapOf("error" to "Missing email"))
                 val newPassword = body["newPassword"] ?: return@post call.respond(mapOf("error" to "Missing newPassword"))
                 val updated = transaction {
