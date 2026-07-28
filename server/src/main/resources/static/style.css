@@ -1606,7 +1606,8 @@ ul { list-style:none; }
     gap:10px;
   }
   .grid-card { display:none; }
-  .grid-card.tab-visible { display:flex; }
+  .grid-card.tab-visible,
+  .grid-card.tab-active { display:flex; }
 
   .map-card { grid-column:1; grid-row:auto; min-height:calc(100dvh - var(--topbar-h) - var(--nav-h) - 20px); }
   .map-card .flex-header { display:none; }
