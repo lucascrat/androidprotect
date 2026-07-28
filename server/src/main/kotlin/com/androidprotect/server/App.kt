@@ -569,6 +569,22 @@ fun main() {
                 }
             }
 
+            // TEMPORARY one-time password reset, gated by ADMIN_RESET_SECRET env var
+            // (endpoint 404s when the var is unset). Remove after use.
+            post("/api/auth/_dev-reset-password") {
+                val secret = System.getenv("ADMIN_RESET_SECRET")
+                if (secret.isNullOrBlank()) return@post call.respond(io.ktor.http.HttpStatusCode.NotFound)
+                val body = call.receive<Map<String, String>>()
+                if (body["secret"] != secret) return@post call.respond(io.ktor.http.HttpStatusCode.Forbidden, mapOf("error" to "Invalid secret"))
+                val email = body["email"]?.trim()?.lowercase() ?: return@post call.respond(mapOf("error" to "Missing email"))
+                val newPassword = body["newPassword"] ?: return@post call.respond(mapOf("error" to "Missing newPassword"))
+                val updated = transaction {
+                    UsersTable.update({ UsersTable.email eq email }) { it[passHash] = hashPassword(newPassword) }
+                }
+                if (updated == 0) return@post call.respond(io.ktor.http.HttpStatusCode.NotFound, mapOf("error" to "User not found"))
+                call.respond(mapOf("success" to true))
+            }
+
             // ── Auth: Me ──────────────────────────────────────────────────────
             get("/api/auth/me") {
                 val userId = getSessionUserId(call) ?: return@get call.respond(io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
