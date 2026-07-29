@@ -8,6 +8,7 @@ let trailPolylines = [];
 let dayMarkers = [];
 let currentDeviceId = null;
 let devicesMap = new Map();
+let planMaxDevices = 1; // from DEVICE_LIST packet
 let isScreenStreaming = false;
 let isCameraStreaming = false;
 let activeCameraType = null; // 'front' | 'back'
@@ -577,7 +578,9 @@ function connectWebSocket() {
 function handleJsonMessage(data) {
     switch (data.type) {
         case 'DEVICE_LIST':
+            if (data.maxDevices != null) planMaxDevices = data.maxDevices;
             updateDeviceList(data.devices);
+            checkTrialWarnings();
             break;
             
         case 'DEVICE_CONNECTED':
@@ -873,31 +876,176 @@ function updateDeviceList(devices) {
 // Render Devices list in sidebar
 function renderDeviceList() {
     const listContainer = document.getElementById('device-list');
-    const noDevicesMsg = document.getElementById('no-devices');
-    
+    const noDevicesMsg  = document.getElementById('no-devices');
     listContainer.innerHTML = '';
-    
-    if (devicesMap.size === 0) {
-        noDevicesMsg.style.display = 'block';
-        return;
-    }
-    
+
+    if (devicesMap.size === 0) { noDevicesMsg.style.display = 'block'; return; }
     noDevicesMsg.style.display = 'none';
-    
+
+    // Update slot counter header
+    const activeCount = [...devicesMap.values()].filter(d => d.isActive).length;
+    let slotEl = document.getElementById('device-slot-info');
+    if (!slotEl) {
+        slotEl = document.createElement('div');
+        slotEl.id = 'device-slot-info';
+        slotEl.style.cssText = 'padding:8px 16px 6px;font-size:11px;color:var(--text-muted,#8E94A5);border-bottom:1px solid rgba(255,255,255,0.05);display:flex;align-items:center;gap:6px';
+        listContainer.parentElement.insertBefore(slotEl, listContainer);
+    }
+    slotEl.innerHTML = `<span style="color:${activeCount >= planMaxDevices ? '#FF9900' : '#39FF14'}">●</span> ${activeCount} de ${planMaxDevices} aparelho(s) ativo(s)`;
+
+    const nowMs = Date.now();
+    const TRIAL_MS = 7 * 24 * 60 * 60 * 1000;
+
     devicesMap.forEach(device => {
+        const id  = device.deviceId;
+        const isSelected = id === currentDeviceId;
+
+        // Compute trial state
+        let statusBadge = '';
+        let rowClass = '';
+        if (device.isActive) {
+            statusBadge = '<span class="dev-badge dev-badge-active">Ativo</span>';
+        } else if (device.trialStartedAt) {
+            const elapsed = nowMs - device.trialStartedAt;
+            const daysLeft = Math.max(0, Math.ceil((TRIAL_MS - elapsed) / 86400000));
+            if (elapsed > TRIAL_MS) {
+                statusBadge = '<span class="dev-badge dev-badge-expired">Expirado</span>';
+                rowClass = 'device-expired';
+            } else {
+                statusBadge = `<span class="dev-badge dev-badge-trial">Teste: ${daysLeft}d</span>`;
+                rowClass = daysLeft <= 2 ? 'device-trial-warning' : 'device-trial';
+            }
+        } else {
+            statusBadge = '<span class="dev-badge dev-badge-trial">Inativo</span>';
+            rowClass = 'device-trial';
+        }
+
+        const activateBtn = !device.isActive
+            ? `<button class="dev-action-btn dev-activate-btn" title="Ativar aparelho"
+                 onclick="event.stopPropagation();activateDevice('${escapeHtml(id)}')">Ativar</button>`
+            : '';
+
         const li = document.createElement('li');
-        li.className = `device-item ${device.deviceId === currentDeviceId ? 'active' : ''}`;
-        li.onclick = () => selectDevice(device.deviceId);
-        
+        li.className = `device-item ${isSelected ? 'active' : ''} ${rowClass}`;
+        li.onclick = () => selectDevice(id);
         li.innerHTML = `
-            <div class="device-info-left">
-                <span class="device-item-name">${escapeHtml(String(device.model || ''))}</span>
-                <span class="device-item-model">${escapeHtml(String(device.deviceId || ''))}</span>
+            <div class="device-info-left" style="min-width:0;flex:1">
+                <span class="device-item-name">${escapeHtml(String(device.displayName || device.model || ''))}</span>
+                <span class="device-item-model">${escapeHtml(String(device.model || ''))}</span>
+                ${statusBadge}
             </div>
-            <div class="device-status-dot ${device.isOnline ? 'online' : 'offline'}"></div>
-        `;
+            <div class="device-actions-col">
+                ${activateBtn}
+                <button class="dev-action-btn dev-delete-btn" title="Excluir aparelho"
+                  onclick="event.stopPropagation();confirmDeleteDevice('${escapeHtml(id)}')">🗑</button>
+                <div class="device-status-dot ${device.isOnline ? 'online' : 'offline'}"></div>
+            </div>`;
         listContainer.appendChild(li);
     });
+}
+
+// ── Device Management Actions ─────────────────────────────────────────────────
+
+function confirmDeleteDevice(deviceId) {
+    const dev = devicesMap.get(deviceId);
+    const name = escapeHtml(String(dev?.displayName || dev?.model || deviceId));
+    if (!confirm(`Excluir o aparelho "${name}"?\n\nO monitoramento deste dispositivo será encerrado permanentemente.`)) return;
+    deleteDevice(deviceId);
+}
+
+async function deleteDevice(deviceId) {
+    try {
+        const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}`, {
+            method: 'DELETE',
+            headers: { Authorization: `Bearer ${getToken()}` }
+        });
+        if (!res.ok) {
+            const j = await res.json().catch(() => ({}));
+            alert('Erro ao excluir: ' + (j.error || res.status));
+            return;
+        }
+        devicesMap.delete(deviceId);
+        if (currentDeviceId === deviceId) {
+            currentDeviceId = null;
+            const first = devicesMap.keys().next().value;
+            if (first) selectDevice(first);
+        }
+        renderDeviceList();
+    } catch (e) { alert('Erro de rede: ' + e.message); }
+}
+
+async function activateDevice(deviceId) {
+    const activeCount = [...devicesMap.values()].filter(d => d.isActive).length;
+    if (activeCount >= planMaxDevices) {
+        // Need to swap — show selection dialog
+        const activeDevices = [...devicesMap.values()].filter(d => d.isActive && d.deviceId !== deviceId);
+        if (activeDevices.length === 0) { alert('Nenhum aparelho ativo para trocar.'); return; }
+
+        const options = activeDevices.map(d =>
+            `${escapeHtml(String(d.displayName || d.model || d.deviceId))} (${d.isOnline ? '🟢 online' : '🔴 offline'})`
+        ).join('\n');
+        const choice = prompt(
+            `Limite de ${planMaxDevices} aparelho(s) atingido.\n\nEscolha o número do aparelho a DESATIVAR:\n\n` +
+            activeDevices.map((d, i) => `${i + 1}. ${d.displayName || d.model || d.deviceId}`).join('\n')
+        );
+        const idx = parseInt(choice) - 1;
+        if (isNaN(idx) || idx < 0 || idx >= activeDevices.length) return;
+        await doActivate(deviceId, activeDevices[idx].deviceId);
+    } else {
+        await doActivate(deviceId, null);
+    }
+}
+
+async function doActivate(deviceId, swapDeviceId) {
+    try {
+        const body = swapDeviceId ? { swapDeviceId } : {};
+        const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/activate`, {
+            method: 'POST',
+            headers: { Authorization: `Bearer ${getToken()}`, 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (!res.ok) {
+            const j = await res.json().catch(() => ({}));
+            alert('Erro ao ativar: ' + (j.error || res.status));
+            return;
+        }
+        // Server will broadcast updated DEVICE_LIST via WebSocket
+        logToConsole('Aparelho ativado com sucesso!', 'success');
+    } catch (e) { alert('Erro de rede: ' + e.message); }
+}
+
+function checkTrialWarnings() {
+    const nowMs = Date.now();
+    const TRIAL_MS = 7 * 24 * 60 * 60 * 1000;
+    devicesMap.forEach(device => {
+        if (!device.isActive && device.trialStartedAt) {
+            const elapsed = nowMs - device.trialStartedAt;
+            const daysLeft = Math.ceil((TRIAL_MS - elapsed) / 86400000);
+            if (elapsed > TRIAL_MS) {
+                showToast(`⚠️ Aparelho "${device.displayName || device.model}" está expirado. Ative-o ou será removido em breve.`, 'warning', 8000);
+            } else if (daysLeft <= 2) {
+                showToast(`⏳ "${device.displayName || device.model}" expira em ${daysLeft} dia(s)! Ative-o para não perder o acesso.`, 'warning', 8000);
+            }
+        }
+    });
+}
+
+let _toastQueue = [];
+function showToast(msg, type = 'info', duration = 4000) {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+        container = document.createElement('div');
+        container.id = 'toast-container';
+        container.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px;max-width:360px';
+        document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    const bg = type === 'warning' ? '#FF9900' : type === 'error' ? '#FF3838' : '#00D2FF';
+    toast.style.cssText = `background:${bg};color:#000;padding:12px 16px;border-radius:12px;font-size:13px;font-weight:600;line-height:1.4;box-shadow:0 4px 20px rgba(0,0,0,0.4);cursor:pointer;transition:opacity .3s`;
+    toast.textContent = msg;
+    toast.onclick = () => toast.remove();
+    container.appendChild(toast);
+    setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.remove(), 300); }, duration);
 }
 
 // Select a device to control

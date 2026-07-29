@@ -187,6 +187,12 @@ function renderPricingList() {
                 <input type="text" value="${escapeAttr(p.period)}" placeholder="Período (ex: /mês)" oninput="content.pricing.plans[${i}].period=this.value">
                 <input type="text" value="${escapeAttr(p.badge)}" placeholder="Selo (ex: Mais Popular)" oninput="content.pricing.plans[${i}].badge=this.value">
             </div>
+            <div class="al-plan-row" style="align-items:center;gap:10px">
+                <label style="color:#8E94A5;font-size:12px;white-space:nowrap">📱 Máx. aparelhos:</label>
+                <input type="number" min="0" max="100" value="${p.maxDevices ?? 1}" style="width:80px"
+                  oninput="content.pricing.plans[${i}].maxDevices=parseInt(this.value)||1">
+                <span style="color:#8E94A5;font-size:11px">Aparelhos que este plano libera para o usuário</span>
+            </div>
             <label class="al-plan-featured-toggle">
                 <input type="checkbox" ${p.featured ? 'checked' : ''} onchange="content.pricing.plans[${i}].featured=this.checked">
                 Destacar este plano
@@ -197,7 +203,7 @@ function renderPricingList() {
     `).join('') || '<p class="al-hint">Nenhum plano cadastrado ainda.</p>';
 }
 function addPlan() {
-    content.pricing.plans.push({ id: 'plan_' + Date.now(), name: '', price: '', period: '', badge: '', featured: false, features: [] });
+    content.pricing.plans.push({ id: 'plan_' + Date.now(), name: '', price: '', period: '', badge: '', featured: false, maxDevices: 1, features: [] });
     renderPricingList();
 }
 function removePlan(i) { content.pricing.plans.splice(i, 1); renderPricingList(); }

@@ -360,7 +360,8 @@ h1,h2,h3,h4 { line-height: 1.15; letter-spacing: -.02em; font-weight: 800; }
 .price-value { display: flex; align-items: baseline; gap: 4px; margin-bottom: 4px; }
 .price-currency { font-size: 1.1rem; font-weight: 700; color: var(--text-secondary); }
 .price-amount { font-size: 2.4rem; font-weight: 800; letter-spacing: -.02em; }
-.price-period { color: var(--text-muted); font-size: .85rem; margin-bottom: 22px; }
+.price-period { color: var(--text-muted); font-size: .85rem; margin-bottom: 10px; }
+.price-devices { display:inline-flex; align-items:center; gap:6px; font-size:.78rem; font-weight:700; color:#7C5CFF; background:rgba(124,92,255,.12); border:1px solid rgba(124,92,255,.25); border-radius:100px; padding:4px 12px; margin-bottom:18px; }
 .price-features { list-style: none; display: flex; flex-direction: column; gap: 12px; margin-bottom: 28px; flex: 1; }
 .price-features li { display: flex; align-items: flex-start; gap: 10px; font-size: .86rem; color: var(--text-secondary); }
 .price-features i { color: var(--green); margin-top: 3px; flex-shrink: 0; }

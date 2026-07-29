@@ -253,6 +253,7 @@ function renderPricing(pricing) {
                 <span class="price-amount">${escapeHtml(p.price)}</span>
             </div>
             <div class="price-period">${escapeHtml(p.period || '')}</div>
+            ${p.maxDevices ? `<div class="price-devices"><i class="fa-solid fa-mobile-screen"></i> Até ${p.maxDevices} aparelho${p.maxDevices > 1 ? 's' : ''}</div>` : ''}
             <ul class="price-features">
                 ${(p.features || []).map(f => `<li><i class="fa-solid fa-circle-check"></i><span>${escapeHtml(f)}</span></li>`).join('')}
             </ul>

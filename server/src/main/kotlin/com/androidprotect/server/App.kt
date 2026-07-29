@@ -29,6 +29,7 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
 import org.jetbrains.exposed.sql.transactions.transaction
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
@@ -91,7 +92,10 @@ data class DeviceInfo(
     val model: String = "Android Device",
     val battery: Int = 100,
     val isCharging: Boolean = false,
-    val isOnline: Boolean = true
+    val isOnline: Boolean = true,
+    val displayName: String = "",
+    val isActive: Boolean = true,
+    val trialStartedAt: Long? = null
 )
 
 @Serializable
@@ -109,7 +113,8 @@ data class DeviceDisconnectedPacket(
 @Serializable
 data class DeviceListPacket(
     val type: String = "DEVICE_LIST",
-    val devices: List<DeviceInfo>
+    val devices: List<DeviceInfo>,
+    val maxDevices: Int = 1
 )
 
 @Serializable
@@ -135,12 +140,13 @@ data class LogItem(
 
 // SQL Tables Definitions using Exposed
 object UsersTable : Table("users") {
-    val id        = integer("id").autoIncrement()
-    val email     = varchar("email", 255).uniqueIndex()
-    val username  = varchar("username", 100)
-    val passHash  = varchar("pass_hash", 255)
-    val linkToken = varchar("link_token", 20).uniqueIndex() // code entered in Android app
-    val createdAt = long("created_at")
+    val id         = integer("id").autoIncrement()
+    val email      = varchar("email", 255).uniqueIndex()
+    val username   = varchar("username", 100)
+    val passHash   = varchar("pass_hash", 255)
+    val linkToken  = varchar("link_token", 20).uniqueIndex() // code entered in Android app
+    val createdAt  = long("created_at")
+    val maxDevices = integer("max_devices").default(1)       // plan device slot limit
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -152,13 +158,16 @@ object SessionsTable : Table("sessions") {
 }
 
 object DevicesTable : Table("devices") {
-    val id        = varchar("id", 50)
-    val model     = varchar("model", 100)
-    val battery   = integer("battery")
-    val isCharging= bool("is_charging")
-    val isOnline  = bool("is_online")
-    val lastSeen  = long("last_seen")
-    val ownerId   = integer("owner_id").nullable() // null = not yet linked
+    val id             = varchar("id", 50)
+    val model          = varchar("model", 100)
+    val battery        = integer("battery")
+    val isCharging     = bool("is_charging")
+    val isOnline       = bool("is_online")
+    val lastSeen       = long("last_seen")
+    val ownerId        = integer("owner_id").nullable()       // null = not yet linked
+    val displayName    = varchar("display_name", 150).default("")
+    val isActive       = bool("is_active").default(true)      // within plan slot
+    val trialStartedAt = long("trial_started_at").nullable()  // non-null → in 7-day trial
 
     override val primaryKey = PrimaryKey(id)
 }
@@ -235,10 +244,10 @@ val DEFAULT_LANDING_CONTENT = """
   "pricing": {
     "note": "Cancele quando quiser. Sem fidelidade.",
     "plans": [
-      { "id": "monthly", "name": "Mensal", "price": "29,90", "period": "/mês", "badge": "", "featured": false, "features": ["Monitoramento completo", "Localização em tempo real", "Câmeras e áudio remotos", "Suporte via WhatsApp"] },
-      { "id": "quarterly", "name": "Trimestral", "price": "79,90", "period": "/3 meses", "badge": "Economize 11%", "featured": false, "features": ["Tudo do plano Mensal", "Histórico de localização estendido", "Prioridade no suporte"] },
-      { "id": "semiannual", "name": "Semestral", "price": "139,90", "period": "/6 meses", "badge": "Mais Popular", "featured": true, "features": ["Tudo do plano Trimestral", "Backup de mídias na nuvem", "Múltiplos dispositivos"] },
-      { "id": "annual", "name": "Anual", "price": "239,90", "period": "/ano", "badge": "Economize 33%", "featured": false, "features": ["Tudo do plano Semestral", "Suporte prioritário 24/7", "Melhor custo-benefício"] }
+      { "id": "monthly", "name": "Mensal", "price": "29,90", "period": "/mês", "badge": "", "featured": false, "maxDevices": 1, "features": ["1 aparelho monitorado", "Monitoramento completo", "Localização em tempo real", "Câmeras e áudio remotos", "Suporte via WhatsApp"] },
+      { "id": "quarterly", "name": "Trimestral", "price": "79,90", "period": "/3 meses", "badge": "Economize 11%", "featured": false, "maxDevices": 2, "features": ["Até 2 aparelhos", "Tudo do plano Mensal", "Histórico de localização estendido", "Prioridade no suporte"] },
+      { "id": "semiannual", "name": "Semestral", "price": "139,90", "period": "/6 meses", "badge": "Mais Popular", "featured": true, "maxDevices": 3, "features": ["Até 3 aparelhos", "Tudo do plano Trimestral", "Backup de mídias na nuvem", "Suporte prioritário"] },
+      { "id": "annual", "name": "Anual", "price": "239,90", "period": "/ano", "badge": "Economize 33%", "featured": false, "maxDevices": 5, "features": ["Até 5 aparelhos", "Tudo do plano Semestral", "Suporte prioritário 24/7", "Melhor custo-benefício"] }
     ]
   },
   "apk": { "url": "", "version": "1.0.0", "size": "", "updatedAt": 0 },
@@ -420,7 +429,7 @@ fun initDatabase() {
 
     transaction {
         SchemaUtils.create(UsersTable, SessionsTable, DevicesTable, TelemetryTable, LogsTable, MessagesTable, LandingContentTable)
-        SchemaUtils.createMissingTablesAndColumns(DevicesTable, MessagesTable) // migrate new columns on existing installs
+        SchemaUtils.createMissingTablesAndColumns(UsersTable, DevicesTable, MessagesTable) // migrate new columns on existing installs
 
         // Reset all devices to offline state initially on server start
         DevicesTable.update {
@@ -1315,25 +1324,51 @@ fun main() {
 
                 // Write Device Connection state to Database
                 val info = transaction {
-                    val exists = DevicesTable.select { DevicesTable.id eq deviceId }.count() > 0
+                    val nowMs = System.currentTimeMillis()
+                    val existingRow = DevicesTable.select { DevicesTable.id eq deviceId }.firstOrNull()
+                    val exists = existingRow != null
+
+                    // For existing devices, preserve their isActive/trialStartedAt/displayName.
+                    // For new devices, check plan limit and assign trial if needed.
+                    val (devIsActive, devTrialStartedAt, devDisplayName) = if (exists) {
+                        Triple(
+                            existingRow!![DevicesTable.isActive],
+                            existingRow[DevicesTable.trialStartedAt],
+                            existingRow[DevicesTable.displayName]
+                        )
+                    } else if (resolvedOwnerId != null) {
+                        val maxD = UsersTable.select { UsersTable.id eq resolvedOwnerId }
+                            .firstOrNull()?.get(UsersTable.maxDevices) ?: 1
+                        val activeCount = DevicesTable.select {
+                            (DevicesTable.ownerId eq resolvedOwnerId) and (DevicesTable.isActive eq true)
+                        }.count()
+                        if (activeCount < maxD) Triple(true, null, "")
+                        else Triple(false, nowMs, "")
+                    } else {
+                        Triple(true, null, "")
+                    }
+
                     if (exists) {
                         DevicesTable.update({ DevicesTable.id eq deviceId }) {
                             it[DevicesTable.model]      = model
                             it[DevicesTable.battery]    = battery
                             it[DevicesTable.isCharging] = isCharging
                             it[DevicesTable.isOnline]   = true
-                            it[DevicesTable.lastSeen]   = System.currentTimeMillis()
+                            it[DevicesTable.lastSeen]   = nowMs
                             if (resolvedOwnerId != null) it[DevicesTable.ownerId] = resolvedOwnerId
                         }
                     } else {
                         DevicesTable.insert {
-                            it[DevicesTable.id]        = deviceId
-                            it[DevicesTable.model]     = model
-                            it[DevicesTable.battery]   = battery
-                            it[DevicesTable.isCharging]= isCharging
-                            it[DevicesTable.isOnline]  = true
-                            it[DevicesTable.lastSeen]  = System.currentTimeMillis()
-                            it[DevicesTable.ownerId]   = resolvedOwnerId
+                            it[DevicesTable.id]             = deviceId
+                            it[DevicesTable.model]          = model
+                            it[DevicesTable.battery]        = battery
+                            it[DevicesTable.isCharging]     = isCharging
+                            it[DevicesTable.isOnline]       = true
+                            it[DevicesTable.lastSeen]       = nowMs
+                            it[DevicesTable.ownerId]        = resolvedOwnerId
+                            it[DevicesTable.isActive]       = devIsActive
+                            it[DevicesTable.trialStartedAt] = devTrialStartedAt
+                            it[DevicesTable.displayName]    = devDisplayName
                         }
                     }
 
@@ -1342,10 +1377,12 @@ fun main() {
                         it[LogsTable.deviceId] = deviceId
                         it[message] = "Aparelho estabeleceu conexão com o servidor."
                         it[logType] = "success"
-                        it[timestamp] = System.currentTimeMillis()
+                        it[timestamp] = nowMs
                     }
 
-                    DeviceInfo(deviceId, model, battery, isCharging, isOnline = true)
+                    DeviceInfo(deviceId, model, battery, isCharging,
+                        isOnline = true, displayName = devDisplayName,
+                        isActive = devIsActive, trialStartedAt = devTrialStartedAt)
                 }
 
                 // Notify only the owner's dashboards
@@ -1546,18 +1583,27 @@ fun main() {
                 // Send only devices owned by this user — an unauthenticated connection
                 // (userId == 0) must never see anyone's device roster.
                 val list = if (userId <= 0) emptyList() else transaction {
-                    DevicesTable.select { DevicesTable.ownerId eq userId }.map {
-                        DeviceInfo(
-                            deviceId   = it[DevicesTable.id],
-                            model      = it[DevicesTable.model],
-                            battery    = it[DevicesTable.battery],
-                            isCharging = it[DevicesTable.isCharging],
-                            isOnline   = it[DevicesTable.isOnline]
-                        )
-                    }
+                    DevicesTable.select { DevicesTable.ownerId eq userId }
+                        .orderBy(DevicesTable.lastSeen, SortOrder.DESC)
+                        .map {
+                            DeviceInfo(
+                                deviceId       = it[DevicesTable.id],
+                                model          = it[DevicesTable.model],
+                                battery        = it[DevicesTable.battery],
+                                isCharging     = it[DevicesTable.isCharging],
+                                isOnline       = it[DevicesTable.isOnline],
+                                displayName    = it[DevicesTable.displayName],
+                                isActive       = it[DevicesTable.isActive],
+                                trialStartedAt = it[DevicesTable.trialStartedAt]
+                            )
+                        }
                 }
+                // Also send subscription info alongside the device list
+                val maxDevicesForUser = if (userId > 0) transaction {
+                    UsersTable.select { UsersTable.id eq userId }.firstOrNull()?.get(UsersTable.maxDevices) ?: 1
+                } else 1
                 
-                send(packetJson.encodeToString(DeviceListPacket(devices = list)))
+                send(packetJson.encodeToString(DeviceListPacket(devices = list, maxDevices = maxDevicesForUser)))
 
                 try {
                     for (frame in incoming) {
@@ -1626,6 +1672,153 @@ fun main() {
                 }
             }
 
+            // ── Device Management ─────────────────────────────────────────────
+
+            // User subscription info + device slot status
+            get("/api/user/subscription") {
+                val userId = getSessionUserId(call) ?: return@get call.respond(
+                    io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+                val maxDevices = transaction {
+                    UsersTable.select { UsersTable.id eq userId }.firstOrNull()?.get(UsersTable.maxDevices) ?: 1
+                }
+                val devRows = transaction {
+                    DevicesTable.select { DevicesTable.ownerId eq userId }
+                        .orderBy(DevicesTable.lastSeen, SortOrder.DESC)
+                        .map { row ->
+                            mapOf(
+                                "deviceId"       to row[DevicesTable.id],
+                                "model"          to row[DevicesTable.model],
+                                "displayName"    to row[DevicesTable.displayName],
+                                "isActive"       to row[DevicesTable.isActive],
+                                "isOnline"       to row[DevicesTable.isOnline],
+                                "trialStartedAt" to row[DevicesTable.trialStartedAt],
+                                "lastSeen"       to row[DevicesTable.lastSeen]
+                            )
+                        }
+                }
+                val activeCount = devRows.count { it["isActive"] == true }
+                call.respond(mapOf("maxDevices" to maxDevices, "activeCount" to activeCount,
+                    "totalDevices" to devRows.size, "devices" to devRows))
+            }
+
+            // Delete a device (owner only)
+            delete("/api/devices/{id}") {
+                val userId = getSessionUserId(call) ?: return@delete call.respond(
+                    io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+                val deviceId = call.parameters["id"] ?: return@delete call.respond(
+                    io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Device ID obrigatório"))
+                if (!isSafeId(deviceId)) return@delete call.respond(
+                    io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Device ID inválido"))
+
+                val ownerId = transaction {
+                    DevicesTable.select { DevicesTable.id eq deviceId }.firstOrNull()?.get(DevicesTable.ownerId)
+                }
+                if (ownerId == null || ownerId != userId) return@delete call.respond(
+                    io.ktor.http.HttpStatusCode.Forbidden, mapOf("error" to "Acesso negado"))
+
+                // Disconnect live WS session before deleting
+                deviceSessions[deviceId]?.let { ws ->
+                    try { ws.close(CloseReason(CloseReason.Codes.NORMAL, "Device deleted by owner")) } catch (_: Exception) {}
+                }
+                // Broadcast removal BEFORE cache/DB cleanup so owner lookup still resolves
+                broadcastToDashboards(packetJson.encodeToString(DeviceDisconnectedPacket(deviceId = deviceId)), deviceId)
+
+                deviceSessions.remove(deviceId)
+                deviceOwnerCache.remove(deviceId)
+                transaction { DevicesTable.deleteWhere { DevicesTable.id eq deviceId } }
+                call.respond(mapOf("ok" to true))
+            }
+
+            // Activate a device within the user's plan slot limit.
+            // Body: { "swapDeviceId": "..." } to deactivate another device simultaneously.
+            post("/api/devices/{id}/activate") {
+                val userId = getSessionUserId(call) ?: return@post call.respond(
+                    io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+                val deviceId = call.parameters["id"] ?: return@post call.respond(
+                    io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Device ID obrigatório"))
+                if (!isSafeId(deviceId)) return@post call.respond(
+                    io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Device ID inválido"))
+
+                val body = runCatching { call.receive<Map<String, String>>() }.getOrDefault(emptyMap())
+                val swapId = body["swapDeviceId"]?.takeIf { it.isNotBlank() }
+
+                val ownerId = transaction {
+                    DevicesTable.select { DevicesTable.id eq deviceId }.firstOrNull()?.get(DevicesTable.ownerId)
+                }
+                if (ownerId == null || ownerId != userId) return@post call.respond(
+                    io.ktor.http.HttpStatusCode.Forbidden, mapOf("error" to "Acesso negado"))
+
+                val maxDevices = transaction {
+                    UsersTable.select { UsersTable.id eq userId }.firstOrNull()?.get(UsersTable.maxDevices) ?: 1
+                }
+                val currentlyActive = transaction {
+                    DevicesTable.select {
+                        (DevicesTable.ownerId eq userId) and (DevicesTable.isActive eq true) and (DevicesTable.id neq deviceId)
+                    }.count()
+                }
+
+                if (currentlyActive >= maxDevices && swapId == null) {
+                    return@post call.respond(io.ktor.http.HttpStatusCode.Conflict, mapOf(
+                        "error" to "Limite de ${maxDevices} aparelho(s) atingido. Informe swapDeviceId para trocar.",
+                        "maxDevices" to maxDevices, "activeCount" to currentlyActive))
+                }
+
+                val nowMs = System.currentTimeMillis()
+                transaction {
+                    if (swapId != null) {
+                        DevicesTable.update({ (DevicesTable.id eq swapId) and (DevicesTable.ownerId eq userId) }) {
+                            it[DevicesTable.isActive] = false
+                            it[DevicesTable.trialStartedAt] = nowMs
+                        }
+                    }
+                    DevicesTable.update({ (DevicesTable.id eq deviceId) and (DevicesTable.ownerId eq userId) }) {
+                        it[DevicesTable.isActive] = true
+                        it[DevicesTable.trialStartedAt] = null
+                    }
+                }
+
+                val updatedList = transaction {
+                    DevicesTable.select { DevicesTable.ownerId eq userId }
+                        .orderBy(DevicesTable.lastSeen, SortOrder.DESC)
+                        .map {
+                            DeviceInfo(it[DevicesTable.id], it[DevicesTable.model], it[DevicesTable.battery],
+                                it[DevicesTable.isCharging], it[DevicesTable.isOnline],
+                                it[DevicesTable.displayName], it[DevicesTable.isActive], it[DevicesTable.trialStartedAt])
+                        }
+                }
+                broadcastToUserId(packetJson.encodeToString(DeviceListPacket(devices = updatedList, maxDevices = maxDevices)), userId)
+                call.respond(mapOf("ok" to true))
+            }
+
+            // Admin: list all users
+            get("/api/admin/users") {
+                if (assertLandingAdmin(call) == null) return@get
+                val users = transaction {
+                    UsersTable.selectAll().orderBy(UsersTable.createdAt, SortOrder.DESC).map {
+                        mapOf("id" to it[UsersTable.id], "email" to it[UsersTable.email],
+                            "username" to it[UsersTable.username], "maxDevices" to it[UsersTable.maxDevices],
+                            "createdAt" to it[UsersTable.createdAt])
+                    }
+                }
+                call.respond(users)
+            }
+
+            // Admin: update a user's device slot limit
+            patch("/api/admin/users/{id}/max-devices") {
+                if (assertLandingAdmin(call) == null) return@patch
+                val targetId = call.parameters["id"]?.toIntOrNull() ?: return@patch call.respond(
+                    io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "User ID inválido"))
+                val body = call.receive<Map<String, Int>>()
+                val newMax = (body["maxDevices"] ?: return@patch call.respond(
+                    io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "maxDevices obrigatório")))
+                    .coerceIn(0, 100)
+                val updated = transaction {
+                    UsersTable.update({ UsersTable.id eq targetId }) { it[UsersTable.maxDevices] = newMax }
+                }
+                if (updated == 0) call.respond(io.ktor.http.HttpStatusCode.NotFound, mapOf("error" to "Usuário não encontrado"))
+                else call.respond(mapOf("ok" to true, "maxDevices" to newMax))
+            }
+
             // Serve static dashboard files (last — more specific routes match first)
             staticFiles("/", File("server/src/main/resources/static"), index = "index.html")
         }
@@ -1642,6 +1835,16 @@ suspend fun broadcastToDashboards(event: String, deviceId: String? = null) {
             else -> userId == ownerId              // authenticated: only their own devices
         }
         if (canReceive) {
+            try { dash.send(Frame.Text(event)) }
+            catch (e: Exception) { dashboardSessions.remove(dash) }
+        }
+    }
+}
+
+// Broadcast an event directly to all open dashboard sessions for a specific userId
+suspend fun broadcastToUserId(event: String, targetUserId: Int) {
+    for ((dash, uid) in dashboardSessions) {
+        if (uid == targetUserId) {
             try { dash.send(Frame.Text(event)) }
             catch (e: Exception) { dashboardSessions.remove(dash) }
         }
