@@ -816,6 +816,9 @@ ul { list-style:none; }
   grid-template-columns:repeat(3,1fr);
   gap:12px;
   padding:14px;
+  flex:1;
+  min-height:0;
+  overflow-y:auto;
 }
 .stream-panel {
   border-radius:var(--radius-sm);
@@ -1607,7 +1610,16 @@ ul { list-style:none; }
   }
   .grid-card { display:none; }
   .grid-card.tab-visible,
-  .grid-card.tab-active { display:flex; }
+  .grid-card.tab-active {
+    display:flex;
+    /* Fix the active card's height to the visible viewport area instead of
+       letting CSS Grid auto-size the track — grid track sizing doesn't
+       account correctly for aspect-ratio children (e.g. streams-grid),
+       which silently clipped overflowing content with no way to scroll it.
+       Card bodies still scroll internally via .card-body's overflow:auto. */
+    height:calc(100dvh - var(--topbar-h) - var(--nav-h) - 20px);
+    max-height:calc(100dvh - var(--topbar-h) - var(--nav-h) - 20px);
+  }
 
   .map-card { grid-column:1; grid-row:auto; min-height:calc(100dvh - var(--topbar-h) - var(--nav-h) - 20px); }
   .map-card .flex-header { display:none; }
@@ -1622,7 +1634,9 @@ ul { list-style:none; }
   .stream-viewport { aspect-ratio:16/9; }
   .stream-controls { opacity:1; }
 
-  .wa-body { height:calc(100dvh - var(--topbar-h) - var(--nav-h) - 80px); }
+  /* .wa-body is also .card-body, which already gets flex:1 to fill the now
+     fixed-height parent card — no manual height calc needed here anymore. */
+  .wa-body { height:auto; min-height:0; }
   .wa-sidebar { width:100%; }
   .wa-wrap { flex-direction:column; }
   .wa-sidebar { max-height:45%; border-right:none; border-bottom:1px solid var(--border); }

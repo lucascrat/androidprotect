@@ -1,8 +1,8 @@
-const CACHE = 'ap-v30';
+const CACHE = 'ap-v31';
 const PRECACHE = [
   '/',
-  '/style.css?v=30',
-  '/app.js?v=30',
+  '/style.css?v=31',
+  '/app.js?v=31',
   '/icon-192.svg',
   '/icon-512.svg'
 ];
