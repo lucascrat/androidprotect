@@ -42,17 +42,79 @@
                     <i class="fa-solid fa-xmark"></i>
                 </button>
             </div>
-            
-            <div class="device-section">
-                <h3><i class="fa-solid fa-mobile-screen"></i> DISPOSITIVOS</h3>
-                <div id="no-devices" class="no-devices-msg">
-                    <i class="fa-solid fa-spinner fa-spin"></i>
-                    <p>Aguardando conexão de dispositivos...</p>
+
+            <div class="sidebar-body">
+
+                <!-- Devices collapsible section -->
+                <div class="snav-group">
+                    <div class="snav-group-header" onclick="toggleSidebarDevices()" title="Recolher/Expandir">
+                        <span><i class="fa-solid fa-mobile-screen"></i>&nbsp; DISPOSITIVOS</span>
+                        <i class="fa-solid fa-chevron-down snav-chevron" id="snav-devices-chevron"></i>
+                    </div>
+                    <div id="sidebar-devices-panel" class="snav-devices-panel">
+                        <div id="no-devices" class="no-devices-msg">
+                            <i class="fa-solid fa-spinner fa-spin"></i>
+                            <p>Aguardando conexão de dispositivos...</p>
+                        </div>
+                        <ul id="device-list" class="device-list"></ul>
+                    </div>
                 </div>
-                <ul id="device-list" class="device-list">
-                    <!-- Dynamic devices list will render here -->
-                </ul>
-            </div>
+
+                <!-- Navigation -->
+                <div class="snav-section-label">NAVEGAÇÃO</div>
+                <nav class="snav-list">
+                    <button class="snav-item active" data-nav="map" onclick="sidebarNav('map')">
+                        <i class="fa-solid fa-map-location-dot"></i>
+                        <span>Mapa</span>
+                    </button>
+                    <button class="snav-item" data-nav="control" onclick="sidebarNav('control')">
+                        <i class="fa-solid fa-terminal"></i>
+                        <span>Controle</span>
+                    </button>
+                    <button class="snav-item" data-nav="cameras" onclick="sidebarNav('cameras')">
+                        <i class="fa-solid fa-video"></i>
+                        <span>Câmeras</span>
+                    </button>
+                    <button class="snav-item" data-nav="media" onclick="sidebarNav('media')">
+                        <i class="fa-solid fa-photo-film"></i>
+                        <span>Mídia</span>
+                    </button>
+                    <button class="snav-item" data-nav="more" onclick="sidebarNav('more')">
+                        <i class="fa-solid fa-folder-open"></i>
+                        <span>Arquivos</span>
+                    </button>
+                </nav>
+
+                <!-- Messaging -->
+                <div class="snav-section-label">MENSAGENS</div>
+                <nav class="snav-list">
+                    <button class="snav-item" data-nav="msg-whatsapp" onclick="sidebarNav('sms','whatsapp')">
+                        <i class="fa-brands fa-whatsapp snav-icon-wa"></i>
+                        <span>WhatsApp</span>
+                    </button>
+                    <button class="snav-item" data-nav="msg-sms" onclick="sidebarNav('sms','sms')">
+                        <i class="fa-solid fa-comment-sms snav-icon-sms"></i>
+                        <span>SMS</span>
+                    </button>
+                    <button class="snav-item" data-nav="msg-instagram" onclick="sidebarNav('sms','instagram')">
+                        <i class="fa-brands fa-instagram snav-icon-ig"></i>
+                        <span>Instagram</span>
+                    </button>
+                    <button class="snav-item" data-nav="msg-facebook" onclick="sidebarNav('sms','facebook')">
+                        <i class="fa-brands fa-facebook snav-icon-fb"></i>
+                        <span>Facebook</span>
+                    </button>
+                    <button class="snav-item" data-nav="msg-messenger" onclick="sidebarNav('sms','messenger')">
+                        <i class="fa-brands fa-facebook-messenger snav-icon-ms"></i>
+                        <span>Messenger</span>
+                    </button>
+                    <button class="snav-item" data-nav="msg-telegram" onclick="sidebarNav('sms','telegram')">
+                        <i class="fa-brands fa-telegram snav-icon-tg"></i>
+                        <span>Telegram</span>
+                    </button>
+                </nav>
+
+            </div><!-- /sidebar-body -->
 
             <div class="sidebar-footer">
                 <p><i class="fa-solid fa-circle-nodes green-dot"></i> Servidor Online</p>
@@ -436,7 +498,7 @@
                 <!-- Messages Panel — WhatsApp Web style -->
                 <div class="grid-card messages-card" data-tab="sms">
                     <div class="card-header">
-                        <h3><i class="fa-brands fa-whatsapp neon-text-green"></i> Mensagens</h3>
+                        <h3><i class="fa-solid fa-comments neon-text-green"></i> Mensagens</h3>
                         <div style="display:flex;align-items:center;gap:8px;">
                             <button class="btn btn-sm btn-clear-log" onclick="waClearAllConversations()" title="Recarregar mensagens do servidor">
                                 <i class="fa-solid fa-arrows-rotate"></i> Recarregar
@@ -445,6 +507,44 @@
                         </div>
                     </div>
                     <div class="card-body wa-body">
+                        <!-- Platform filter tabs -->
+                        <div class="wa-platform-tabs">
+                            <button class="wa-platform-tab active" data-platform="all" onclick="waSwitchPlatform('all')" title="Todas as mensagens">
+                                <i class="fa-solid fa-message"></i>
+                                Todas
+                                <span class="wa-tab-badge" id="wabadge-all" style="display:none"></span>
+                            </button>
+                            <button class="wa-platform-tab" data-platform="whatsapp" onclick="waSwitchPlatform('whatsapp')" title="WhatsApp">
+                                <i class="fa-brands fa-whatsapp"></i>
+                                WhatsApp
+                                <span class="wa-tab-badge" id="wabadge-whatsapp" style="display:none"></span>
+                            </button>
+                            <button class="wa-platform-tab" data-platform="sms" onclick="waSwitchPlatform('sms')" title="SMS">
+                                <i class="fa-solid fa-comment-sms"></i>
+                                SMS
+                                <span class="wa-tab-badge" id="wabadge-sms" style="display:none"></span>
+                            </button>
+                            <button class="wa-platform-tab" data-platform="instagram" onclick="waSwitchPlatform('instagram')" title="Instagram">
+                                <i class="fa-brands fa-instagram"></i>
+                                Instagram
+                                <span class="wa-tab-badge" id="wabadge-instagram" style="display:none"></span>
+                            </button>
+                            <button class="wa-platform-tab" data-platform="telegram" onclick="waSwitchPlatform('telegram')" title="Telegram">
+                                <i class="fa-brands fa-telegram"></i>
+                                Telegram
+                                <span class="wa-tab-badge" id="wabadge-telegram" style="display:none"></span>
+                            </button>
+                            <button class="wa-platform-tab" data-platform="facebook" onclick="waSwitchPlatform('facebook')" title="Facebook">
+                                <i class="fa-brands fa-facebook"></i>
+                                Facebook
+                                <span class="wa-tab-badge" id="wabadge-facebook" style="display:none"></span>
+                            </button>
+                            <button class="wa-platform-tab" data-platform="messenger" onclick="waSwitchPlatform('messenger')" title="Messenger">
+                                <i class="fa-brands fa-facebook-messenger"></i>
+                                Messenger
+                                <span class="wa-tab-badge" id="wabadge-messenger" style="display:none"></span>
+                            </button>
+                        </div>
                         <div class="wa-wrap">
                             <!-- Sidebar: conversation list -->
                             <div class="wa-sidebar">
@@ -465,7 +565,7 @@
                                     <div class="wa-avatar" id="wa-avatar">?</div>
                                     <div class="wa-chat-info">
                                         <div class="wa-chat-name" id="wa-chat-name">Selecione uma conversa</div>
-                                        <div class="wa-chat-sub" id="wa-chat-sub">SMS e WhatsApp monitorados</div>
+                                        <div class="wa-chat-sub" id="wa-chat-sub">Mensagens monitoradas</div>
                                     </div>
                                 </div>
                                 <div class="wa-messages" id="wa-messages">

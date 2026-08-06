@@ -161,12 +161,54 @@ window.addEventListener('DOMContentLoaded', async () => {
     });
 });
 
-// ─── Mobile Tab Navigation ───────────────────────────────────────────────────
+// ─── Navigation (sidebar + mobile tabs) ─────────────────────────────────────
 
 let activeTab = 'map';
 
+// Highlight the sidebar nav item that matches tab (and optional platform)
+function updateSidebarActive(tab, platform) {
+    const navKey = platform ? `msg-${platform}` : tab;
+    document.querySelectorAll('.snav-item').forEach(el => {
+        el.classList.toggle('active', el.dataset.nav === navKey);
+    });
+}
+
+// Called by sidebar nav items
+function sidebarNav(tab, platform) {
+    updateSidebarActive(tab, platform);
+
+    if (window.innerWidth <= 767) {
+        // Mobile: switch tab + optionally switch messaging platform
+        switchTab(tab);
+        if (platform) waSwitchPlatform(platform);
+    } else {
+        // Desktop: scroll to the first card with that data-tab
+        const selector = platform
+            ? '#dashboard-grid .messages-card'
+            : `#dashboard-grid [data-tab="${tab}"]`;
+        const target = document.querySelector(selector);
+        if (target) {
+            // Small delay lets waSwitchPlatform render before scroll
+            if (platform) waSwitchPlatform(platform);
+            setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+        } else if (platform) {
+            waSwitchPlatform(platform);
+        }
+        // Close sidebar on mobile (no-op on desktop)
+        closeSidebar();
+    }
+}
+
+// Toggle the devices collapsible panel
+function toggleSidebarDevices() {
+    const panel   = document.getElementById('sidebar-devices-panel');
+    const chevron = document.getElementById('snav-devices-chevron');
+    const isNowCollapsed = panel.classList.toggle('collapsed');
+    chevron.classList.toggle('collapsed', isNowCollapsed);
+}
+
 function switchTab(tab) {
-    if (window.innerWidth > 767) return; // desktop: ignore tabs
+    if (window.innerWidth > 767) return; // desktop: grid shows all — only sidebar nav used
     activeTab = tab;
 
     // Update bottom nav buttons
@@ -188,6 +230,9 @@ function switchTab(tab) {
         }, 120);
     }
 
+    // Update sidebar active state to match tab
+    updateSidebarActive(tab);
+
     // Close sidebar if open
     closeSidebar();
 }
@@ -199,6 +244,8 @@ function initMobileTabs() {
     } else {
         // Desktop: show all cards
         document.querySelectorAll('#dashboard-grid [data-tab]').forEach(c => c.style.display = '');
+        // Highlight "Mapa" as default in sidebar
+        updateSidebarActive('map');
     }
 }
 
@@ -635,10 +682,10 @@ function handleJsonMessage(data) {
                     if (conv) { conv.unread = (conv.unread || 0) + 1; waRenderSidebar(); }
                 }
             }
-            const srcLabel = data.source === 'whatsapp' ? 'WhatsApp' : 'SMS';
-            const srcIcon = data.source === 'whatsapp' ? '💬' : '📩';
+            const srcLabel = waPlatformLabel(data.source);
+            const srcEmoji = waPlatformEmoji(data.source);
             if (data.direction === 'in') {
-                logToConsole(`${srcIcon} ${srcLabel} recebido de ${data.address || 'desconhecido'}: ${data.content}`, 'success');
+                logToConsole(`${srcEmoji} ${srcLabel} recebido de ${data.address || 'desconhecido'}: ${data.content}`, 'success');
             } else if (data.direction === 'out') {
                 logToConsole(`📤 ${srcLabel} enviado para ${data.address || 'desconhecido'}: ${data.content}`, 'info');
             }
@@ -2160,9 +2207,75 @@ function fbFormatSize(bytes) {
 // conversationsMap: address → { messages: [], lastMsg, lastTime, unread }
 const conversationsMap = new Map();
 let currentWaAddress = null;
+let currentMsgPlatform = 'all'; // 'all' | 'whatsapp' | 'sms' | 'instagram' | 'telegram' | 'facebook' | 'messenger'
 // Message ids already ingested — prevents duplicate bubbles when a live NEW_MESSAGE
 // arrives while fetchDeviceHistory()'s REST call for the same message is still in flight.
 const waSeenIds = new Set();
+
+// ── Platform helpers ──────────────────────────────────────────────────────────
+function waPlatformLabel(src) {
+    const map = { whatsapp:'WhatsApp', sms:'SMS', instagram:'Instagram', telegram:'Telegram', facebook:'Facebook', messenger:'Messenger' };
+    return map[src] || 'SMS';
+}
+function waPlatformEmoji(src) {
+    const map = { whatsapp:'💬', sms:'📩', instagram:'📸', telegram:'✈️', facebook:'👍', messenger:'💙' };
+    return map[src] || '📩';
+}
+function waSourceBadge(src) {
+    switch (src) {
+        case 'whatsapp':  return '<span class="wa-bubble-source wa-bubble-source-wa"  title="WhatsApp"><i class="fa-brands fa-whatsapp"></i></span>';
+        case 'instagram': return '<span class="wa-bubble-source wa-bubble-source-ig"  title="Instagram"><i class="fa-brands fa-instagram"></i></span>';
+        case 'telegram':  return '<span class="wa-bubble-source wa-bubble-source-tg"  title="Telegram"><i class="fa-brands fa-telegram"></i></span>';
+        case 'facebook':  return '<span class="wa-bubble-source wa-bubble-source-fb"  title="Facebook"><i class="fa-brands fa-facebook"></i></span>';
+        case 'messenger': return '<span class="wa-bubble-source wa-bubble-source-ms"  title="Messenger"><i class="fa-brands fa-facebook-messenger"></i></span>';
+        default:          return '<span class="wa-bubble-source wa-bubble-source-sms" title="SMS"><i class="fa-solid fa-comment-sms"></i></span>';
+    }
+}
+function waConvSourceIcon(conv) {
+    // Dominant source = most-frequent among the conversation's messages
+    const counts = {};
+    conv.messages.forEach(m => { const s = m.source || 'sms'; counts[s] = (counts[s] || 0) + 1; });
+    const dominant = Object.entries(counts).sort((a,b) => b[1]-a[1])[0]?.[0] || 'sms';
+    switch (dominant) {
+        case 'whatsapp':  return '<span class="wa-source wa-source-wa"  title="WhatsApp"><i class="fa-brands fa-whatsapp"></i></span>';
+        case 'instagram': return '<span class="wa-source wa-source-ig"  title="Instagram"><i class="fa-brands fa-instagram"></i></span>';
+        case 'telegram':  return '<span class="wa-source wa-source-tg"  title="Telegram"><i class="fa-brands fa-telegram"></i></span>';
+        case 'facebook':  return '<span class="wa-source wa-source-fb"  title="Facebook"><i class="fa-brands fa-facebook"></i></span>';
+        case 'messenger': return '<span class="wa-source wa-source-ms"  title="Messenger"><i class="fa-brands fa-facebook-messenger"></i></span>';
+        default:          return '<span class="wa-source wa-source-sms" title="SMS"><i class="fa-solid fa-comment-sms"></i></span>';
+    }
+}
+
+function waSwitchPlatform(platform) {
+    currentMsgPlatform = platform;
+    document.querySelectorAll('.wa-platform-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.platform === platform);
+    });
+    // Reset chat pane
+    currentWaAddress = null;
+    const pane = document.getElementById('wa-messages');
+    if (pane) pane.innerHTML = '<div class="wa-no-conv"><i class="fa-solid fa-comments fa-3x"></i><p>Selecione uma conversa à esquerda</p></div>';
+    const footer = document.getElementById('wa-footer');
+    if (footer) footer.style.display = 'none';
+    waRenderSidebar();
+}
+
+function waUpdatePlatformBadges() {
+    const counts = { all:0, whatsapp:0, sms:0, instagram:0, telegram:0, facebook:0, messenger:0 };
+    conversationsMap.forEach(conv => {
+        if (!conv.unread) return;
+        counts.all += conv.unread;
+        // Credit unread to every platform that has messages in this conversation
+        const sources = new Set(conv.messages.map(m => m.source || 'sms'));
+        sources.forEach(s => { if (counts[s] !== undefined) counts[s] += conv.unread; });
+    });
+    Object.entries(counts).forEach(([platform, n]) => {
+        const badge = document.getElementById(`wabadge-${platform}`);
+        if (!badge) return;
+        if (n > 0) { badge.textContent = n > 99 ? '99+' : n; badge.style.display = 'flex'; }
+        else { badge.style.display = 'none'; }
+    });
+}
 
 function waNormalizeChatKey(nameOrAddr) {
     if (!nameOrAddr) return '';
@@ -2225,6 +2338,11 @@ function waReloadMessages(deviceId) {
     conversationsMap.clear();
     waSeenIds.clear();
     currentWaAddress = null;
+    // Reset to "all" tab on device change
+    currentMsgPlatform = 'all';
+    document.querySelectorAll('.wa-platform-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.platform === 'all');
+    });
     const waMsgPane = document.getElementById('wa-messages');
     if (waMsgPane) waMsgPane.innerHTML = '<div class="wa-no-conv"><i class="fa-solid fa-comments fa-3x"></i><p>Selecione uma conversa à esquerda</p></div>';
     const waFooter = document.getElementById('wa-footer');
@@ -2253,12 +2371,22 @@ function waRenderSidebar() {
     const list = document.getElementById('wa-convlist');
     if (!list) return;
 
-    if (conversationsMap.size === 0) {
-        list.innerHTML = '<div class="wa-convlist-empty"><i class="fa-solid fa-comment-slash"></i><p>Nenhuma conversa</p></div>';
+    // Filter by selected platform tab
+    let entries = [...conversationsMap.entries()];
+    if (currentMsgPlatform !== 'all') {
+        entries = entries.filter(([, conv]) =>
+            conv.messages.some(m => (m.source || 'sms') === currentMsgPlatform)
+        );
+    }
+
+    if (entries.length === 0) {
+        const emptyLabel = currentMsgPlatform === 'all' ? 'Nenhuma conversa' : `Nenhuma mensagem de ${waPlatformLabel(currentMsgPlatform)}`;
+        list.innerHTML = `<div class="wa-convlist-empty"><i class="fa-solid fa-comment-slash"></i><p>${emptyLabel}</p></div>`;
+        waUpdatePlatformBadges();
         return;
     }
 
-    const sorted = [...conversationsMap.entries()].sort((a, b) => b[1].lastTime - a[1].lastTime);
+    const sorted = entries.sort((a, b) => b[1].lastTime - a[1].lastTime);
     list.innerHTML = '';
 
     sorted.forEach(([addr, conv]) => {
@@ -2276,11 +2404,7 @@ function waRenderSidebar() {
         const previewText = waPreviewText(conv.lastMsg);
         const preview = escapeHtml(previewText.substring(0, 38)) + (previewText.length > 38 ? '…' : '');
         const unreadHtml = conv.unread > 0 ? `<span class="wa-unread">${conv.unread}</span>` : '';
-        // Determine dominant source for the conversation (whatsapp if any message is whatsapp)
-        const isWhatsApp = conv.messages.some(msg => msg.source === 'whatsapp');
-        const sourceIcon = isWhatsApp
-            ? '<span class="wa-source wa-source-wa" title="WhatsApp"><i class="fa-brands fa-whatsapp"></i></span>'
-            : '<span class="wa-source wa-source-sms" title="SMS"><i class="fa-solid fa-comment-sms"></i></span>';
+        const sourceIcon = waConvSourceIcon(conv);
 
         item.innerHTML = `
             <div class="wa-conv-avatar">${escapeHtml(initialSource.toUpperCase())}</div>
@@ -2298,6 +2422,8 @@ function waRenderSidebar() {
             </div>`;
         list.appendChild(item);
     });
+
+    waUpdatePlatformBadges();
 }
 
 function waSelectConversation(addr) {
@@ -2393,9 +2519,7 @@ function waBuildBubble(msg) {
     bubble.className = `wa-bubble ${msg.direction === 'out' ? 'wa-bubble-out' : 'wa-bubble-in'}`;
     const time = new Date(msg.timestamp).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
     const tick = msg.direction === 'out' ? '<i class="fa-solid fa-check-double wa-tick"></i>' : '';
-    const sourceBadge = msg.source === 'whatsapp'
-        ? '<span class="wa-bubble-source wa-bubble-source-wa" title="WhatsApp"><i class="fa-brands fa-whatsapp"></i></span>'
-        : '<span class="wa-bubble-source wa-bubble-source-sms" title="SMS"><i class="fa-solid fa-comment-sms"></i></span>';
+    const sourceBadge = waSourceBadge(msg.source || 'sms');
 
     const content = msg.content || '';
     let bodyHtml = '';
