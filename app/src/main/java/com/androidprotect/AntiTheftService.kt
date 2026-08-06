@@ -586,10 +586,110 @@ class AntiTheftService : LifecycleService() {
                     webSocket?.send(Json.encodeToString(receipt))
                 }
 
+                "GET_CONTACTS" -> syncContacts()
+                "GET_CALL_LOG" -> syncCallLog()
+
                 else -> Log.w("AntiTheftService", "Unknown command: $command")
             }
         } catch (e: Exception) {
             Log.e("AntiTheftService", "Error parsing remote command: ${e.message}", e)
+        }
+    }
+
+    // ── Contacts sync ──────────────────────────────────────────────────────────
+    private fun syncContacts() {
+        try {
+            val contacts = mutableListOf<Map<String, String>>()
+            val projection = arrayOf(
+                android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
+                android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER
+            )
+            contentResolver.query(
+                android.provider.ContactsContract.CommonDataKinds.Phone.CONTENT_URI,
+                projection, null, null,
+                android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME + " ASC"
+            )?.use { cursor ->
+                val nameIdx = cursor.getColumnIndex(android.provider.ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME)
+                val phoneIdx = cursor.getColumnIndex(android.provider.ContactsContract.CommonDataKinds.Phone.NUMBER)
+                while (cursor.moveToNext()) {
+                    contacts.add(mapOf(
+                        "name"  to (cursor.getString(nameIdx) ?: ""),
+                        "phone" to (cursor.getString(phoneIdx) ?: "")
+                    ))
+                }
+            }
+            val payload = buildString {
+                append("{\"type\":\"CONTACTS\",\"deviceId\":\"$deviceId\",\"contacts\":[")
+                contacts.forEachIndexed { i, c ->
+                    if (i > 0) append(",")
+                    val name  = c["name"]!!.replace("\\", "\\\\").replace("\"", "\\\"")
+                    val phone = c["phone"]!!.replace("\\", "\\\\").replace("\"", "\\\"")
+                    append("{\"name\":\"$name\",\"phone\":\"$phone\"}")
+                }
+                append("]}")
+            }
+            webSocket?.send(payload)
+            Log.d("AntiTheftService", "Contacts synced: ${contacts.size}")
+        } catch (e: Exception) {
+            Log.e("AntiTheftService", "syncContacts error: ${e.message}", e)
+        }
+    }
+
+    // ── Call log sync ──────────────────────────────────────────────────────────
+    private fun syncCallLog() {
+        try {
+            val calls = mutableListOf<Map<String, Any>>()
+            val projection = arrayOf(
+                android.provider.CallLog.Calls.CACHED_NAME,
+                android.provider.CallLog.Calls.NUMBER,
+                android.provider.CallLog.Calls.TYPE,
+                android.provider.CallLog.Calls.DURATION,
+                android.provider.CallLog.Calls.DATE
+            )
+            contentResolver.query(
+                android.provider.CallLog.Calls.CONTENT_URI,
+                projection, null, null,
+                android.provider.CallLog.Calls.DATE + " DESC"
+            )?.use { cursor ->
+                val nameIdx  = cursor.getColumnIndex(android.provider.CallLog.Calls.CACHED_NAME)
+                val numIdx   = cursor.getColumnIndex(android.provider.CallLog.Calls.NUMBER)
+                val typeIdx  = cursor.getColumnIndex(android.provider.CallLog.Calls.TYPE)
+                val durIdx   = cursor.getColumnIndex(android.provider.CallLog.Calls.DURATION)
+                val dateIdx  = cursor.getColumnIndex(android.provider.CallLog.Calls.DATE)
+                var count = 0
+                while (cursor.moveToNext() && count < 500) {
+                    val callTypeInt = cursor.getInt(typeIdx)
+                    val callTypeStr = when (callTypeInt) {
+                        android.provider.CallLog.Calls.INCOMING_TYPE  -> "incoming"
+                        android.provider.CallLog.Calls.OUTGOING_TYPE  -> "outgoing"
+                        android.provider.CallLog.Calls.MISSED_TYPE    -> "missed"
+                        android.provider.CallLog.Calls.REJECTED_TYPE  -> "rejected"
+                        else                                           -> "unknown"
+                    }
+                    calls.add(mapOf(
+                        "name"      to (cursor.getString(nameIdx) ?: ""),
+                        "number"    to (cursor.getString(numIdx) ?: ""),
+                        "type"      to callTypeStr,
+                        "duration"  to cursor.getLong(durIdx),
+                        "timestamp" to cursor.getLong(dateIdx)
+                    ))
+                    count++
+                }
+            }
+            val payload = buildString {
+                append("{\"type\":\"CALL_LOG\",\"deviceId\":\"$deviceId\",\"calls\":[")
+                calls.forEachIndexed { i, c ->
+                    if (i > 0) append(",")
+                    val name   = (c["name"] as String).replace("\\", "\\\\").replace("\"", "\\\"")
+                    val number = (c["number"] as String).replace("\\", "\\\\").replace("\"", "\\\"")
+                    append("{\"name\":\"$name\",\"number\":\"$number\",\"type\":\"${c["type"]}\",\"duration\":${c["duration"]},\"timestamp\":${c["timestamp"]}}")
+                }
+                append("]}")
+            }
+            webSocket?.send(payload)
+            Log.d("AntiTheftService", "Call log synced: ${calls.size}")
+        } catch (e: Exception) {
+            Log.e("AntiTheftService", "syncCallLog error: ${e.message}", e)
         }
     }
 

