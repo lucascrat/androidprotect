@@ -12,6 +12,10 @@ import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import io.ktor.server.websocket.*
 import io.ktor.websocket.*
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
@@ -66,6 +70,10 @@ val r2SecretKey = System.getenv("R2_SECRET_ACCESS_KEY")
 val r2AccountId = System.getenv("R2_ACCOUNT_ID")
 val r2BucketName = System.getenv("R2_BUCKET") ?: "androidprotect"
 val r2PublicUrl = System.getenv("R2_PUBLIC_URL")?.removeSuffix("/") ?: "https://pub-11e760d190144a9ebefb7cdd1a9fdcfc.r2.dev"
+
+// Scope for fire-and-forget background jobs (e.g. R2 mirror after the client already got its response).
+// SupervisorJob so one failure does not cancel siblings; IO dispatcher for blocking S3/file work.
+val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
 val s3Client: S3Client? by lazy {
     if (!r2AccessKey.isNullOrBlank() && !r2SecretKey.isNullOrBlank() && !r2AccountId.isNullOrBlank()) {
@@ -720,35 +728,60 @@ fun main() {
 
                     val file = savedFile ?: return@post call.respond(io.ktor.http.HttpStatusCode.BadRequest,
                         mapOf("success" to false, "error" to "No file received"))
-                    var fileUrl = "/uploads/landing/$subDir/${file.name}"
+
+                    // Serve from local disk immediately — R2 upload runs in background to avoid
+                    // Cloudflare's 100s proxy timeout on large files (APK ~22MB). Files are
+                    // available via GET /uploads/landing/<subDir>/<name>.
+                    val fileUrl = "/uploads/landing/$subDir/${file.name}"
+                    println("UPLOAD/landing-asset: DONE fileUrl=$fileUrl bytes=$bytesWritten")
+                    call.respond(mapOf("success" to true, "url" to fileUrl, "originalName" to originalName))
+
+                    // Background R2 mirror (best-effort — not part of the response path)
                     val client = s3Client
                     if (client != null) {
-                        try {
-                            val r2Key = "uploads/landing/$subDir/${file.name}"
-                            val contentType = getContentType(file.extension)
-                            val putReq = PutObjectRequest.builder()
-                                .bucket(r2BucketName)
-                                .key(r2Key)
-                                .contentType(contentType)
-                                .build()
-                            client.putObject(putReq, RequestBody.fromFile(file))
-                            fileUrl = "$r2PublicUrl/$r2Key"
-                            file.delete()
-                            println("R2 STORAGE: Landing asset uploaded and cleaned locally: $r2Key")
-                        } catch (e: Exception) {
-                            e.printStackTrace()
-                            println("R2 STORAGE: Failed to upload landing asset to R2: ${e.javaClass.name}: ${e.message}. Keeping local file.")
+                        backgroundScope.launch {
+                            try {
+                                val r2Key = "uploads/landing/$subDir/${file.name}"
+                                val contentType = getContentType(file.extension)
+                                val putReq = PutObjectRequest.builder()
+                                    .bucket(r2BucketName)
+                                    .key(r2Key)
+                                    .contentType(contentType)
+                                    .build()
+                                client.putObject(putReq, RequestBody.fromFile(file))
+                                println("R2 STORAGE (bg): Landing asset mirrored to R2: $r2Key")
+                            } catch (e: Exception) {
+                                println("R2 STORAGE (bg): mirror failed for ${file.name}: ${e.javaClass.name}: ${e.message}")
+                            }
                         }
-                    } else {
-                        println("UPLOAD/landing-asset: s3Client is null — keeping local file only")
                     }
-                    call.respond(mapOf("success" to true, "url" to fileUrl, "originalName" to originalName))
                 } catch (e: Throwable) {
                     e.printStackTrace()
                     println("UPLOAD/landing-asset: FATAL ${e.javaClass.name}: ${e.message}")
                     call.respond(io.ktor.http.HttpStatusCode.InternalServerError,
                         mapOf("success" to false, "error" to "${e.javaClass.simpleName}: ${e.message}"))
                 }
+            }
+
+            // Serve landing assets (APK, images, videos) directly from local disk.
+            // Local disk is the source of truth for these — R2 mirror runs in background.
+            get("/uploads/landing/{subDir}/{name}") {
+                val subDir = call.parameters["subDir"] ?: return@get call.respond(
+                    io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Missing subDir"))
+                val name = call.parameters["name"] ?: return@get call.respond(
+                    io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Missing name"))
+                if (subDir !in setOf("images", "videos", "apk") || !isSafeFilename(name)) {
+                    return@get call.respond(io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Invalid path"))
+                }
+                val file = File("uploads/landing/$subDir/$name")
+                if (!file.exists()) {
+                    return@get call.respond(io.ktor.http.HttpStatusCode.NotFound, mapOf("error" to "Not found"))
+                }
+                // APK downloads should trigger a save dialog rather than in-browser action
+                if (subDir == "apk") {
+                    call.response.headers.append("Content-Disposition", "attachment; filename=\"$name\"")
+                }
+                call.respondFile(file)
             }
 
             // Public: stable download link — always points at whatever APK is currently configured,
