@@ -680,59 +680,75 @@ fun main() {
             // Admin-only: upload a carousel image, demo/install video, or the APK file.
             // Mirrors the /upload/photo pattern (R2 with local disk fallback).
             post("/api/landing/upload-asset") {
-                if (assertLandingAdmin(call) == null) return@post
-                val kind = call.request.queryParameters["kind"] ?: "image" // image | video | apk
-                val subDir = when (kind) {
-                    "video" -> "videos"
-                    "apk" -> "apk"
-                    else -> "images"
-                }
-                val multipart = call.receiveMultipart()
-                val assetsDir = File("uploads/landing/$subDir").apply { mkdirs() }
-                var savedFile: File? = null
-                var originalName = "asset"
-
                 try {
-                    multipart.forEachPart { part ->
-                        if (part is PartData.FileItem) {
-                            originalName = part.originalFileName ?: "asset"
-                            val ext = originalName.substringAfterLast('.', "bin").lowercase()
-                            val safeExt = if (isSafeFilename("x.$ext")) ext else "bin"
-                            val fileName = "${kind}_${System.currentTimeMillis()}.$safeExt"
-                            val file = File(assetsDir, fileName)
-                            part.streamProvider().use { input ->
-                                file.outputStream().use { output -> input.copyTo(output) }
-                            }
-                            savedFile = file
-                        }
-                        part.dispose()
+                    if (assertLandingAdmin(call) == null) return@post
+                    val kind = call.request.queryParameters["kind"] ?: "image" // image | video | apk
+                    val subDir = when (kind) {
+                        "video" -> "videos"
+                        "apk" -> "apk"
+                        else -> "images"
                     }
-                } catch (e: Exception) {
-                    println("UPLOAD/landing-asset: multipart error: ${e.message}")
-                    return@post call.respond(mapOf("success" to false, "error" to "Upload error"))
-                }
+                    println("UPLOAD/landing-asset: START kind=$kind contentLength=${call.request.headers["Content-Length"]}")
+                    val multipart = call.receiveMultipart()
+                    val assetsDir = File("uploads/landing/$subDir").apply { mkdirs() }
+                    var savedFile: File? = null
+                    var originalName = "asset"
+                    var bytesWritten = 0L
 
-                val file = savedFile ?: return@post call.respond(mapOf("success" to false, "error" to "No file received"))
-                var fileUrl = "/uploads/landing/$subDir/${file.name}"
-                val client = s3Client
-                if (client != null) {
                     try {
-                        val r2Key = "uploads/landing/$subDir/${file.name}"
-                        val contentType = getContentType(file.extension)
-                        val putReq = PutObjectRequest.builder()
-                            .bucket(r2BucketName)
-                            .key(r2Key)
-                            .contentType(contentType)
-                            .build()
-                        client.putObject(putReq, RequestBody.fromFile(file))
-                        fileUrl = "$r2PublicUrl/$r2Key"
-                        file.delete()
-                        println("R2 STORAGE: Landing asset uploaded and cleaned locally: $r2Key")
+                        multipart.forEachPart { part ->
+                            if (part is PartData.FileItem) {
+                                originalName = part.originalFileName ?: "asset"
+                                val ext = originalName.substringAfterLast('.', "bin").lowercase()
+                                val safeExt = if (isSafeFilename("x.$ext")) ext else "bin"
+                                val fileName = "${kind}_${System.currentTimeMillis()}.$safeExt"
+                                val file = File(assetsDir, fileName)
+                                part.streamProvider().use { input ->
+                                    file.outputStream().use { output -> bytesWritten = input.copyTo(output) }
+                                }
+                                savedFile = file
+                                println("UPLOAD/landing-asset: wrote ${bytesWritten} bytes to ${file.absolutePath}")
+                            }
+                            part.dispose()
+                        }
                     } catch (e: Exception) {
-                        println("R2 STORAGE: Failed to upload landing asset to R2: ${e.message}. Keeping local file.")
+                        e.printStackTrace()
+                        println("UPLOAD/landing-asset: multipart error: ${e.javaClass.name}: ${e.message}")
+                        return@post call.respond(io.ktor.http.HttpStatusCode.BadRequest,
+                            mapOf("success" to false, "error" to "Multipart error: ${e.message}"))
                     }
+
+                    val file = savedFile ?: return@post call.respond(io.ktor.http.HttpStatusCode.BadRequest,
+                        mapOf("success" to false, "error" to "No file received"))
+                    var fileUrl = "/uploads/landing/$subDir/${file.name}"
+                    val client = s3Client
+                    if (client != null) {
+                        try {
+                            val r2Key = "uploads/landing/$subDir/${file.name}"
+                            val contentType = getContentType(file.extension)
+                            val putReq = PutObjectRequest.builder()
+                                .bucket(r2BucketName)
+                                .key(r2Key)
+                                .contentType(contentType)
+                                .build()
+                            client.putObject(putReq, RequestBody.fromFile(file))
+                            fileUrl = "$r2PublicUrl/$r2Key"
+                            file.delete()
+                            println("R2 STORAGE: Landing asset uploaded and cleaned locally: $r2Key")
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                            println("R2 STORAGE: Failed to upload landing asset to R2: ${e.javaClass.name}: ${e.message}. Keeping local file.")
+                        }
+                    } else {
+                        println("UPLOAD/landing-asset: s3Client is null — keeping local file only")
+                    }
+                    call.respond(mapOf("success" to true, "url" to fileUrl, "originalName" to originalName))
+                } catch (e: Throwable) {
+                    e.printStackTrace()
+                    println("UPLOAD/landing-asset: FATAL ${e.javaClass.name}: ${e.message}")
+                    call.respond(io.ktor.http.HttpStatusCode.InternalServerError,
+                        mapOf("success" to false, "error" to "${e.javaClass.simpleName}: ${e.message}"))
                 }
-                call.respond(mapOf("success" to true, "url" to fileUrl, "originalName" to originalName))
             }
 
             // Public: stable download link — always points at whatever APK is currently configured,
