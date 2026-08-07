@@ -483,7 +483,9 @@ fun main() {
     // Initialize Database
     initDatabase()
 
-    embeddedServer(Netty, port = 8080, host = "0.0.0.0") {
+    embeddedServer(Netty, port = 8080, host = "0.0.0.0", configure = {
+        maxBodySize = 150L * 1024 * 1024   // 150 MB — allows APK + video uploads
+    }) {
         install(WebSockets) {
             pingPeriod = Duration.ofSeconds(20)   // server pings client every 20s
             timeout    = Duration.ofSeconds(300)  // allow up to 5min without pong (Doze mode on Chinese OEMs)
