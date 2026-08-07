@@ -207,19 +207,28 @@ function toggleSidebarDevices() {
     chevron.classList.toggle('collapsed', isNowCollapsed);
 }
 
+// Tabs that live inside the "Mais" drawer — their activation highlights the Mais button
+const MORE_TABS = new Set(['more', 'contacts', 'calllogs', 'keylog']);
+
 function switchTab(tab) {
     if (window.innerWidth > 767) return; // desktop: grid shows all — only sidebar nav used
     activeTab = tab;
 
+    // Close more drawer if open
+    closeMoreDrawer();
+
     // Update bottom nav buttons
+    // Any tab inside MORE_TABS activates the "Mais" button
+    const isMoreGroup = MORE_TABS.has(tab);
     document.querySelectorAll('.mbn-tab').forEach(btn => {
-        btn.classList.toggle('active', btn.dataset.tab === tab);
+        const directMatch = btn.dataset.tab === tab;
+        const moreMatch   = isMoreGroup && btn.id === 'mbn-more';
+        btn.classList.toggle('active', directMatch || moreMatch);
     });
 
     // Show/hide cards
     document.querySelectorAll('#dashboard-grid [data-tab]').forEach(card => {
-        const match = card.dataset.tab === tab;
-        card.classList.toggle('tab-visible', match);
+        card.classList.toggle('tab-visible', card.dataset.tab === tab);
     });
 
     // When switching to map tab, trigger resize so Leaflet re-renders
@@ -230,11 +239,41 @@ function switchTab(tab) {
         }, 120);
     }
 
+    // When leaving messages, reset to conversation list view
+    if (tab !== 'sms') {
+        document.querySelector('.wa-body')?.classList.remove('wa-in-chat');
+    }
+
     // Update sidebar active state to match tab
     updateSidebarActive(tab);
 
     // Close sidebar if open
     closeSidebar();
+}
+
+// ── More drawer ──────────────────────────────────────────────────────────────
+function openMoreDrawer() {
+    if (window.innerWidth > 767) { switchTab('more'); return; }
+    const drawer  = document.getElementById('more-drawer');
+    const overlay = document.getElementById('more-drawer-overlay');
+    if (!drawer) return;
+    // Highlight active item inside drawer
+    drawer.querySelectorAll('.mdr-item').forEach(btn => {
+        btn.classList.toggle('mdr-active', btn.getAttribute('onclick')?.includes(`'${activeTab}'`));
+    });
+    overlay.classList.add('active');
+    // Two-frame trick so transform transition fires after display change
+    requestAnimationFrame(() => requestAnimationFrame(() => drawer.classList.add('open')));
+}
+
+function closeMoreDrawer() {
+    document.getElementById('more-drawer')?.classList.remove('open');
+    document.getElementById('more-drawer-overlay')?.classList.remove('active');
+}
+
+function mdrSelect(tab) {
+    closeMoreDrawer();
+    switchTab(tab);
 }
 
 // Initialize tabs on mobile after DOM ready
@@ -2490,6 +2529,18 @@ function waSelectConversation(addr) {
     requestAnimationFrame(() => {
         pane.scrollTo({ top: pane.scrollHeight, behavior: 'instant' });
     });
+
+    // Mobile: switch to chat pane (single-pane navigation)
+    if (window.innerWidth <= 767) {
+        document.querySelector('.wa-body')?.classList.add('wa-in-chat');
+    }
+}
+
+// Mobile: back from chat pane to conversation list
+function waBackToList() {
+    document.querySelector('.wa-body')?.classList.remove('wa-in-chat');
+    currentWaAddress = null;
+    document.querySelectorAll('.wa-conv-item').forEach(el => el.classList.remove('wa-conv-active'));
 }
 
 // Shared by waBuildBubble (chat) and waPreviewText (sidebar) so both agree on what

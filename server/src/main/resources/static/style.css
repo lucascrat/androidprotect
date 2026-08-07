@@ -1829,7 +1829,8 @@ ul { list-style:none; }
   .map-gps-bar { display:flex; }
   .map-trail-bar { display:flex; }
   .commands-card, .streams-card, .gallery-card, .audio-card,
-  .terminal-card, .messages-card, .filebrowser-card {
+  .terminal-card, .messages-card, .filebrowser-card,
+  .contacts-card, .calllogs-card, .keylog-card {
     grid-column:1; grid-row:auto;
   }
 
@@ -1841,15 +1842,29 @@ ul { list-style:none; }
   .stream-viewport { aspect-ratio:16/9; }
   .stream-controls { opacity:1; }
 
-  /* .wa-body is also .card-body, which already gets flex:1 to fill the now
-     fixed-height parent card — no manual height calc needed here anymore. */
-  .wa-body { height:auto; min-height:0; }
-  .wa-platform-tabs { padding:6px 8px; gap:2px; }
+  /* ── Messages: single-pane navigation on mobile ── */
+  /* .wa-body is also .card-body, already flex:1 — no manual height needed */
+  .wa-body { height:auto; min-height:0; display:flex; flex-direction:column; }
+  .wa-platform-tabs { padding:6px 8px; gap:2px; flex-shrink:0; }
   .wa-platform-tab { padding:4px 8px; font-size:.58rem; min-width:46px; }
   .wa-platform-tab i { font-size:.8rem; }
-  .wa-sidebar { width:100%; }
-  .wa-wrap { flex-direction:column; }
-  .wa-sidebar { max-height:40%; border-right:none; border-bottom:1px solid var(--border); }
+
+  /* wa-wrap fills remaining height and clips overflow */
+  .wa-wrap { flex-direction:column; flex:1; min-height:0; overflow:hidden; }
+
+  /* Default: show conversation list only */
+  .wa-sidebar {
+    width:100%; max-height:none; flex:1;
+    border-right:none; border-bottom:none;
+  }
+  .wa-chat-pane { display:none; flex:1; }
+
+  /* wa-in-chat: hide list, show chat */
+  .wa-body.wa-in-chat .wa-sidebar   { display:none; }
+  .wa-body.wa-in-chat .wa-chat-pane { display:flex; }
+
+  /* Back button visible on mobile */
+  .wa-back-btn { display:flex; }
 
   .photo-gallery { grid-template-columns:repeat(auto-fill,minmax(90px,1fr)); }
 
@@ -1857,11 +1872,104 @@ ul { list-style:none; }
 
   .pm-nav { display:none; }
   .pm-img { max-width:95vw; max-height:70vh; }
+
+  /* Contacts/calllogs/keylog body spacing on mobile */
+  .contacts-search { width:140px; }
 }
 
 @media (max-width:600px) {
   .streams-grid { grid-template-columns:1fr; }
 }
+
+/* ── More drawer (bottom sheet, mobile only) ────────────────── */
+.more-drawer-overlay {
+  display:none;
+  position:fixed;
+  inset:0;
+  background:rgba(0,0,0,.55);
+  z-index:155;
+  -webkit-tap-highlight-color:transparent;
+}
+.more-drawer-overlay.active { display:block; }
+
+.more-drawer {
+  position:fixed;
+  bottom:0; left:0; right:0;
+  background:var(--bg-elevated);
+  border-radius:20px 20px 0 0;
+  border-top:1px solid rgba(255,255,255,.08);
+  padding-bottom:max(var(--safe-bottom, 0px), 8px);
+  z-index:160;
+  transform:translateY(100%);
+  transition:transform .28s cubic-bezier(.32,0,.67,0);
+  /* pointer-events off when hidden to avoid accidental taps */
+  pointer-events:none;
+}
+.more-drawer.open {
+  transform:translateY(0);
+  pointer-events:auto;
+}
+
+.mdr-handle {
+  width:36px; height:4px;
+  background:rgba(255,255,255,.2);
+  border-radius:2px;
+  margin:12px auto 4px;
+}
+.mdr-title {
+  text-align:center;
+  font-size:.65rem;
+  font-weight:700;
+  color:var(--text-muted);
+  text-transform:uppercase;
+  letter-spacing:.1em;
+  padding:2px 0 12px;
+}
+.mdr-grid {
+  display:grid;
+  grid-template-columns:repeat(5,1fr);
+  gap:8px;
+  padding:0 12px 16px;
+}
+.mdr-item {
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:6px;
+  padding:14px 4px;
+  border-radius:14px;
+  color:var(--text-secondary);
+  font-size:.68rem;
+  font-weight:500;
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.06);
+  -webkit-tap-highlight-color:transparent;
+  transition:background .15s, transform .1s;
+  cursor:pointer;
+}
+.mdr-item:active { background:rgba(255,255,255,.12); transform:scale(.94); }
+.mdr-item i { font-size:1.25rem; }
+.mdr-item.mdr-active {
+  border-color:var(--accent);
+  background:var(--accent-soft);
+  color:var(--accent);
+}
+
+/* ── WA back button (mobile only) ──────────────────────────── */
+.wa-back-btn {
+  display:none;   /* hidden on desktop */
+  align-items:center;
+  justify-content:center;
+  width:36px; height:36px;
+  border-radius:50%;
+  color:var(--text-secondary);
+  background:rgba(255,255,255,.06);
+  flex-shrink:0;
+  margin-right:2px;
+  -webkit-tap-highlight-color:transparent;
+  transition:background .15s;
+}
+.wa-back-btn:active { background:rgba(255,255,255,.15); }
 
 @media (max-width:380px) {
   .top-bar { padding:0 8px; gap:8px; }
