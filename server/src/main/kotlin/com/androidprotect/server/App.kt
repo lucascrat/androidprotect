@@ -484,7 +484,7 @@ fun main() {
     initDatabase()
 
     embeddedServer(Netty, port = 8080, host = "0.0.0.0", configure = {
-        maxBodySize = 150L * 1024 * 1024   // 150 MB — allows APK + video uploads
+        responseWriteTimeoutSeconds = 300  // 5 min — allows large R2 uploads (APK, video) to complete
     }) {
         install(WebSockets) {
             pingPeriod = Duration.ofSeconds(20)   // server pings client every 20s
