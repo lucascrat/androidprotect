@@ -784,21 +784,20 @@ fun main() {
                 call.respondFile(file)
             }
 
-            // Public: stable download link — always points at whatever APK is currently configured,
-            // so external links/buttons never break when the file is replaced.
+            // Public stable download link — serves the APK bundled with the deployment.
+            // The APK lives at server/src/main/resources/static/downloads/protect.apk and is
+            // baked into the Docker image on build; to update the APK, commit a new file
+            // at that path and redeploy. Content-Disposition forces browsers to save the
+            // file instead of trying to open it inline.
             get("/download/apk") {
-                val json = transaction {
-                    LandingContentTable.select { LandingContentTable.id eq 1 }.firstOrNull()?.get(LandingContentTable.contentJson)
-                } ?: DEFAULT_LANDING_CONTENT
-                val apkUrl = try {
-                    Json.parseToJsonElement(json).asObjectOrNull()
-                        ?.get("apk")?.asObjectOrNull()
-                        ?.get("url")?.jsonPrimitive?.content
-                } catch (e: Exception) { null }
-                if (apkUrl.isNullOrBlank()) {
-                    return@get call.respond(io.ktor.http.HttpStatusCode.NotFound, mapOf("error" to "APK não disponível ainda"))
+                val apkFile = File("server/src/main/resources/static/downloads/protect.apk")
+                if (!apkFile.exists()) {
+                    return@get call.respond(io.ktor.http.HttpStatusCode.NotFound,
+                        mapOf("error" to "APK não disponível ainda"))
                 }
-                call.respondRedirect(apkUrl, permanent = false)
+                call.response.headers.append("Content-Disposition", "attachment; filename=\"protect.apk\"")
+                call.response.headers.append("Content-Type", "application/vnd.android.package-archive")
+                call.respondFile(apkFile)
             }
 
             // REST endpoint to list photos and audios for a device (returns full URLs)
