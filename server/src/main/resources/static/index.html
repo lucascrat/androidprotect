@@ -666,7 +666,7 @@
                         <h3><i class="fa-solid fa-address-book neon-text-blue"></i> Contatos</h3>
                         <div style="display:flex;align-items:center;gap:8px;">
                             <input class="contacts-search" id="contacts-search" type="text" placeholder="Buscar contato…" oninput="contactsFilter(this.value)">
-                            <button class="btn btn-sm btn-primary" onclick="fetchContacts()">
+                            <button class="btn btn-sm btn-primary" onclick="syncContacts()">
                                 <i class="fa-solid fa-rotate-right"></i> Sync
                             </button>
                         </div>
@@ -684,7 +684,7 @@
                 <div class="grid-card calllogs-card" data-tab="calllogs">
                     <div class="card-header">
                         <h3><i class="fa-solid fa-phone-volume neon-text-green"></i> Registro de Ligações</h3>
-                        <button class="btn btn-sm btn-primary" onclick="fetchCallLogs()">
+                        <button class="btn btn-sm btn-primary" onclick="syncCallLogs()">
                             <i class="fa-solid fa-rotate-right"></i> Sync
                         </button>
                     </div>
