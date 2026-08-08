@@ -150,14 +150,10 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (currentDeviceId) fetchTrailHistory(currentDeviceId);
     }, 3600000);
     window.addEventListener('resize', () => {
-        if (window.innerWidth > 767) {
-            document.querySelectorAll('#dashboard-grid [data-tab]').forEach(c => {
-                c.classList.remove('tab-visible');
-                c.style.display = '';
-            });
-        } else {
-            switchTab(activeTab);
-        }
+        // Re-apply the active tab so visibility rules stay consistent across
+        // viewport changes (mobile ↔ desktop). The CSS handles the actual
+        // show/hide based on the tab-visible class + viewport media query.
+        switchTab(activeTab);
     });
 });
 
@@ -177,26 +173,13 @@ function updateSidebarActive(tab, platform) {
 function sidebarNav(tab, platform) {
     updateSidebarActive(tab, platform);
 
-    if (window.innerWidth <= 767) {
-        // Mobile: switch tab + optionally switch messaging platform
-        switchTab(tab);
-        if (platform) waSwitchPlatform(platform);
-    } else {
-        // Desktop: scroll to the first card with that data-tab
-        const selector = platform
-            ? '#dashboard-grid .messages-card'
-            : `#dashboard-grid [data-tab="${tab}"]`;
-        const target = document.querySelector(selector);
-        if (target) {
-            // Small delay lets waSwitchPlatform render before scroll
-            if (platform) waSwitchPlatform(platform);
-            setTimeout(() => target.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
-        } else if (platform) {
-            waSwitchPlatform(platform);
-        }
-        // Close sidebar on mobile (no-op on desktop)
-        closeSidebar();
-    }
+    // Switch to single-panel view of that tab (same UX on mobile + desktop —
+    // the sidebar is a navigator, not a scroll shortcut).
+    switchTab(tab);
+    if (platform) waSwitchPlatform(platform);
+
+    // Close sidebar on mobile (no-op on desktop)
+    closeSidebar();
 }
 
 // Toggle the devices collapsible panel
@@ -211,13 +194,12 @@ function toggleSidebarDevices() {
 const MORE_TABS = new Set(['more', 'contacts', 'calllogs', 'keylog']);
 
 function switchTab(tab) {
-    if (window.innerWidth > 767) return; // desktop: grid shows all — only sidebar nav used
     activeTab = tab;
 
     // Close more drawer if open
     closeMoreDrawer();
 
-    // Update bottom nav buttons
+    // Update bottom nav buttons (mobile only, but harmless on desktop)
     // Any tab inside MORE_TABS activates the "Mais" button
     const isMoreGroup = MORE_TABS.has(tab);
     document.querySelectorAll('.mbn-tab').forEach(btn => {
@@ -226,7 +208,10 @@ function switchTab(tab) {
         btn.classList.toggle('active', directMatch || moreMatch);
     });
 
-    // Show/hide cards
+    // Show/hide cards. On mobile this is handled by CSS media query
+    // (.grid-card default display:none, .tab-visible shows one card).
+    // On desktop the same class triggers our :has(.tab-visible) rule
+    // in style.css to collapse the grid to a single-panel view.
     document.querySelectorAll('#dashboard-grid [data-tab]').forEach(card => {
         card.classList.toggle('tab-visible', card.dataset.tab === tab);
     });

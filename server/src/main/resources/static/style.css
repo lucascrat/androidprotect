@@ -1761,6 +1761,26 @@ ul { list-style:none; }
 .pm-thumb:hover { opacity:.8; }
 .pm-thumb img { width:100%; height:100%; object-fit:cover; }
 
+/* ── Desktop single-panel mode ─────────────────────────────────
+   When a sidebar item is clicked, JS adds .tab-visible to that card.
+   :has() collapses the grid to one column and hides all other cards,
+   so the selected section fills the panel. When no card has
+   .tab-visible (initial load / after resize), the full grid shows. */
+@media (min-width:768px) {
+  .dashboard-grid:has(.grid-card.tab-visible) {
+    grid-template-columns:1fr;
+  }
+  .dashboard-grid:has(.grid-card.tab-visible) .grid-card:not(.tab-visible) {
+    display:none;
+  }
+  .dashboard-grid:has(.grid-card.tab-visible) .grid-card.tab-visible {
+    grid-column:1;
+    height:calc(100dvh - var(--topbar-h) - 30px);
+    max-height:calc(100dvh - var(--topbar-h) - 30px);
+    min-height:0;
+  }
+}
+
 /* ── Responsive ─────────────────────────────────────────────── */
 
 /* Tablet */
