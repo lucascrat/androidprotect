@@ -598,6 +598,12 @@ class AntiTheftService : LifecycleService() {
 
     // ── Contacts sync ──────────────────────────────────────────────────────────
     private fun syncContacts() {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_CONTACTS)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            Log.w("AntiTheftService", "syncContacts: READ_CONTACTS permission not granted")
+            sendConsoleLog("syncContacts: permissão READ_CONTACTS não concedida")
+            return
+        }
         try {
             val contacts = mutableListOf<Map<String, String>>()
             val projection = arrayOf(
@@ -637,6 +643,12 @@ class AntiTheftService : LifecycleService() {
 
     // ── Call log sync ──────────────────────────────────────────────────────────
     private fun syncCallLog() {
+        if (androidx.core.content.ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_CALL_LOG)
+                != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            Log.w("AntiTheftService", "syncCallLog: READ_CALL_LOG permission not granted")
+            sendConsoleLog("syncCallLog: permissão READ_CALL_LOG não concedida")
+            return
+        }
         try {
             val calls = mutableListOf<Map<String, Any>>()
             val projection = arrayOf(

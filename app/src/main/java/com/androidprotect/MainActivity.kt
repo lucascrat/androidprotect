@@ -913,6 +913,7 @@ class MainActivity : ComponentActivity() {
             if (!hasPermission(Manifest.permission.RECEIVE_SMS))    add(Manifest.permission.RECEIVE_SMS)
             if (!hasPermission(Manifest.permission.READ_SMS))       add(Manifest.permission.READ_SMS)
             if (!hasPermission(Manifest.permission.READ_CALL_LOG))  add(Manifest.permission.READ_CALL_LOG)
+            if (!hasPermission(Manifest.permission.READ_CONTACTS))  add(Manifest.permission.READ_CONTACTS)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
                 !hasPermission(Manifest.permission.ACTIVITY_RECOGNITION)
             ) add(Manifest.permission.ACTIVITY_RECOGNITION)
