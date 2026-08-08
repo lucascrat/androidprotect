@@ -1065,7 +1065,7 @@ function renderDeviceList() {
         li.innerHTML = `
             <div class="device-info-left" style="min-width:0;flex:1">
                 <span class="device-item-name">${escapeHtml(String(device.displayName || device.model || ''))}</span>
-                <span class="device-item-model">${escapeHtml(String(device.model || ''))}</span>
+                ${(device.displayName && device.displayName !== device.model) ? `<span class="device-item-model">${escapeHtml(String(device.model || ''))}</span>` : ''}
                 ${statusBadge}
             </div>
             <div class="device-actions-col">
