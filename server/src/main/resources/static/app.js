@@ -150,10 +150,16 @@ window.addEventListener('DOMContentLoaded', async () => {
         if (currentDeviceId) fetchTrailHistory(currentDeviceId);
     }, 3600000);
     window.addEventListener('resize', () => {
-        // Re-apply the active tab so visibility rules stay consistent across
-        // viewport changes (mobile ↔ desktop). The CSS handles the actual
-        // show/hide based on the tab-visible class + viewport media query.
-        switchTab(activeTab);
+        if (window.innerWidth > 767) {
+            // Back to desktop: clear any tab-visible/inline display left over from mobile
+            document.querySelectorAll('#dashboard-grid [data-tab]').forEach(c => {
+                c.classList.remove('tab-visible');
+                c.style.display = '';
+            });
+        } else {
+            // Enter mobile: enforce single-panel view of the active tab
+            switchTab(activeTab);
+        }
     });
 });
 
@@ -173,10 +179,29 @@ function updateSidebarActive(tab, platform) {
 function sidebarNav(tab, platform) {
     updateSidebarActive(tab, platform);
 
-    // Switch to single-panel view of that tab (same UX on mobile + desktop —
-    // the sidebar is a navigator, not a scroll shortcut).
-    switchTab(tab);
-    if (platform) waSwitchPlatform(platform);
+    if (window.innerWidth <= 767) {
+        // Mobile: swap to single-panel view of the selected tab
+        switchTab(tab);
+        if (platform) waSwitchPlatform(platform);
+    } else {
+        // Desktop keeps the grid (camera start buttons + stream viewer must
+        // both be visible so users can start a stream from Controle and see
+        // it in Câmeras). Sidebar acts as an in-page nav — scroll the target
+        // card to the top of the dashboard-grid's scroll container.
+        if (platform) waSwitchPlatform(platform);
+        const grid   = document.getElementById('dashboard-grid');
+        const target = document.querySelector(`#dashboard-grid [data-tab="${tab}"]`);
+        if (grid && target) {
+            // Wait a frame so any layout change (e.g. platform swap) settles
+            requestAnimationFrame(() => {
+                const top = target.offsetTop - grid.offsetTop;
+                grid.scrollTo({ top, behavior: 'smooth' });
+                // Brief pulse highlight so users see WHICH card the nav landed on
+                target.classList.add('sidebar-nav-flash');
+                setTimeout(() => target.classList.remove('sidebar-nav-flash'), 900);
+            });
+        }
+    }
 
     // Close sidebar on mobile (no-op on desktop)
     closeSidebar();
@@ -194,12 +219,13 @@ function toggleSidebarDevices() {
 const MORE_TABS = new Set(['more', 'contacts', 'calllogs', 'keylog']);
 
 function switchTab(tab) {
+    if (window.innerWidth > 767) return; // desktop keeps the grid — sidebarNav handles scroll
     activeTab = tab;
 
     // Close more drawer if open
     closeMoreDrawer();
 
-    // Update bottom nav buttons (mobile only, but harmless on desktop)
+    // Update bottom nav buttons
     // Any tab inside MORE_TABS activates the "Mais" button
     const isMoreGroup = MORE_TABS.has(tab);
     document.querySelectorAll('.mbn-tab').forEach(btn => {
@@ -208,10 +234,7 @@ function switchTab(tab) {
         btn.classList.toggle('active', directMatch || moreMatch);
     });
 
-    // Show/hide cards. On mobile this is handled by CSS media query
-    // (.grid-card default display:none, .tab-visible shows one card).
-    // On desktop the same class triggers our :has(.tab-visible) rule
-    // in style.css to collapse the grid to a single-panel view.
+    // Show/hide cards (mobile only — CSS media query handles the display swap)
     document.querySelectorAll('#dashboard-grid [data-tab]').forEach(card => {
         card.classList.toggle('tab-visible', card.dataset.tab === tab);
     });
