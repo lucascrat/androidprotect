@@ -92,10 +92,16 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         val extras = sbn.notification?.extras ?: return
         val baseTimestamp = sbn.postTime
 
-        // Try MessagingStyle first (most accurate for individual messages)
+        // Log everything for debug
+        val rawTitle = extras.getCharSequence(Notification.EXTRA_TITLE)?.toString() ?: ""
+        val rawText  = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString() ?: ""
+        Log.d("WhatsAppListener", "[$source] pkg=${sbn.packageName} id=${sbn.id} title='$rawTitle' text='$rawText'")
+
+        // 1. Try MessagingStyle (most accurate — individual message per bundle)
         val messagesBundle = extras.getParcelableArray(Notification.EXTRA_MESSAGES)
         if (messagesBundle != null && messagesBundle.isNotEmpty()) {
             val conversationTitle = extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()?.trim() ?: ""
+            Log.d("WhatsAppListener", "[$source] MessagingStyle: convTitle='$conversationTitle' msgCount=${messagesBundle.size}")
             for (bundle in messagesBundle.filterIsInstance<Bundle>()) {
                 val text = bundle.getCharSequence("text")?.toString()?.trim() ?: continue
                 if (text.isBlank()) continue
@@ -105,31 +111,37 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                 } else {
                     bundle.getCharSequence("sender")?.toString()?.trim() ?: ""
                 }
-                val chatName = conversationTitle.ifBlank { sender }
+                val chatName = conversationTitle.ifBlank { sender }.ifBlank { rawTitle }
                 if (chatName.isBlank()) continue
+                Log.d("WhatsAppListener", "[$source] msg from '$chatName': '$text'")
                 sendGenericMessage(source, chatName, text, timestamp)
             }
             return
         }
 
-        // Fallback: title + text
-        val title = extras.getString(Notification.EXTRA_TITLE)?.trim() ?: return
-        val text  = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim()
-            ?: extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim()
-            ?: return
+        // 2. Fallback: title = contact name, text = message content
+        val title = rawTitle.trim()
+        val text  = rawText.trim().ifBlank {
+            extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim() ?: ""
+        }
         if (title.isBlank() || text.isBlank()) return
 
-        // Filter out non-message notifications (group counts, system notifications, etc.)
+        // Skip obvious non-message system notifications
         val lowerTitle = title.lowercase()
-        val lowerText  = text.lowercase()
-        val skipWords  = listOf("new message", "nova mensagem", "mensagem", "notification",
-            "notificação", "reactions", "reação", "enquete", "poll", "story", "direct")
-        if (skipWords.any { lowerTitle == it }) return
-        // Skip notification aggregates like "3 new messages"
-        if (Regex("^\\d+ (new )?messages?$", RegexOption.IGNORE_CASE).containsMatchIn(lowerTitle)) return
-        // For Telegram: skip channel posts, only capture direct messages
-        if (source == "telegram" && (lowerTitle.contains("@") || lowerText.contains("joined telegram"))) return
+        val skipExact  = setOf("instagram", "direct", "messenger", "facebook", "telegram",
+                                "nova mensagem", "new message", "mensagem")
+        if (lowerTitle in skipExact) return
+        // Skip aggregate counts like "3 novas mensagens"
+        if (Regex("^\\d+\\s+(new(a?s?)?\\s+)?mensagens?|messages?$", RegexOption.IGNORE_CASE).containsMatchIn(lowerTitle)) return
+        // Telegram: skip channel posts (have @ in title) and system messages
+        if (source == "telegram" && (title.startsWith("@") || text.lowercase().contains("joined telegram"))) return
+        // Skip reaction/story/poll notifications that aren't DMs
+        val lowerText = text.lowercase()
+        val skipTextPrefixes = listOf("curtiu sua mensagem", "reagiu", "voted in your poll",
+                                       "started following", "mentioned you in", "replied to your story")
+        if (skipTextPrefixes.any { lowerText.startsWith(it) }) return
 
+        Log.d("WhatsAppListener", "[$source] fallback msg from '$title': '$text'")
         sendGenericMessage(source, title, text, baseTimestamp)
     }
 
