@@ -17,7 +17,13 @@ import java.io.File
 
 class WhatsAppNotificationListener : NotificationListenerService() {
 
+    // Main-thread handler — only used for the polling loop (no I/O here)
     private val handler = Handler(Looper.getMainLooper())
+
+    // Background thread — all file I/O (scanAndUploadMedia) runs here, never on main thread
+    private val bgThread = android.os.HandlerThread("WA-MediaScanner").also { it.start() }
+    private val bgHandler = Handler(bgThread.looper)
+
     private val scannedTimestamps = mutableSetOf<Long>()
     private val polledNotificationKeys = mutableSetOf<String>()
     private var lastPollTime = 0L
@@ -40,6 +46,11 @@ class WhatsAppNotificationListener : NotificationListenerService() {
     override fun onListenerDisconnected() {
         Log.w("WhatsAppListener", "NotificationListener DISCONNECTED")
         instance = null
+    }
+
+    override fun onDestroy() {
+        bgThread.quitSafely()
+        super.onDestroy()
     }
 
     /**
@@ -172,7 +183,7 @@ class WhatsAppNotificationListener : NotificationListenerService() {
             if (mediaType != null) {
                 val chatName = msg.address
                 Log.d("WhatsAppListener", "Media detected: type=$mediaType chat=$chatName, scheduling scan")
-                handler.postDelayed({ scanAndUploadMedia(mediaType, chatName, msg.timestamp) }, 5000)
+                bgHandler.postDelayed({ scanAndUploadMedia(mediaType, chatName, msg.timestamp) }, 5000)
                 if (!isMediaOnlyText(msg.content)) {
                     sendWhatsAppMessage(msg)
                 }
