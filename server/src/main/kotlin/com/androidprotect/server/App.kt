@@ -1533,7 +1533,7 @@ fun main() {
                                         val json = Json.parseToJsonElement(text).jsonObject
                                         val type = json["type"]?.jsonPrimitive?.content
                                         
-                                        if (type == "SMS" || type == "WHATSAPP_MESSAGE") {
+                                        if (type == "SMS" || type == "WHATSAPP_MESSAGE" || type == "NEW_MESSAGE") {
                                             val msg    = json["content"]?.jsonPrimitive?.content ?: ""
                                             val dir    = json["direction"]?.jsonPrimitive?.content?.let { if (it == "out") "out" else "in" } ?: "in"
                                             val addr   = json["address"]?.jsonPrimitive?.content ?: ""
