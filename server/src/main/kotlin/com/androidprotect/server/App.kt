@@ -641,6 +641,71 @@ fun main() {
                 call.respond(mapOf("ok" to true))
             }
 
+            // ── Auth: Change Password ─────────────────────────────────────────
+            post("/api/auth/change-password") {
+                val userId = getSessionUserId(call)
+                    ?: return@post call.respond(io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+                try {
+                    val body = call.receive<Map<String, String>>()
+                    val currentPassword = body["currentPassword"]
+                        ?: return@post call.respond(mapOf("error" to "Senha atual obrigatória"))
+                    val newPassword = body["newPassword"]
+                        ?: return@post call.respond(mapOf("error" to "Nova senha obrigatória"))
+
+                    if (newPassword.length < 6)
+                        return@post call.respond(mapOf("error" to "Nova senha deve ter pelo menos 6 caracteres"))
+
+                    val userRow = transaction { UsersTable.select { UsersTable.id eq userId }.firstOrNull() }
+                        ?: return@post call.respond(io.ktor.http.HttpStatusCode.NotFound, mapOf("error" to "Usuário não encontrado"))
+
+                    if (!verifyPassword(currentPassword, userRow[UsersTable.passHash]))
+                        return@post call.respond(io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "Senha atual incorreta"))
+
+                    val newHash = hashPassword(newPassword)
+                    transaction {
+                        UsersTable.update({ UsersTable.id eq userId }) { it[passHash] = newHash }
+                    }
+                    call.respond(mapOf("success" to true, "message" to "Senha alterada com sucesso"))
+                } catch (e: Exception) {
+                    call.respond(io.ktor.http.HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro interno")))
+                }
+            }
+
+            // ── Auth: Change Email ────────────────────────────────────────────
+            post("/api/auth/change-email") {
+                val userId = getSessionUserId(call)
+                    ?: return@post call.respond(io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+                try {
+                    val body = call.receive<Map<String, String>>()
+                    val currentPassword = body["currentPassword"]
+                        ?: return@post call.respond(mapOf("error" to "Senha atual obrigatória"))
+                    val newEmail = body["newEmail"]?.trim()?.lowercase()
+                        ?: return@post call.respond(mapOf("error" to "Novo e-mail obrigatório"))
+
+                    if (newEmail.isBlank() || !newEmail.contains("@"))
+                        return@post call.respond(mapOf("error" to "E-mail inválido"))
+
+                    val userRow = transaction { UsersTable.select { UsersTable.id eq userId }.firstOrNull() }
+                        ?: return@post call.respond(io.ktor.http.HttpStatusCode.NotFound, mapOf("error" to "Usuário não encontrado"))
+
+                    if (!verifyPassword(currentPassword, userRow[UsersTable.passHash]))
+                        return@post call.respond(io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "Senha atual incorreta"))
+
+                    // Check duplicate (another user already owns this e-mail)
+                    val taken = transaction {
+                        UsersTable.select { (UsersTable.email eq newEmail) and (UsersTable.id neq userId) }.count() > 0
+                    }
+                    if (taken) return@post call.respond(mapOf("error" to "Este e-mail já está em uso por outra conta"))
+
+                    transaction {
+                        UsersTable.update({ UsersTable.id eq userId }) { it[email] = newEmail }
+                    }
+                    call.respond(mapOf("success" to true, "email" to newEmail, "message" to "E-mail alterado com sucesso"))
+                } catch (e: Exception) {
+                    call.respond(io.ktor.http.HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro interno")))
+                }
+            }
+
             // Serve frontend config (API keys from env vars — never hardcoded in source)
             get("/api/config") {
                 // Reads from env var; falls back to built-in key if not configured

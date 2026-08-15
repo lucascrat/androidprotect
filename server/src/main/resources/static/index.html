@@ -164,6 +164,9 @@
                             <i class="fa-solid fa-link"></i>
                         </button>
                         <span class="user-name" id="user-name-display"></span>
+                        <button class="user-link-btn" onclick="openAccountSettings()" title="Configurações da conta">
+                            <i class="fa-solid fa-gear"></i>
+                        </button>
                         <button class="logout-btn" onclick="doLogout()" title="Sair">
                             <i class="fa-solid fa-right-from-bracket"></i>
                         </button>
@@ -797,6 +800,70 @@
         <div class="pm-thumbs" id="pm-thumbs"></div>
     </div>
     
-    <script src="app.js?v=33"></script>
+    <!-- Account Settings Modal -->
+    <div id="account-settings-overlay" class="accs-overlay" onclick="closeAccountSettings()" style="display:none"></div>
+    <div id="account-settings-modal" class="accs-modal" style="display:none">
+        <div class="accs-header">
+            <span><i class="fa-solid fa-gear"></i> Configurações da Conta</span>
+            <button class="accs-close" onclick="closeAccountSettings()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
+        <div class="accs-body">
+
+            <!-- Change Email -->
+            <div class="accs-section">
+                <div class="accs-section-title"><i class="fa-solid fa-envelope"></i> Alterar E-mail</div>
+                <div class="accs-field">
+                    <label>Novo e-mail</label>
+                    <input type="email" id="accs-new-email" placeholder="novo@email.com" autocomplete="off">
+                </div>
+                <div class="accs-field">
+                    <label>Senha atual (confirmação)</label>
+                    <div class="accs-pw-wrap">
+                        <input type="password" id="accs-email-pass" placeholder="••••••••" autocomplete="current-password">
+                        <button type="button" class="accs-eye" onclick="accsToggleEye('accs-email-pass',this)"><i class="fa-solid fa-eye"></i></button>
+                    </div>
+                </div>
+                <div class="accs-feedback" id="accs-email-feedback"></div>
+                <button class="accs-btn" onclick="accsSaveEmail()">
+                    <i class="fa-solid fa-floppy-disk"></i> Salvar e-mail
+                </button>
+            </div>
+
+            <div class="accs-divider"></div>
+
+            <!-- Change Password -->
+            <div class="accs-section">
+                <div class="accs-section-title"><i class="fa-solid fa-lock"></i> Alterar Senha</div>
+                <div class="accs-field">
+                    <label>Senha atual</label>
+                    <div class="accs-pw-wrap">
+                        <input type="password" id="accs-cur-pass" placeholder="••••••••" autocomplete="current-password">
+                        <button type="button" class="accs-eye" onclick="accsToggleEye('accs-cur-pass',this)"><i class="fa-solid fa-eye"></i></button>
+                    </div>
+                </div>
+                <div class="accs-field">
+                    <label>Nova senha</label>
+                    <div class="accs-pw-wrap">
+                        <input type="password" id="accs-new-pass" placeholder="Mín. 6 caracteres" autocomplete="new-password">
+                        <button type="button" class="accs-eye" onclick="accsToggleEye('accs-new-pass',this)"><i class="fa-solid fa-eye"></i></button>
+                    </div>
+                </div>
+                <div class="accs-field">
+                    <label>Confirmar nova senha</label>
+                    <div class="accs-pw-wrap">
+                        <input type="password" id="accs-confirm-pass" placeholder="Repita a nova senha" autocomplete="new-password">
+                        <button type="button" class="accs-eye" onclick="accsToggleEye('accs-confirm-pass',this)"><i class="fa-solid fa-eye"></i></button>
+                    </div>
+                </div>
+                <div class="accs-feedback" id="accs-pass-feedback"></div>
+                <button class="accs-btn" onclick="accsSavePassword()">
+                    <i class="fa-solid fa-floppy-disk"></i> Salvar senha
+                </button>
+            </div>
+
+        </div>
+    </div>
+
+    <script src="app.js?v=34"></script>
 </body>
 </html>

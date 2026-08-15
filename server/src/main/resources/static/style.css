@@ -2131,3 +2131,153 @@ audio::-webkit-media-controls-panel { background:var(--bg-input); }
 @media (max-width: 767px) {
     .contacts-search { width: 130px; }
 }
+
+/* ── Account Settings Modal ─────────────────────────────────── */
+.accs-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.6);
+  backdrop-filter: blur(4px);
+  z-index: 800;
+  animation: accsFadeIn .2s ease;
+}
+.accs-modal {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 801;
+  width: min(480px, calc(100vw - 24px));
+  max-height: calc(100dvh - 48px);
+  background: var(--bg-card-solid);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: accsSlideIn .22s cubic-bezier(.4,0,.2,1);
+}
+@keyframes accsFadeIn  { from { opacity:0 } to { opacity:1 } }
+@keyframes accsSlideIn { from { opacity:0; transform:translate(-50%,-46%) } to { opacity:1; transform:translate(-50%,-50%) } }
+
+.accs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 20px 14px;
+  border-bottom: 1px solid var(--border);
+  font-size: .95rem;
+  font-weight: 700;
+  color: var(--text);
+  flex-shrink: 0;
+}
+.accs-header i { color: var(--accent); margin-right: 8px; }
+.accs-close {
+  width: 32px; height: 32px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: var(--radius-xs);
+  background: rgba(255,255,255,.05);
+  color: var(--text-secondary);
+  transition: background var(--transition), color var(--transition);
+}
+.accs-close:hover { background: rgba(239,68,68,.15); color: var(--red); }
+
+.accs-body {
+  overflow-y: auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.accs-section { display: flex; flex-direction: column; gap: 12px; }
+.accs-section-title {
+  font-size: .82rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 2px;
+}
+.accs-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 20px 0;
+}
+
+.accs-field { display: flex; flex-direction: column; gap: 5px; }
+.accs-field label {
+  font-size: .78rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.accs-field input {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 11px 14px;
+  font-size: .9rem;
+  color: var(--text);
+  outline: none;
+  transition: border-color var(--transition), box-shadow var(--transition);
+}
+.accs-field input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(0,180,255,.1);
+}
+
+.accs-pw-wrap { position: relative; }
+.accs-pw-wrap input { padding-right: 44px; }
+.accs-eye {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-muted);
+  font-size: .85rem;
+  padding: 4px;
+  transition: color var(--transition);
+}
+.accs-eye:hover { color: var(--accent); }
+
+.accs-feedback {
+  font-size: .8rem;
+  min-height: 18px;
+  font-weight: 600;
+  border-radius: var(--radius-xs);
+  padding: 0;
+  transition: all .2s;
+}
+.accs-feedback.error  { color: var(--red);   background: var(--red-soft);   padding: 8px 12px; }
+.accs-feedback.success{ color: var(--green); background: var(--green-soft); padding: 8px 12px; }
+
+.accs-btn {
+  width: 100%;
+  background: linear-gradient(135deg, var(--accent), #0055ff);
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: 12px 16px;
+  color: #fff;
+  font-size: .9rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: opacity var(--transition), transform .15s;
+  box-shadow: 0 4px 16px rgba(0,180,255,.25);
+  margin-top: 4px;
+}
+.accs-btn:hover  { opacity: .88; transform: translateY(-1px); }
+.accs-btn:active { transform: none; }
+.accs-btn:disabled { opacity: .45; cursor: not-allowed; transform: none; }
+
+@media (max-width: 480px) {
+  .accs-modal { border-radius: var(--radius) var(--radius) 0 0; top: auto; bottom: 0; left: 0; transform: none; width: 100%; animation: accsSlideUp .22s cubic-bezier(.4,0,.2,1); }
+  @keyframes accsSlideUp { from { opacity:0; transform:translateY(30px) } to { opacity:1; transform:none } }
+}

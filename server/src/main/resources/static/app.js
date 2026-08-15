@@ -63,6 +63,116 @@ function authHeaders() {
     return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getToken() };
 }
 
+// ─── Account Settings Modal ───────────────────────────────────────────────────
+function openAccountSettings() {
+    document.getElementById('account-settings-overlay').style.display = 'block';
+    document.getElementById('account-settings-modal').style.display   = 'flex';
+    // Clear all fields and feedback when opening
+    ['accs-new-email','accs-email-pass','accs-cur-pass','accs-new-pass','accs-confirm-pass']
+        .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+    accsSetFeedback('accs-email-feedback', '', '');
+    accsSetFeedback('accs-pass-feedback',  '', '');
+}
+
+function closeAccountSettings() {
+    document.getElementById('account-settings-overlay').style.display = 'none';
+    document.getElementById('account-settings-modal').style.display   = 'none';
+}
+
+function accsSetFeedback(id, msg, type) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.textContent = msg;
+    el.className = 'accs-feedback' + (type ? ' ' + type : '');
+}
+
+function accsToggleEye(inputId, btn) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    btn.querySelector('i').className = show ? 'fa-solid fa-eye-slash' : 'fa-solid fa-eye';
+}
+
+async function accsSaveEmail() {
+    const newEmail  = (document.getElementById('accs-new-email')?.value  || '').trim();
+    const password  = (document.getElementById('accs-email-pass')?.value || '').trim();
+    const fbId      = 'accs-email-feedback';
+
+    if (!newEmail)  return accsSetFeedback(fbId, 'Informe o novo e-mail.', 'error');
+    if (!password)  return accsSetFeedback(fbId, 'Informe sua senha atual para confirmar.', 'error');
+    if (!newEmail.includes('@')) return accsSetFeedback(fbId, 'E-mail inválido.', 'error');
+
+    const btn = document.querySelector('#account-settings-modal .accs-section:first-of-type .accs-btn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando…'; }
+
+    try {
+        const res  = await fetch('/api/auth/change-email', {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ newEmail, currentPassword: password })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            localStorage.setItem('ap_email', data.email);
+            accsSetFeedback(fbId, '✓ E-mail alterado com sucesso!', 'success');
+            document.getElementById('accs-new-email').value   = '';
+            document.getElementById('accs-email-pass').value  = '';
+            showToast('E-mail atualizado!', 'info');
+        } else {
+            accsSetFeedback(fbId, data.error || 'Erro ao alterar e-mail.', 'error');
+        }
+    } catch {
+        accsSetFeedback(fbId, 'Erro de conexão. Tente novamente.', 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Salvar e-mail'; }
+    }
+}
+
+async function accsSavePassword() {
+    const curPass  = (document.getElementById('accs-cur-pass')?.value     || '');
+    const newPass  = (document.getElementById('accs-new-pass')?.value     || '');
+    const confPass = (document.getElementById('accs-confirm-pass')?.value || '');
+    const fbId     = 'accs-pass-feedback';
+
+    if (!curPass)  return accsSetFeedback(fbId, 'Informe a senha atual.', 'error');
+    if (!newPass)  return accsSetFeedback(fbId, 'Informe a nova senha.', 'error');
+    if (newPass.length < 6) return accsSetFeedback(fbId, 'A nova senha deve ter pelo menos 6 caracteres.', 'error');
+    if (newPass !== confPass) return accsSetFeedback(fbId, 'A confirmação não coincide com a nova senha.', 'error');
+
+    const btn = document.querySelector('#account-settings-modal .accs-section:last-of-type .accs-btn');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Salvando…'; }
+
+    try {
+        const res  = await fetch('/api/auth/change-password', {
+            method: 'POST',
+            headers: authHeaders(),
+            body: JSON.stringify({ currentPassword: curPass, newPassword: newPass })
+        });
+        const data = await res.json();
+        if (res.ok && data.success) {
+            accsSetFeedback(fbId, '✓ Senha alterada com sucesso!', 'success');
+            ['accs-cur-pass','accs-new-pass','accs-confirm-pass'].forEach(id => {
+                const el = document.getElementById(id); if (el) el.value = '';
+            });
+            showToast('Senha atualizada com sucesso!', 'info');
+        } else {
+            accsSetFeedback(fbId, data.error || 'Erro ao alterar senha.', 'error');
+        }
+    } catch {
+        accsSetFeedback(fbId, 'Erro de conexão. Tente novamente.', 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> Salvar senha'; }
+    }
+}
+
+// Close modal on Escape key
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+        if (document.getElementById('account-settings-modal')?.style.display === 'flex') closeAccountSettings();
+    }
+});
+
 async function doLogout() {
     await fetch('/api/auth/logout', { method: 'POST', headers: authHeaders() }).catch(() => {});
     localStorage.removeItem('ap_token');
