@@ -1855,8 +1855,8 @@ ul { list-style:none; }
   .stream-controls { opacity:1; }
 
   /* ── Messages: single-pane navigation on mobile ── */
-  /* .wa-body is also .card-body, already flex:1 — no manual height needed */
-  .wa-body { height:auto; min-height:0; display:flex; flex-direction:column; }
+  /* overflow:hidden aqui para que o scroll aconteça dentro de .wa-convlist */
+  .wa-body { height:auto; min-height:0; display:flex; flex-direction:column; overflow:hidden; }
   .wa-platform-tabs { padding:6px 8px; gap:2px; flex-shrink:0; }
   .wa-platform-tab { padding:4px 8px; font-size:.58rem; min-width:46px; }
   .wa-platform-tab i { font-size:.8rem; }
@@ -1864,12 +1864,28 @@ ul { list-style:none; }
   /* wa-wrap fills remaining height and clips overflow */
   .wa-wrap { flex-direction:column; flex:1; min-height:0; overflow:hidden; }
 
-  /* Default: show conversation list only */
+  /* Default: show conversation list only.
+     min-height:0 é essencial — sem ele o flex child tenta ser tão alto
+     quanto o conteúdo e .wa-convlist nunca rola em mobile. */
   .wa-sidebar {
-    width:100%; max-height:none; flex:1;
+    width:100%; max-height:none; flex:1; min-height:0;
     border-right:none; border-bottom:none;
+    overflow:hidden; display:flex; flex-direction:column;
   }
-  .wa-chat-pane { display:none; flex:1; }
+  /* Scroll tátil na lista de conversas */
+  .wa-convlist {
+    overflow-y:scroll;
+    -webkit-overflow-scrolling:touch;
+    touch-action:pan-y;
+    min-height:0;
+  }
+  /* Scroll tátil dentro do chat aberto */
+  .wa-messages {
+    overflow-y:scroll;
+    -webkit-overflow-scrolling:touch;
+    touch-action:pan-y;
+  }
+  .wa-chat-pane { display:none; flex:1; min-height:0; }
 
   /* wa-in-chat: hide list, show chat */
   .wa-body.wa-in-chat .wa-sidebar   { display:none; }
