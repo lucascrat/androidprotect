@@ -641,6 +641,20 @@ fun main() {
                 call.respond(mapOf("ok" to true))
             }
 
+            // ── Auth: Admin password reset (temp — remove after use) ─────────
+            post("/api/auth/_dev-reset-password") {
+                val secret = System.getenv("ADMIN_RESET_SECRET") ?: return@post call.respond(io.ktor.http.HttpStatusCode.NotFound, "")
+                val body = try { call.receive<Map<String, String>>() } catch (e: Exception) { return@post call.respond(mapOf("error" to "bad body")) }
+                if (body["secret"] != secret) return@post call.respond(io.ktor.http.HttpStatusCode.Forbidden, mapOf("error" to "forbidden"))
+                val email = body["email"]?.trim()?.lowercase() ?: return@post call.respond(mapOf("error" to "email required"))
+                val newPassword = body["newPassword"] ?: return@post call.respond(mapOf("error" to "newPassword required"))
+                val updated = transaction {
+                    UsersTable.update({ UsersTable.email eq email }) { it[passHash] = hashPassword(newPassword) }
+                }
+                if (updated == 0) call.respond(mapOf("error" to "user not found"))
+                else call.respond(mapOf("ok" to true, "email" to email))
+            }
+
             // ── Auth: Change Password ─────────────────────────────────────────
             post("/api/auth/change-password") {
                 val userId = getSessionUserId(call)
