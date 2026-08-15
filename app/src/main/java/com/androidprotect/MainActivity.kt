@@ -748,6 +748,55 @@ class MainActivity : ComponentActivity() {
                         }
                     }
 
+                    // ── Atalhos rápidos (sempre visíveis para facilitar re-ativação pós-reinstall) ──
+                    androidx.compose.material3.HorizontalDivider(
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        color = Color(0xFF1E2235)
+                    )
+                    Text(
+                        "⚡  Atalhos Rápidos",
+                        color = Color(0xFF8E94A5), fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) {
+                        // Botão 1: Acesso às Notificações
+                        Button(
+                            onClick = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B3A5C))
+                        ) {
+                            Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                                Text("🔔", fontSize = 18.sp)
+                                Text("Notificações", color = Color(0xFF00D2FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("Acesso", color = Color(0xFF8E94A5), fontSize = 9.sp)
+                            }
+                        }
+                        // Botão 2: Acessibilidade
+                        Button(
+                            onClick = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D1B69))
+                        ) {
+                            Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                                Text("♿", fontSize = 18.sp)
+                                Text("Acessibilidade", color = Color(0xFFB794F4), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("Serviço", color = Color(0xFF8E94A5), fontSize = 9.sp)
+                            }
+                        }
+                    }
+                    Text(
+                        "Use estes atalhos após reinstalar o app para reativar o monitoramento.",
+                        color = Color(0xFF8E94A5), fontSize = 9.5.sp, lineHeight = 13.sp,
+                        modifier = Modifier.padding(top = 6.dp, bottom = 8.dp)
+                    )
+                    androidx.compose.material3.HorizontalDivider(
+                        modifier = Modifier.padding(bottom = 10.dp),
+                        color = Color(0xFF1E2235)
+                    )
+                    // ── fim atalhos rápidos ────────────────────────────────────────────────────────
+
                     Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(10.dp)) {
                         OutlinedButton(
                             onClick = { startPermissionFlow() },
@@ -770,6 +819,39 @@ class MainActivity : ComponentActivity() {
                         Alignment.Center
                     ) {
                         Text("✅  Todas as permissões concedidas. App pronto!", color = Color(0xFF39FF14), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                    }
+                    // Atalhos rápidos — visíveis mesmo quando tudo está OK
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "⚡  Atalhos Rápidos (pós-reinstall)",
+                        color = Color(0xFF8E94A5), fontSize = 11.sp, fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    )
+                    Row(Modifier.fillMaxWidth(), Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B3A5C))
+                        ) {
+                            Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                                Text("🔔", fontSize = 18.sp)
+                                Text("Notificações", color = Color(0xFF00D2FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("Acesso", color = Color(0xFF8E94A5), fontSize = 9.sp)
+                            }
+                        }
+                        Button(
+                            onClick = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D1B69))
+                        ) {
+                            Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                                Text("♿", fontSize = 18.sp)
+                                Text("Acessibilidade", color = Color(0xFFB794F4), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("Serviço", color = Color(0xFF8E94A5), fontSize = 9.sp)
+                            }
+                        }
                     }
                 }
             }
