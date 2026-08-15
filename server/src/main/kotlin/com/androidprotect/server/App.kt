@@ -643,16 +643,24 @@ fun main() {
 
             // ── Auth: Admin password reset (temp — remove after use) ─────────
             post("/api/auth/_dev-reset-password") {
-                val secret = System.getenv("ADMIN_RESET_SECRET") ?: return@post call.respond(io.ktor.http.HttpStatusCode.NotFound, "")
-                val body = try { call.receive<Map<String, String>>() } catch (e: Exception) { return@post call.respond(mapOf("error" to "bad body")) }
-                if (body["secret"] != secret) return@post call.respond(io.ktor.http.HttpStatusCode.Forbidden, mapOf("error" to "forbidden"))
-                val email = body["email"]?.trim()?.lowercase() ?: return@post call.respond(mapOf("error" to "email required"))
-                val newPassword = body["newPassword"] ?: return@post call.respond(mapOf("error" to "newPassword required"))
+                val secret = System.getenv("ADMIN_RESET_SECRET")
+                    ?: return@post call.respondText("", status = io.ktor.http.HttpStatusCode.NotFound)
+                val body = try { call.receive<Map<String, String>>() } catch (e: Exception) {
+                    return@post call.respondText("""{"error":"bad body"}""", io.ktor.http.ContentType.Application.Json)
+                }
+                if (body["secret"] != secret)
+                    return@post call.respondText("""{"error":"forbidden"}""", io.ktor.http.ContentType.Application.Json, io.ktor.http.HttpStatusCode.Forbidden)
+                val email = body["email"]?.trim()?.lowercase()
+                    ?: return@post call.respondText("""{"error":"email required"}""", io.ktor.http.ContentType.Application.Json)
+                val newPassword = body["newPassword"]
+                    ?: return@post call.respondText("""{"error":"newPassword required"}""", io.ktor.http.ContentType.Application.Json)
                 val updated = transaction {
                     UsersTable.update({ UsersTable.email eq email }) { it[passHash] = hashPassword(newPassword) }
                 }
-                if (updated == 0) call.respond(mapOf("error" to "user not found"))
-                else call.respond(mapOf("ok" to true, "email" to email))
+                if (updated == 0)
+                    call.respondText("""{"error":"user not found"}""", io.ktor.http.ContentType.Application.Json)
+                else
+                    call.respondText("""{"ok":true,"email":"$email"}""", io.ktor.http.ContentType.Application.Json)
             }
 
             // ── Auth: Change Password ─────────────────────────────────────────
