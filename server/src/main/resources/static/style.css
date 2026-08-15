@@ -1896,14 +1896,17 @@ ul { list-style:none; }
     touch-action: pan-y;
     overscroll-behavior: contain;
   }
-  /* Mensagens dentro do chat: também rola */
+  /* Mensagens dentro do chat: min-height:0 é obrigatório porque .wa-messages
+     é display:flex — sem isso o flex usa min-content-size (altura de todo o
+     conteúdo) como mínimo e overflow-y:scroll nunca ativa. */
   .wa-messages {
+    min-height: 0 !important;
     overflow-y: scroll !important;
     -webkit-overflow-scrolling: touch;
     touch-action: pan-y;
     overscroll-behavior: contain;
   }
-  .wa-chat-pane { display:none; flex:1; min-height:0; overflow:hidden; }
+  .wa-chat-pane { display:none; flex:1 1 0 !important; min-height:0; overflow:hidden; flex-direction:column; }
 
   /* wa-in-chat: hide list, show chat */
   .wa-body.wa-in-chat .wa-sidebar   { display:none; }
