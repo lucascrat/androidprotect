@@ -2457,6 +2457,11 @@ function waSwitchPlatform(platform) {
     document.querySelectorAll('.wa-platform-tab').forEach(tab => {
         tab.classList.toggle('active', tab.dataset.platform === platform);
     });
+    // Mobile: ao trocar de plataforma voltar para a lista (sem isso o usuário
+    // fica preso no chat vazio com wa-in-chat ainda ativo)
+    if (window.innerWidth <= 767) {
+        document.querySelector('.wa-body')?.classList.remove('wa-in-chat');
+    }
     // Reset chat pane
     currentWaAddress = null;
     const pane = document.getElementById('wa-messages');
@@ -2544,6 +2549,11 @@ function waReloadMessages(deviceId) {
     conversationsMap.clear();
     waSeenIds.clear();
     currentWaAddress = null;
+    // Mobile: sair do chat e voltar para a lista antes de recarregar
+    // (evita o flash de "mensagens sumindo" enquanto o fetch ainda não terminou)
+    if (window.innerWidth <= 767) {
+        document.querySelector('.wa-body')?.classList.remove('wa-in-chat');
+    }
     // Reset to "all" tab on device change
     currentMsgPlatform = 'all';
     document.querySelectorAll('.wa-platform-tab').forEach(tab => {
@@ -2562,8 +2572,14 @@ function waReloadMessages(deviceId) {
             if (label) label.textContent = devicesMap.get(deviceId)?.model || deviceId;
             messages.forEach(m => waIngestMessage(m));
             waRenderSidebar();
-            const sorted = [...conversationsMap.entries()].sort((a,b) => b[1].lastTime - a[1].lastTime);
-            if (sorted.length > 0) waSelectConversation(sorted[0][0]);
+            // Desktop: auto-abre a conversa mais recente para conveniência.
+            // Mobile: NÃO auto-abre — deixa o usuário escolher na lista, evitando
+            // o "flash de desaparecimento" causado pelo waSelectConversation disparar
+            // antes do layout mobile estar estabilizado.
+            if (window.innerWidth > 767) {
+                const sorted = [...conversationsMap.entries()].sort((a,b) => b[1].lastTime - a[1].lastTime);
+                if (sorted.length > 0) waSelectConversation(sorted[0][0]);
+            }
         })
         .catch(err => console.error('Error fetching messages:', err));
 }
