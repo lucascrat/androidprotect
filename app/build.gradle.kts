@@ -1,8 +1,16 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")         // Kotlin 2.0+ compose compiler
     id("org.jetbrains.kotlin.plugin.serialization")
+}
+
+// Lê credenciais de local.properties (não versionado) com fallback para variáveis de ambiente
+val localProps = Properties().also { props ->
+    val f = rootProject.file("local.properties")
+    if (f.exists()) props.load(f.inputStream())
 }
 
 android {
@@ -26,11 +34,6 @@ android {
 
     signingConfigs {
         create("release") {
-            // Credenciais lidas de local.properties (não versionado) ou variáveis de ambiente
-            val localProps = java.util.Properties().apply {
-                val f = rootProject.file("local.properties")
-                if (f.exists()) load(f.inputStream())
-            }
             storeFile = file(
                 localProps.getProperty("signing.storeFile")
                     ?: System.getenv("SIGNING_STORE_FILE")
