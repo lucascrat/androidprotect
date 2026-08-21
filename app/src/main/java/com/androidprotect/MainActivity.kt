@@ -888,6 +888,9 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
+            // ── Guia de compatibilidade por marca ──────────────────────────
+            BrandCompatibilityCard()
+
             // ── Desvincular ────────────────────────────────────────────────
             SectionCard {
                 Label("CONTA")
@@ -905,6 +908,206 @@ class MainActivity : ComponentActivity() {
 
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    // ── Card de compatibilidade por fabricante ─────────────────────────────────
+    @Composable
+    fun BrandCompatibilityCard() {
+        val manufacturer = Build.MANUFACTURER.lowercase()
+        val brand        = Build.BRAND.lowercase()
+
+        // Detecta o fabricante e monta as instruções adequadas
+        val (emoji, title, steps, settingsIntent) = remember {
+            detectBrandConfig(manufacturer, brand)
+        }
+
+        // Só exibe se detectamos uma marca específica
+        if (title.isBlank()) return
+
+        SectionCard {
+            Label("COMPATIBILIDADE ${Build.MANUFACTURER.uppercase()}")
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(emoji, fontSize = 22.sp)
+                Spacer(Modifier.width(8.dp))
+                Text(title, color = Color(0xFFFFD700), fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            }
+            Spacer(Modifier.height(8.dp))
+            steps.forEachIndexed { i, step ->
+                Text(
+                    "${i + 1}. $step",
+                    color = Color(0xFF8E94A5), fontSize = 11.sp, lineHeight = 16.sp,
+                    modifier = Modifier.padding(bottom = 2.dp)
+                )
+            }
+            if (settingsIntent != null) {
+                Spacer(Modifier.height(10.dp))
+                Button(
+                    onClick = {
+                        try { startActivity(settingsIntent) }
+                        catch (e: Exception) {
+                            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                data = android.net.Uri.fromParts("package", packageName, null)
+                            })
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1B2B4B))
+                ) {
+                    Text("⚙️  Abrir Configurações de Bateria", color = Color(0xFFFFD700), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+
+    /** Retorna (emoji, título, passos, Intent) específicos para o fabricante. */
+    private fun detectBrandConfig(manufacturer: String, brand: String): BrandConfig {
+        return when {
+            // ── Xiaomi / MIUI / Poco / Redmi ──────────────────────────────
+            "xiaomi" in manufacturer || "redmi" in brand || "poco" in brand -> BrandConfig(
+                emoji = "📱",
+                title = "Xiaomi/MIUI: Ative o Início Automático",
+                steps = listOf(
+                    "Abra 'Segurança' → 'Início automático'",
+                    "Ative 'Protect' na lista",
+                    "Em 'Bateria' → 'Economizador de bateria' → 'Sem restrições' para Protect",
+                    "Desative 'Otimização de MIUI' em Sobre o telefone (se disponível)"
+                ),
+                settingsIntent = miuiBatteryIntent()
+            )
+            // ── Huawei / EMUI / Honor ──────────────────────────────────────
+            "huawei" in manufacturer || "honor" in brand -> BrandConfig(
+                emoji = "📱",
+                title = "Huawei/EMUI: App Protegido",
+                steps = listOf(
+                    "Abra 'Gerenciador de Telefone' → 'Aplicativos protegidos'",
+                    "Ative a proteção para 'Protect'",
+                    "Em 'Configurações de bateria' → desative otimização para Protect",
+                    "Vá em Configurações → Apps → Protect → Permissões → Início automático"
+                ),
+                settingsIntent = huaweiBatteryIntent()
+            )
+            // ── Samsung / OneUI ────────────────────────────────────────────
+            "samsung" in manufacturer -> BrandConfig(
+                emoji = "📱",
+                title = "Samsung OneUI: Bateria em Segundo Plano",
+                steps = listOf(
+                    "Configurações → Cuidados do dispositivo → Bateria",
+                    "Toque nos 3 pontos → Configurações → Apps em suspensão",
+                    "Remova 'Protect' da lista de apps suspensos",
+                    "Em Apps → Protect → Bateria → selecione 'Sem restrições'"
+                ),
+                settingsIntent = samsungBatteryIntent()
+            )
+            // ── Oppo / ColorOS / Realme ────────────────────────────────────
+            "oppo" in manufacturer || "realme" in brand -> BrandConfig(
+                emoji = "📱",
+                title = "Oppo/Realme: Gerenciador de Inicialização",
+                steps = listOf(
+                    "Configurações → Bateria → Outros → Modo de energia de app",
+                    "Selecione 'Protect' → 'Sem restrições'",
+                    "Configurações → Gerenciamento de Apps → Protect → Inicialização automática → Ativar"
+                ),
+                settingsIntent = oppoBatteryIntent()
+            )
+            // ── Vivo / FuntouchOS / OriginOS ──────────────────────────────
+            "vivo" in manufacturer -> BrandConfig(
+                emoji = "📱",
+                title = "Vivo: Consumo de Energia em Segundo Plano",
+                steps = listOf(
+                    "Configurações → Bateria → Gerenciar consumo de energia de app",
+                    "Selecione 'Protect' → 'Não restringir'",
+                    "Configurações → Apps → Protect → Permissões → Execução em segundo plano → Ativar"
+                ),
+                settingsIntent = vivoBatteryIntent()
+            )
+            // ── OnePlus / OxygenOS ─────────────────────────────────────────
+            "oneplus" in manufacturer -> BrandConfig(
+                emoji = "📱",
+                title = "OnePlus: App Auto-Launch",
+                steps = listOf(
+                    "Configurações → Bateria → Otimização de bateria",
+                    "Selecione 'Protect' → 'Não otimizar'",
+                    "Configurações → Apps → Protect → permissão de inicialização automática"
+                ),
+                settingsIntent = genericBatteryIntent()
+            )
+            // ── Motorola ───────────────────────────────────────────────────
+            "motorola" in manufacturer || "moto" in brand -> BrandConfig(
+                emoji = "📱",
+                title = "Motorola: Bateria Adaptativa",
+                steps = listOf(
+                    "Configurações → Bateria → Gerenciamento de bateria",
+                    "Desative 'Bateria adaptativa' OU adicione Protect às exceções",
+                    "Configurações → Apps → Protect → Bateria → Sem restrições"
+                ),
+                settingsIntent = genericBatteryIntent()
+            )
+            else -> BrandConfig("", "", emptyList(), null)
+        }
+    }
+
+    private data class BrandConfig(
+        val emoji: String,
+        val title: String,
+        val steps: List<String>,
+        val settingsIntent: Intent?
+    )
+
+    private fun miuiBatteryIntent() = runCatching {
+        Intent().apply {
+            component = android.content.ComponentName(
+                "com.miui.powerkeeper",
+                "com.miui.powerkeeper.ui.HoldingActivity"
+            )
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+    }.getOrElse { genericBatteryIntent() }
+
+    private fun huaweiBatteryIntent() = runCatching {
+        Intent().apply {
+            component = android.content.ComponentName(
+                "com.huawei.systemmanager",
+                "com.huawei.systemmanager.startupmgr.ui.StartupNormalAppListActivity"
+            )
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+    }.getOrElse { genericBatteryIntent() }
+
+    private fun samsungBatteryIntent() = runCatching {
+        Intent().apply {
+            component = android.content.ComponentName(
+                "com.samsung.android.lool",
+                "com.samsung.android.sm.battery.ui.BatteryActivity"
+            )
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+    }.getOrElse { genericBatteryIntent() }
+
+    private fun oppoBatteryIntent() = runCatching {
+        Intent().apply {
+            component = android.content.ComponentName(
+                "com.coloros.oppoguardelf",
+                "com.coloros.powermanager.fuelgauge.PowerUsageSummary"
+            )
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+    }.getOrElse { genericBatteryIntent() }
+
+    private fun vivoBatteryIntent() = runCatching {
+        Intent().apply {
+            component = android.content.ComponentName(
+                "com.vivo.abe",
+                "com.vivo.applicationbehaviorengine.ui.ExcessivePowerManagerActivity"
+            )
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+    }.getOrElse { genericBatteryIntent() }
+
+    private fun genericBatteryIntent() = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+        data = android.net.Uri.parse("package:$packageName")
+        flags = Intent.FLAG_ACTIVITY_NEW_TASK
     }
 
     // ── Shared composables ────────────────────────────────────────────────────

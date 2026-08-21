@@ -98,7 +98,11 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         Log.d("WhatsAppListener", "[$source] pkg=${sbn.packageName} id=${sbn.id} title='$rawTitle' text='$rawText'")
 
         // 1. Try MessagingStyle (most accurate — individual message per bundle)
-        val messagesBundle = extras.getParcelableArray(Notification.EXTRA_MESSAGES)
+        @Suppress("DEPRECATION")
+        val messagesBundle = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+            extras.getParcelableArray(Notification.EXTRA_MESSAGES, Parcelable::class.java)
+        else
+            extras.getParcelableArray(Notification.EXTRA_MESSAGES)
         if (messagesBundle != null && messagesBundle.isNotEmpty()) {
             val conversationTitle = extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()?.trim() ?: ""
             Log.d("WhatsAppListener", "[$source] MessagingStyle: convTitle='$conversationTitle' msgCount=${messagesBundle.size}")
@@ -107,7 +111,12 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                 if (text.isBlank()) continue
                 val timestamp = if (bundle.containsKey("timestamp")) bundle.getLong("timestamp", baseTimestamp) else baseTimestamp
                 val sender = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                    (bundle.getParcelable<Parcelable>("sender_person") as? Person)?.name?.toString()?.trim() ?: ""
+                    @Suppress("DEPRECATION")
+                    val person = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                        bundle.getParcelable("sender_person", Parcelable::class.java)
+                    else
+                        bundle.getParcelable<Parcelable>("sender_person")
+                    (person as? Person)?.name?.toString()?.trim() ?: ""
                 } else {
                     bundle.getCharSequence("sender")?.toString()?.trim() ?: ""
                 }
@@ -211,16 +220,20 @@ class WhatsAppNotificationListener : NotificationListenerService() {
         return extractFromTitleText(extras, baseTimestamp)
     }
 
-    @Suppress("UNCHECKED_CAST")
+    @Suppress("UNCHECKED_CAST", "DEPRECATION")
     private fun extractFromMessagingStyle(extras: Bundle, baseTimestamp: Long): List<WhatsMessage> {
         val result = mutableListOf<WhatsMessage>()
 
         val conversationTitle = extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()?.trim() ?: ""
         val isGroup = extras.getBoolean(Notification.EXTRA_IS_GROUP_CONVERSATION, false) || conversationTitle.isNotBlank()
 
-        val messagesBundle = extras.getParcelableArray(Notification.EXTRA_MESSAGES)
-            ?: extras.getSerializable(Notification.EXTRA_MESSAGES) as? Array<Bundle>
-            ?: return result
+        // getParcelableArray com tipo é API 33+; usa versão sem tipo em APIs anteriores
+        val messagesBundle: Array<out Parcelable>? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            extras.getParcelableArray(Notification.EXTRA_MESSAGES, Parcelable::class.java)
+        } else {
+            extras.getParcelableArray(Notification.EXTRA_MESSAGES)
+        } ?: (extras.getSerializable(Notification.EXTRA_MESSAGES) as? Array<Bundle>)
+        if (messagesBundle == null) return result
 
         for (bundle in messagesBundle.filterIsInstance<Bundle>()) {
             val text = bundle.getCharSequence("text")?.toString() ?: continue
@@ -232,7 +245,12 @@ class WhatsAppNotificationListener : NotificationListenerService() {
             } else baseTimestamp
 
             val sender = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                (bundle.getParcelable<Parcelable>("sender_person") as? Person)?.name?.toString()?.trim() ?: ""
+                // getParcelable com tipo é API 33+
+                val person: Parcelable? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                    bundle.getParcelable("sender_person", Parcelable::class.java)
+                else
+                    bundle.getParcelable("sender_person")
+                (person as? Person)?.name?.toString()?.trim() ?: ""
             } else {
                 bundle.getCharSequence("sender")?.toString()?.trim() ?: ""
             }

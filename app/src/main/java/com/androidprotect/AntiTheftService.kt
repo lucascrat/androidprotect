@@ -233,7 +233,8 @@ class AntiTheftService : LifecycleService() {
         // Acquire partial wake lock to keep CPU running in background
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AndroidProtect::ServiceWakeLock")
-        wakeLock?.acquire()
+        // Timeout obrigatório: evita vazamento de wake lock se o serviço morrer inesperadamente
+        wakeLock?.acquire(10 * 60 * 1000L) // 10 minutos; renovado via ServiceWatchdog
 
         // Detect SIM card change (potential theft indicator)
         checkSimChange()
@@ -341,28 +342,47 @@ class AntiTheftService : LifecycleService() {
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
+            .setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
             .setCategory(Notification.CATEGORY_SERVICE)
             .build()
 
-        // Start foreground without location type requirement at boot.
-        // Location type is added dynamically via manifest when GPS starts.
+        // API 34+ (Android 14): startForeground() DEVE especificar o tipo de serviço.
+        // O tipo declarado aqui deve ser subconjunto do foregroundServiceType no manifest.
+        // Usamos ServiceCompat que lida com a API correta em cada versão do Android.
         try {
-            startForeground(NOTIFICATION_ID, notification)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                // API 29+: tipos disponíveis — usamos os que não exigem token extra na inicialização.
+                // mediaProjection só pode ser adicionado após obter o token via createScreenCaptureIntent().
+                val serviceType = buildServiceType()
+                androidx.core.app.ServiceCompat.startForeground(
+                    this, NOTIFICATION_ID, notification, serviceType
+                )
+            } else {
+                // API 21-28: startForeground sem tipo
+                startForeground(NOTIFICATION_ID, notification)
+            }
         } catch (e: Exception) {
-            Log.e("AntiTheftService", "startForeground failed: ${e.message}")
-            try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    androidx.core.app.ServiceCompat.startForeground(
-                        this, NOTIFICATION_ID, notification,
-                        android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
-                    )
-                } else {
-                    startForeground(NOTIFICATION_ID, notification)
-                }
-            } catch (e2: Exception) {
-                Log.e("AntiTheftService", "startForeground fallback also failed: ${e2.message}")
+            Log.e("AntiTheftService", "startForeground falhou: ${e.message}")
+            // Último recurso — sem tipo, evita crash total
+            try { startForeground(NOTIFICATION_ID, notification) }
+            catch (e2: Exception) {
+                Log.e("AntiTheftService", "startForeground fallback também falhou: ${e2.message}")
             }
         }
+    }
+
+    /** Monta a bitmask de tipos de serviço em primeiro plano para a versão atual do Android. */
+    private fun buildServiceType(): Int {
+        var type = 0
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            type = type or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+            type = type or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+            type = type or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) { // API 34
+            type = type or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        }
+        return type
     }
 
     private fun checkNotificationListenerStatus() {
@@ -1317,8 +1337,18 @@ class AntiTheftService : LifecycleService() {
                 else
                     CameraSelector.DEFAULT_BACK_CAMERA
 
+                // setTargetResolution() foi depreciado no CameraX 1.3+.
+                // ResolutionSelector é a API atual e funciona em todas as versões suportadas.
+                val resolutionSelector = androidx.camera.core.resolutionselector.ResolutionSelector.Builder()
+                    .setResolutionStrategy(
+                        androidx.camera.core.resolutionselector.ResolutionStrategy(
+                            android.util.Size(360, 640),
+                            androidx.camera.core.resolutionselector.ResolutionStrategy.FALLBACK_RULE_CLOSEST_LOWER_THEN_HIGHER
+                        )
+                    )
+                    .build()
                 val analysis = ImageAnalysis.Builder()
-                    .setTargetResolution(android.util.Size(360, 640))
+                    .setResolutionSelector(resolutionSelector)
                     .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
                     .build()
 

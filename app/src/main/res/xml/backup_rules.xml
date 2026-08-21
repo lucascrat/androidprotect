@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  backup_rules.xml — usado pelo android:fullBackupContent (API < 31)
+  Exclui dados sensíveis de backups automáticos do Android.
+-->
+<full-backup-content>
+    <exclude domain="sharedpref" path="androidprotect_prefs.xml" />
+    <exclude domain="file" />
+    <exclude domain="cache" />
+</full-backup-content>

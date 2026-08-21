@@ -19,6 +19,8 @@ class AdminReceiver : DeviceAdminReceiver() {
             .edit().putBoolean("admin_enabled", false).apply()
     }
 
+    // onPasswordFailed é depreciado na API 28+ mas ainda necessário para suporte ao minSdk 21
+    @Suppress("OVERRIDE_DEPRECATION")
     override fun onPasswordFailed(context: Context, intent: Intent) {
         Log.w("AdminReceiver", "Password attempt failed")
     }

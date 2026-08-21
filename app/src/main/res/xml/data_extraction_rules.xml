@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  data_extraction_rules.xml — exigido pelo targetSdk 31+
+  Controla quais dados são incluídos em backup/migração de dispositivo.
+-->
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- Exclui prefs sensíveis do backup em nuvem -->
+        <exclude domain="sharedpref" path="androidprotect_prefs.xml" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="sharedpref" path="androidprotect_prefs.xml" />
+    </device-transfer>
+</data-extraction-rules>
