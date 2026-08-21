@@ -290,7 +290,7 @@ val DEFAULT_LANDING_CONTENT = """
       { "id": "annual", "name": "Anual", "price": "239,90", "period": "/ano", "badge": "Economize 33%", "featured": false, "maxDevices": 5, "features": ["Até 5 aparelhos", "Tudo do plano Semestral", "Suporte prioritário 24/7", "Melhor custo-benefício"] }
     ]
   },
-  "apk": { "url": "", "version": "1.0.0", "size": "", "updatedAt": 0 },
+  "apk": { "url": "", "version": "1.1.0", "size": "8.6 MB", "updatedAt": 0 },
   "footer": {
     "companyName": "AndroidProtect",
     "tagline": "Proteção antifurto inteligente para o seu Android.",
