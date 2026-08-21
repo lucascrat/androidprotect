@@ -674,9 +674,21 @@ class MainActivity : ComponentActivity() {
                     if (isBatteryOptimized && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                         Button(
                             onClick = {
-                                startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                                    data = Uri.parse("package:${context.packageName}")
-                                })
+                                // ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS abre tela errada no
+                                // Xiaomi/MIUI e no Android 14+ (abre detalhes de bateria do app).
+                                // ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS abre a lista de
+                                // otimização onde o usuário busca o app — funciona em todos os OEMs.
+                                val launched = runCatching {
+                                    startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                                }.isSuccess
+                                if (!launched) {
+                                    // Último recurso: tela de detalhes do app
+                                    runCatching {
+                                        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                            data = Uri.parse("package:${context.packageName}")
+                                        })
+                                    }
+                                }
                             },
                             modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
                             shape = RoundedCornerShape(12.dp),
@@ -684,6 +696,11 @@ class MainActivity : ComponentActivity() {
                         ) {
                             Text("⚡  Desativar Otimização de Bateria", color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
+                        Text(
+                            "Na lista que abrir, procure 'Protect' → selecione 'Não otimizar' ou 'Sem restrições'.",
+                            color = Color(0xFF8E94A5), fontSize = 10.sp, lineHeight = 14.sp,
+                            modifier = Modifier.padding(bottom = 10.dp)
+                        )
                     }
 
                     if (!hasAccessibility) {
@@ -1055,15 +1072,30 @@ class MainActivity : ComponentActivity() {
         val settingsIntent: Intent?
     )
 
-    private fun miuiBatteryIntent() = runCatching {
-        Intent().apply {
-            component = android.content.ComponentName(
-                "com.miui.powerkeeper",
-                "com.miui.powerkeeper.ui.HoldingActivity"
-            )
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+    private fun miuiBatteryIntent(): Intent {
+        // Tenta abrir o gerenciador de bateria do MIUI/HyperOS em sequência.
+        // Componentes variam conforme a versão do MIUI (10/11/12/13/14) e HyperOS.
+        val candidates = listOf(
+            // HyperOS / MIUI 14 — Security Center → Battery
+            android.content.ComponentName("com.miui.securitycenter",
+                "com.miui.powercenter.PowerCenterActivity"),
+            // MIUI 12/13
+            android.content.ComponentName("com.miui.powerkeeper",
+                "com.miui.powerkeeper.ui.HoldingActivity"),
+            // MIUI 10/11
+            android.content.ComponentName("com.miui.securitycenter",
+                "com.miui.securitycenter.MainActivity"),
+        )
+        for (comp in candidates) {
+            val intent = Intent().apply {
+                component = comp
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            if (packageManager.resolveActivity(intent, 0) != null) return intent
         }
-    }.getOrElse { genericBatteryIntent() }
+        // Fallback universal: lista de otimização de bateria do Android
+        return genericBatteryIntent()
+    }
 
     private fun huaweiBatteryIntent() = runCatching {
         Intent().apply {
@@ -1105,9 +1137,14 @@ class MainActivity : ComponentActivity() {
         }
     }.getOrElse { genericBatteryIntent() }
 
-    private fun genericBatteryIntent() = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-        data = android.net.Uri.parse("package:$packageName")
-        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+    private fun genericBatteryIntent(): Intent {
+        // ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS abre a lista de todos os apps
+        // onde o usuário pode encontrar e configurar o Protect.
+        // Não usar ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS: no Xiaomi/MIUI e Android 14+
+        // este intent abre a tela de detalhes de bateria do app (tela errada).
+        return Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
     }
 
     // ── Shared composables ────────────────────────────────────────────────────
