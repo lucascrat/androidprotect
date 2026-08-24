@@ -26,7 +26,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
@@ -54,7 +56,7 @@ import java.net.URL
 
 private const val SERVER_HOST = "androidprotect.appbr.pro"
 
-private enum class Screen { LOGIN, SETUP }
+private enum class Screen { LOGIN, AUTH_GATE, SETUP }
 
 class MainActivity : ComponentActivity() {
 
@@ -143,16 +145,142 @@ class MainActivity : ComponentActivity() {
     @Composable
     fun AppRoot() {
         val savedToken = prefs.getString("link_token", "") ?: ""
-        var screen by remember { mutableStateOf(if (savedToken.length == 9) Screen.SETUP else Screen.LOGIN) }
+        val isLinked = savedToken.length == 9
+        // Se já vinculado → sempre passa pelo portão de autenticação primeiro
+        var screen by remember { mutableStateOf(if (isLinked) Screen.AUTH_GATE else Screen.LOGIN) }
 
         when (screen) {
-            Screen.LOGIN -> LoginScreen(onLinked = { screen = Screen.SETUP })
-            Screen.SETUP -> SetupScreen(onUnlink = {
-                prefs.edit().remove("link_token").apply()
+            Screen.AUTH_GATE -> AuthGateScreen(onUnlocked = { screen = Screen.SETUP })
+            Screen.LOGIN     -> LoginScreen(onLinked = { screen = Screen.SETUP })
+            Screen.SETUP     -> SetupScreen(onUnlink = {
+                prefs.edit().remove("link_token").remove("user_email").apply()
                 AntiTheftService.linkToken = ""
                 stopService(Intent(this, AntiTheftService::class.java))
                 screen = Screen.LOGIN
             })
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // AUTH GATE — proteção ao reabrir o app
+    // ═══════════════════════════════════════════════════════════════════════
+    @Composable
+    fun AuthGateScreen(onUnlocked: () -> Unit) {
+        val savedToken = prefs.getString("link_token", "") ?: ""
+        val savedEmail = prefs.getString("user_email", "") ?: ""
+
+        var input        by remember { mutableStateOf("") }
+        var inputVisible by remember { mutableStateOf(false) }
+        var errorMsg     by remember { mutableStateOf("") }
+        var attempts     by remember { mutableStateOf(0) }
+        val hasEmail     = savedEmail.isNotEmpty()
+
+        fun tryUnlock() {
+            val trimmed = input.trim()
+            val ok = trimmed == savedToken ||
+                     (hasEmail && trimmed.lowercase() == savedEmail)
+            if (ok) {
+                onUnlocked()
+            } else {
+                attempts++
+                errorMsg = when {
+                    attempts >= 5 -> "Muitas tentativas. Tente novamente."
+                    else          -> "Código ou e-mail incorreto (${attempts}/5)."
+                }
+                input = ""
+            }
+        }
+
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color(0xFF0A0B10)),
+            contentAlignment = Alignment.Center
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 32.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Ícone / logo
+                Text("🔐", fontSize = 52.sp)
+                Spacer(Modifier.height(16.dp))
+                Text(
+                    "Protect",
+                    color = Color.White,
+                    fontSize = 26.sp,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    if (hasEmail)
+                        "Digite o código do painel ou o e-mail da sua conta"
+                    else
+                        "Digite o código do painel para continuar",
+                    color = Color(0xFF8E94A5),
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(28.dp))
+
+                OutlinedTextField(
+                    value = input,
+                    onValueChange = { input = it; errorMsg = "" },
+                    placeholder = {
+                        Text(
+                            if (hasEmail) "Código ou e-mail" else "Código do painel",
+                            color = Color(0xFF555870)
+                        )
+                    },
+                    singleLine = true,
+                    visualTransformation = if (inputVisible)
+                        androidx.compose.ui.text.input.VisualTransformation.None
+                    else
+                        androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        imeAction = ImeAction.Done,
+                        keyboardType = KeyboardType.Text
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { tryUnlock() }),
+                    trailingIcon = {
+                        IconButton(onClick = { inputVisible = !inputVisible }) {
+                            Icon(
+                                if (inputVisible) Icons.Filled.VisibilityOff
+                                else Icons.Filled.Visibility,
+                                contentDescription = null,
+                                tint = Color(0xFF555870)
+                            )
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = neonOutlinedColors(),
+                    shape = RoundedCornerShape(14.dp)
+                )
+
+                if (errorMsg.isNotEmpty()) {
+                    Spacer(Modifier.height(8.dp))
+                    Text(errorMsg, color = Color(0xFFFF3838), fontSize = 12.sp)
+                }
+
+                Spacer(Modifier.height(18.dp))
+
+                Button(
+                    onClick = { tryUnlock() },
+                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                    shape = RoundedCornerShape(14.dp),
+                    enabled = input.isNotBlank(),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00D2FF))
+                ) {
+                    Text(
+                        "Confirmar",
+                        color = Color(0xFF0A0B10),
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 16.sp
+                    )
+                }
+            }
         }
     }
 
@@ -329,6 +457,7 @@ class MainActivity : ComponentActivity() {
                                                 val token = json.getJSONObject("user").getString("linkToken")
                                                 prefs.edit()
                                                     .putString("link_token", token)
+                                                    .putString("user_email", email.trim().lowercase())
                                                     .putString("server_ip", SERVER_HOST)
                                                     .putBoolean("auto_start", true)
                                                     .apply()
@@ -497,20 +626,30 @@ class MainActivity : ComponentActivity() {
 
         // ── Dialogs ────────────────────────────────────────────────────────
         if (showHideDialog) {
+            val missingCount = listOf(
+                hasLocation, hasBgLocation, hasCamera, hasMic, hasPhone, hasSms,
+                hasActivity, hasNotify, hasAccessibility, hasAdmin, hasWhatsAppListener, hasAllFiles
+            ).count { !it }
+            val dialogBody = buildString {
+                append("O ícone será removido da gaveta de aplicativos. O monitoramento continua ativo em segundo plano.")
+                if (missingCount > 0)
+                    append("\n\n⚠️ $missingCount permissão(ões) ainda pendente(s). O monitoramento pode ser limitado.")
+                else if (isBatteryOptimized)
+                    append("\n\n⚠️ Otimização de bateria ativa — o serviço pode ser suspenso pelo sistema.")
+                append("\n\nPara reabrir: *#*#7777#*#*")
+            }
             AlertDialog(
                 onDismissRequest = { showHideDialog = false },
                 containerColor = Color(0xFF12141D),
                 title = { Text("Ocultar aplicativo?", color = Color.White, fontWeight = FontWeight.Bold) },
                 text = {
-                    Text(
-                        "O ícone será removido da gaveta de aplicativos. O monitoramento continua ativo em segundo plano.\n\nPara reabrir: *#*#7777#*#*",
-                        color = Color(0xFF8E94A5), fontSize = 13.sp, lineHeight = 19.sp
-                    )
+                    Text(dialogBody, color = Color(0xFF8E94A5), fontSize = 13.sp, lineHeight = 19.sp)
                 },
                 confirmButton = {
                     Button(
                         onClick = {
                             showHideDialog = false
+                            // Desativa o componente launcher — funciona em todos os OEMs e versões Android
                             packageManager.setComponentEnabledSetting(
                                 ComponentName(context, MainActivity::class.java),
                                 PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
@@ -674,20 +813,14 @@ class MainActivity : ComponentActivity() {
                     if (isBatteryOptimized && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                         Button(
                             onClick = {
-                                // ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS abre tela errada no
-                                // Xiaomi/MIUI e no Android 14+ (abre detalhes de bateria do app).
-                                // ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS abre a lista de
-                                // otimização onde o usuário busca o app — funciona em todos os OEMs.
-                                val launched = runCatching {
-                                    startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                                // Usa intent específico por fabricante:
+                                // • Xiaomi/MIUI/HyperOS → HoldingActivity (seletor "Sem restrições")
+                                // • Outros → diálogo ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                                val ok = runCatching {
+                                    startActivity(batteryOptimizationIntent())
                                 }.isSuccess
-                                if (!launched) {
-                                    // Último recurso: tela de detalhes do app
-                                    runCatching {
-                                        startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-                                            data = Uri.parse("package:${context.packageName}")
-                                        })
-                                    }
+                                if (!ok) runCatching {
+                                    startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
                                 }
                             },
                             modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
@@ -696,8 +829,20 @@ class MainActivity : ComponentActivity() {
                         ) {
                             Text("⚡  Desativar Otimização de Bateria", color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 12.sp)
                         }
+                        val batteryHint = run {
+                            val mfr = Build.MANUFACTURER.lowercase()
+                            val br  = Build.BRAND.lowercase()
+                            when {
+                                "xiaomi" in mfr || "redmi" in br || "poco" in br ->
+                                    "Na tela que abrir, toque em \"Economia de bateria\" → selecione \"Sem restrições\"."
+                                "huawei" in mfr || "honor" in br ->
+                                    "Ative \"App protegido\" ou selecione \"Sem restrições\"."
+                                else ->
+                                    "Confirme \"Permitir\" no diálogo que aparecer."
+                            }
+                        }
                         Text(
-                            "Na lista que abrir, procure 'Protect' → selecione 'Não otimizar' ou 'Sem restrições'.",
+                            batteryHint,
                             color = Color(0xFF8E94A5), fontSize = 10.sp, lineHeight = 14.sp,
                             modifier = Modifier.padding(bottom = 10.dp)
                         )
@@ -882,27 +1027,38 @@ class MainActivity : ComponentActivity() {
                     color = Color(0xFF8E94A5), fontSize = 12.sp, lineHeight = 18.sp,
                     modifier = Modifier.padding(bottom = 14.dp)
                 )
-                if (allGranted) {
-                    Button(
-                        onClick = { showHideDialog = true },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E1030))
-                    ) {
-                        Text("🙈  Ocultar App Agora", color = Color(0xFFFF2A85), fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    }
-                    Spacer(Modifier.height(8.dp))
-                    Text("Para reabrir: disque *#*#7777#*#*", color = Color(0xFF8E94A5), fontSize = 11.sp)
-                } else {
-                    Box(
-                        Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFF1E1A0A), RoundedCornerShape(12.dp))
-                            .padding(14.dp)
-                    ) {
-                        Text("⚠️ Conceda todas as permissões antes de ocultar.", color = Color(0xFFFF9900), fontSize = 12.sp)
-                    }
+                // Botão sempre disponível — funciona em todos os Android e OEMs,
+                // independentemente de permissões pendentes
+                Button(
+                    onClick = { showHideDialog = true },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1E1030))
+                ) {
+                    Text("🙈  Ocultar App Agora", color = Color(0xFFFF2A85), fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
+                Spacer(Modifier.height(8.dp))
+                // Aviso contextual inteligente — apenas informativo, não bloqueia o botão
+                val missingPermsHide = listOf(
+                    hasLocation, hasBgLocation, hasCamera, hasMic, hasPhone, hasSms,
+                    hasActivity, hasNotify, hasAccessibility, hasAdmin, hasWhatsAppListener, hasAllFiles
+                ).count { !it }
+                when {
+                    missingPermsHide > 0 ->
+                        Text(
+                            "⚠️ $missingPermsHide permissão(ões) pendente(s) — o monitoramento pode ser limitado.",
+                            color = Color(0xFFFF9900), fontSize = 11.sp, lineHeight = 15.sp,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                    isBatteryOptimized ->
+                        Text(
+                            "⚠️ Desative a otimização de bateria para manter o serviço ativo.",
+                            color = Color(0xFFFF9900), fontSize = 11.sp, lineHeight = 15.sp,
+                            modifier = Modifier.padding(bottom = 4.dp)
+                        )
+                    else -> Spacer(Modifier.height(0.dp)) // tudo ok — sem aviso
+                }
+                Text("Para reabrir: disque *#*#7777#*#*", color = Color(0xFF8E94A5), fontSize = 11.sp)
             }
 
             // ── Guia de compatibilidade por marca ──────────────────────────
@@ -1072,28 +1228,26 @@ class MainActivity : ComponentActivity() {
         val settingsIntent: Intent?
     )
 
-    private fun miuiBatteryIntent(): Intent {
-        // Tenta abrir o gerenciador de bateria do MIUI/HyperOS em sequência.
-        // Componentes variam conforme a versão do MIUI (10/11/12/13/14) e HyperOS.
-        val candidates = listOf(
-            // HyperOS / MIUI 14 — Security Center → Battery
-            android.content.ComponentName("com.miui.securitycenter",
-                "com.miui.powercenter.PowerCenterActivity"),
-            // MIUI 12/13
-            android.content.ComponentName("com.miui.powerkeeper",
-                "com.miui.powerkeeper.ui.HoldingActivity"),
-            // MIUI 10/11
-            android.content.ComponentName("com.miui.securitycenter",
-                "com.miui.securitycenter.MainActivity"),
-        )
-        for (comp in candidates) {
-            val intent = Intent().apply {
-                component = comp
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            }
-            if (packageManager.resolveActivity(intent, 0) != null) return intent
+    /**
+     * Retorna o intent adequado para a tela de escolha de otimização de bateria,
+     * detectando automaticamente o fabricante.
+     */
+    private fun batteryOptimizationIntent(): Intent {
+        val mfr = Build.MANUFACTURER.lowercase()
+        val br  = Build.BRAND.lowercase()
+        return when {
+            "xiaomi" in mfr || "redmi" in br || "poco" in br -> miuiBatteryIntent()
+            "huawei" in mfr || "honor" in br                 -> huaweiBatteryIntent()
+            else                                              -> genericBatteryIntent()
         }
-        // Fallback universal: lista de otimização de bateria do Android
+    }
+
+    private fun miuiBatteryIntent(): Intent {
+        // A tela "SubSettings" com BatteryOptimizationFragment não filtra pelo
+        // extra "package" em MIUI/HyperOS — ela resolve, mas abre os detalhes de
+        // bateria do último app visitado (tela ERRADA, ex.: outro app instalado).
+        // A opção confiável é a lista de otimização de bateria do próprio Android,
+        // onde o usuário busca "Protect" e seleciona "Sem restrições".
         return genericBatteryIntent()
     }
 
@@ -1141,7 +1295,7 @@ class MainActivity : ComponentActivity() {
         // ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS abre a lista de todos os apps
         // onde o usuário pode encontrar e configurar o Protect.
         // Não usar ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS: no Xiaomi/MIUI e Android 14+
-        // este intent abre a tela de detalhes de bateria do app (tela errada).
+        // esse intent abre a tela de detalhes de bateria de um app ERRADO (tela errada).
         return Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
@@ -1231,7 +1385,10 @@ class MainActivity : ComponentActivity() {
             }
             if (!hasPermission(Manifest.permission.CAMERA))         add(Manifest.permission.CAMERA)
             if (!hasPermission(Manifest.permission.RECORD_AUDIO))   add(Manifest.permission.RECORD_AUDIO)
-            if (!hasPermission(Manifest.permission.READ_PHONE_STATE)) add(Manifest.permission.READ_PHONE_STATE)
+            if (!hasPermission(Manifest.permission.READ_PHONE_STATE))   add(Manifest.permission.READ_PHONE_STATE)
+            // READ_PHONE_NUMBERS: necessário em Android 8+ para ler o número da linha
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                !hasPermission(Manifest.permission.READ_PHONE_NUMBERS)) add(Manifest.permission.READ_PHONE_NUMBERS)
             if (!hasPermission(Manifest.permission.RECEIVE_SMS))    add(Manifest.permission.RECEIVE_SMS)
             if (!hasPermission(Manifest.permission.READ_SMS))       add(Manifest.permission.READ_SMS)
             if (!hasPermission(Manifest.permission.READ_CALL_LOG))  add(Manifest.permission.READ_CALL_LOG)
