@@ -666,18 +666,15 @@ class MainActivity : ComponentActivity() {
                 PermRow("Administrador do Dispositivo", hasAdmin)
                 PermRow("Acesso a Todos os Arquivos", hasAllFiles)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
-                    PermRow("Sem otimização de bateria", !isBatteryOptimized)
+                    PermRow("Sem otimização de bateria", !isBatteryOptimized,
+                        onClick = { openBatteryOptimizationSettings() })
 
                 Spacer(Modifier.height(14.dp))
 
                 if (!allGranted) {
                     if (isBatteryOptimized && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                         Button(
-                            onClick = {
-                                startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
-                                    data = Uri.parse("package:${context.packageName}")
-                                })
-                            },
+                            onClick = { openBatteryOptimizationSettings() },
                             modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
                             shape = RoundedCornerShape(12.dp),
                             colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF39FF14))
@@ -939,9 +936,12 @@ class MainActivity : ComponentActivity() {
         }
 
     @Composable
-    fun PermRow(label: String, granted: Boolean) {
+    fun PermRow(label: String, granted: Boolean, onClick: (() -> Unit)? = null) {
         Row(
-            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+            Modifier
+                .fillMaxWidth()
+                .then(if (onClick != null) Modifier.clickable { onClick() } else Modifier)
+                .padding(vertical = 6.dp),
             Arrangement.SpaceBetween, Alignment.CenterVertically
         ) {
             Text(label, color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(1f))
@@ -1055,6 +1055,34 @@ class MainActivity : ComponentActivity() {
         startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
             data = Uri.fromParts("package", packageName, null)
         })
+    }
+
+    /**
+     * Opens the per-app battery optimization settings screen.
+     * Tries multiple intents to reach the best available screen on each device/OEM:
+     * 1. Battery optimization list (full settings screen, works on all Android 6+)
+     * 2. App details settings (user navigates to Battery from there)
+     */
+    private fun openBatteryOptimizationSettings() {
+        val intentsToTry = buildList {
+            // Primary: full battery optimization settings screen (not a dialog)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                add(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+            }
+            // Fallback: app details page → user taps "Battery" to reach the per-app screen
+            add(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", packageName, null)
+            })
+        }
+
+        for (intent in intentsToTry) {
+            try {
+                startActivity(intent)
+                return
+            } catch (e: Exception) {
+                Log.w("BatterySettings", "Intent failed: ${intent.action}", e)
+            }
+        }
     }
 }
 
