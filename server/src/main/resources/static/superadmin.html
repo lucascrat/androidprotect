@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SuperAdmin – AndroidProtect</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0f172a;--sidebar:#1a2540;--surface:#1e293b;--surface2:#243044;--border:#334155;--accent:#6366f1;--accent2:#4f46e5;--green:#10b981;--yellow:#f59e0b;--red:#ef4444;--text:#f1f5f9;--sub:#94a3b8;--sub2:#64748b}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);display:flex;min-height:100vh;font-size:14px}
+
+/* Sidebar */
+.sidebar{width:240px;min-height:100vh;background:var(--sidebar);border-right:1px solid var(--border);display:flex;flex-direction:column;position:fixed;top:0;left:0;bottom:0;z-index:100}
+.sidebar-brand{padding:24px 20px 20px;border-bottom:1px solid var(--border)}
+.sidebar-brand .logo{font-weight:800;font-size:1.1rem;color:#fff;display:flex;align-items:center;gap:10px}
+.sidebar-brand .logo .icon{background:linear-gradient(135deg,var(--accent),#8b5cf6);border-radius:10px;width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:1.1rem;flex-shrink:0}
+.sidebar-brand .sub{color:var(--sub);font-size:.75rem;margin-top:6px;padding-left:46px}
+.nav{flex:1;padding:16px 12px;overflow-y:auto}
+.nav-item{display:flex;align-items:center;gap:12px;padding:10px 12px;border-radius:10px;cursor:pointer;color:var(--sub);font-weight:500;transition:all .18s;margin-bottom:2px;user-select:none}
+.nav-item:hover{background:rgba(99,102,241,.1);color:var(--text)}
+.nav-item.active{background:rgba(99,102,241,.2);color:var(--accent)}
+.nav-item .icon{font-size:1rem;width:20px;text-align:center}
+.sidebar-footer{padding:16px;border-top:1px solid var(--border)}
+.sidebar-user{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.sidebar-user .avatar{width:32px;height:32px;border-radius:50%;background:var(--accent);display:flex;align-items:center;justify-content:center;font-weight:700;font-size:.9rem}
+.sidebar-user .info{font-size:.8rem;color:var(--sub);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:150px}
+.btn-logout{width:100%;background:transparent;border:1px solid var(--border);color:var(--sub);border-radius:8px;padding:8px;cursor:pointer;font-size:.8rem;transition:all .18s}
+.btn-logout:hover{border-color:var(--red);color:var(--red)}
+
+/* Main */
+.main{margin-left:240px;flex:1;display:flex;flex-direction:column;min-height:100vh}
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:16px 28px;display:flex;align-items:center;justify-content:space-between}
+.topbar h1{font-size:1.1rem;font-weight:700}
+.topbar .time{color:var(--sub);font-size:.82rem}
+.content{padding:28px;flex:1;overflow-x:hidden}
+
+/* Cards */
+.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:28px}
+@media(max-width:1100px){.cards{grid-template-columns:repeat(2,1fr)}}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px}
+.card .label{font-size:.78rem;color:var(--sub);font-weight:500;margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.card .value{font-size:1.75rem;font-weight:800;line-height:1}
+.card .delta{font-size:.78rem;color:var(--sub);margin-top:6px}
+.card.green .value{color:var(--green)}
+.card.yellow .value{color:var(--yellow)}
+.card.accent .value{color:var(--accent)}
+.card.red .value{color:var(--red)}
+
+/* Charts row */
+.charts-row{display:grid;grid-template-columns:2fr 1fr;gap:16px;margin-bottom:28px}
+@media(max-width:900px){.charts-row{grid-template-columns:1fr}}
+.chart-box{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:20px}
+.chart-box h3{font-size:.9rem;font-weight:600;margin-bottom:16px;color:var(--sub)}
+
+/* Tables */
+.table-box{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:20px}
+.table-header{padding:16px 20px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border)}
+.table-header h3{font-size:.95rem;font-weight:700}
+table{width:100%;border-collapse:collapse}
+th{text-align:left;padding:10px 16px;font-size:.75rem;font-weight:600;color:var(--sub);background:var(--surface2);text-transform:uppercase;letter-spacing:.04em}
+td{padding:12px 16px;border-top:1px solid var(--border);font-size:.85rem;vertical-align:middle}
+tr:hover td{background:rgba(99,102,241,.04)}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 10px;border-radius:20px;font-size:.72rem;font-weight:600}
+.badge.trial{background:rgba(245,158,11,.15);color:var(--yellow)}
+.badge.active{background:rgba(16,185,129,.15);color:var(--green)}
+.badge.expired{background:rgba(239,68,68,.15);color:var(--red)}
+.badge.none{background:rgba(148,163,184,.1);color:var(--sub)}
+.badge.paid{background:rgba(16,185,129,.15);color:var(--green)}
+.badge.pending{background:rgba(245,158,11,.15);color:var(--yellow)}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 16px;border-radius:8px;font-weight:600;font-size:.82rem;cursor:pointer;border:none;transition:all .18s;font-family:inherit}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:var(--accent2)}
+.btn-sm{padding:5px 10px;font-size:.75rem}
+.btn-danger{background:rgba(239,68,68,.15);color:var(--red)}
+.btn-danger:hover{background:rgba(239,68,68,.25)}
+.btn-outline{background:transparent;color:var(--sub);border:1px solid var(--border)}
+.btn-outline:hover{border-color:var(--accent);color:var(--accent)}
+
+/* Forms & Modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center;z-index:999;display:none}
+.modal-overlay.open{display:flex}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;width:500px;max-width:95vw;max-height:90vh;overflow-y:auto}
+.modal h2{font-size:1rem;font-weight:700;margin-bottom:20px}
+.form-group{margin-bottom:16px}
+.form-group label{display:block;font-size:.8rem;font-weight:600;color:var(--sub);margin-bottom:6px}
+.form-group input,.form-group textarea,.form-group select{width:100%;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:10px 12px;color:var(--text);font-size:.85rem;font-family:inherit;outline:none;transition:border .18s}
+.form-group input:focus,.form-group textarea:focus,.form-group select:focus{border-color:var(--accent)}
+.form-group textarea{resize:vertical;min-height:80px}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:20px}
+
+/* Sections */
+.section{display:none}
+.section.active{display:block}
+
+/* Login page */
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg)}
+.login-card{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:40px;width:380px;max-width:95vw}
+.login-card .logo{font-weight:800;font-size:1.2rem;margin-bottom:6px;display:flex;align-items:center;gap:10px}
+.login-card .logo .icon{background:linear-gradient(135deg,var(--accent),#8b5cf6);border-radius:10px;width:40px;height:40px;display:flex;align-items:center;justify-content:center;font-size:1.2rem}
+.login-card .sub{color:var(--sub);font-size:.85rem;margin-bottom:28px}
+.login-error{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:var(--red);padding:10px 14px;border-radius:8px;font-size:.82rem;margin-bottom:16px;display:none}
+.search-box{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 14px;color:var(--text);font-size:.85rem;font-family:inherit;outline:none;width:220px}
+.search-box:focus{border-color:var(--accent)}
+.empty{text-align:center;padding:40px;color:var(--sub)}
+.toggle-switch{display:flex;align-items:center;gap:8px}
+.switch{position:relative;width:40px;height:22px;flex-shrink:0}
+.switch input{opacity:0;width:0;height:0;position:absolute}
+.slider{position:absolute;cursor:pointer;inset:0;background:var(--border);border-radius:22px;transition:.2s}
+.slider:before{position:absolute;content:"";height:16px;width:16px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.2s}
+input:checked+.slider{background:var(--accent)}
+input:checked+.slider:before{transform:translateX(18px)}
+.pagination{display:flex;align-items:center;gap:8px;padding:14px 20px;border-top:1px solid var(--border)}
+.page-btn{background:var(--surface2);border:1px solid var(--border);color:var(--sub);padding:5px 12px;border-radius:6px;cursor:pointer;font-size:.8rem;font-family:inherit}
+.page-btn:hover{border-color:var(--accent);color:var(--accent)}
+.page-btn:disabled{opacity:.4;cursor:not-allowed}
+</style>
+</head>
+<body>
+
+<!-- LOGIN SCREEN -->
+<div class="login-wrap" id="loginWrap">
+  <div class="login-card">
+    <div class="logo"><div class="icon">🛡️</div> SuperAdmin</div>
+    <div class="sub">Painel de Gerenciamento — AndroidProtect</div>
+    <div class="login-error" id="loginError"></div>
+    <div class="form-group">
+      <label>E-mail</label>
+      <input type="email" id="loginEmail" value="hlsistemas2025@gmail.com" placeholder="admin@email.com">
+    </div>
+    <div class="form-group">
+      <label>Senha</label>
+      <input type="password" id="loginPass" value="" placeholder="••••••••" onkeydown="if(event.key==='Enter')doLogin()">
+    </div>
+    <button class="btn btn-primary" style="width:100%;padding:12px" onclick="doLogin()">Entrar</button>
+  </div>
+</div>
+
+<!-- ADMIN PANEL -->
+<div id="adminPanel" style="display:none;width:100%">
+<div class="sidebar">
+  <div class="sidebar-brand">
+    <div class="logo"><div class="icon">🛡️</div> AndroidProtect</div>
+    <div class="sub">SuperAdmin Panel</div>
+  </div>
+  <nav class="nav">
+    <div class="nav-item active" onclick="nav('dashboard')"><span class="icon">📊</span> Dashboard</div>
+    <div class="nav-item" onclick="nav('plans')"><span class="icon">💳</span> Planos</div>
+    <div class="nav-item" onclick="nav('users')"><span class="icon">👥</span> Usuários</div>
+    <div class="nav-item" onclick="nav('payments')"><span class="icon">💰</span> Pagamentos</div>
+    <div class="nav-item" onclick="nav('settings')"><span class="icon">⚙️</span> Configurações</div>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="sidebar-user">
+      <div class="avatar">S</div>
+      <div class="info" id="adminEmailDisplay">admin</div>
+    </div>
+    <button class="btn-logout" onclick="logout()">Sair</button>
+  </div>
+</div>
+
+<div class="main">
+  <div class="topbar">
+    <h1 id="pageTitle">Dashboard</h1>
+    <div class="time" id="clockDisplay"></div>
+  </div>
+  <div class="content">
+
+    <!-- DASHBOARD -->
+    <div class="section active" id="sec-dashboard">
+      <div class="cards">
+        <div class="card accent"><div class="label">👥 Total de Usuários</div><div class="value" id="dTotalUsers">—</div><div class="delta">cadastros na plataforma</div></div>
+        <div class="card green"><div class="label">✅ Assinantes Ativos</div><div class="value" id="dActiveUsers">—</div><div class="delta">planos pagos vigentes</div></div>
+        <div class="card yellow"><div class="label">⏳ Em Trial</div><div class="value" id="dTrialUsers">—</div><div class="delta">período gratuito</div></div>
+        <div class="card green"><div class="label">💰 Receita este mês</div><div class="value" id="dMonthlyRev">—</div><div class="delta" id="dTotalRev">total acumulado: —</div></div>
+      </div>
+      <div class="charts-row">
+        <div class="chart-box"><h3>📈 Receita diária (últimos 30 dias)</h3><canvas id="revenueChart" height="120"></canvas></div>
+        <div class="chart-box"><h3>🥧 Distribuição por plano</h3><canvas id="planChart" height="180"></canvas></div>
+      </div>
+    </div>
+
+    <!-- PLANS -->
+    <div class="section" id="sec-plans">
+      <div class="table-box">
+        <div class="table-header">
+          <h3>Planos de Assinatura</h3>
+          <button class="btn btn-primary" onclick="openPlanModal()">+ Novo Plano</button>
+        </div>
+        <table>
+          <thead><tr><th>Nome</th><th>Preço</th><th>Duração</th><th>Dispositivos</th><th>Status</th><th>Ações</th></tr></thead>
+          <tbody id="plansBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- USERS -->
+    <div class="section" id="sec-users">
+      <div class="table-box">
+        <div class="table-header">
+          <h3>Usuários</h3>
+          <input class="search-box" id="userSearch" placeholder="🔍 Buscar por email…" oninput="filterUsers()">
+        </div>
+        <table>
+          <thead><tr><th>Email</th><th>Nome</th><th>Plano</th><th>Status</th><th>Expira</th><th>Dispositivos</th><th>Cadastro</th></tr></thead>
+          <tbody id="usersBody"></tbody>
+        </table>
+        <div class="pagination">
+          <button class="page-btn" id="prevBtn" onclick="changePage(-1)" disabled>← Anterior</button>
+          <span id="pageInfo" style="color:var(--sub);font-size:.8rem"></span>
+          <button class="page-btn" id="nextBtn" onclick="changePage(1)">Próxima →</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PAYMENTS -->
+    <div class="section" id="sec-payments">
+      <div class="table-box">
+        <div class="table-header"><h3>Pagamentos</h3></div>
+        <table>
+          <thead><tr><th>ID</th><th>Usuário</th><th>Plano</th><th>Valor</th><th>Método</th><th>Status</th><th>Data</th></tr></thead>
+          <tbody id="paymentsBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- SETTINGS -->
+    <div class="section" id="sec-settings">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;max-width:800px">
+        <!-- Trial settings -->
+        <div class="table-box">
+          <div class="table-header"><h3>⚙️ Configurações Gerais</h3></div>
+          <div style="padding:20px">
+            <div class="form-group">
+              <label>Dias de Trial Gratuito</label>
+              <input type="number" id="settingTrialDays" min="1" max="365" value="7">
+            </div>
+            <button class="btn btn-primary" onclick="saveSettings()">Salvar</button>
+          </div>
+        </div>
+        <!-- Password change -->
+        <div class="table-box">
+          <div class="table-header"><h3>🔐 Alterar Senha</h3></div>
+          <div style="padding:20px">
+            <div class="form-group">
+              <label>Senha Atual</label>
+              <input type="password" id="currentPass" placeholder="Senha atual">
+            </div>
+            <div class="form-group">
+              <label>Nova Senha</label>
+              <input type="password" id="newPass" placeholder="Min 8 caracteres">
+            </div>
+            <div class="form-group">
+              <label>Confirmar Nova Senha</label>
+              <input type="password" id="confirmPass" placeholder="Repita a nova senha">
+            </div>
+            <button class="btn btn-primary" onclick="changePassword()">Alterar Senha</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+</div>
+
+<!-- PLAN MODAL -->
+<div class="modal-overlay" id="planModal">
+  <div class="modal">
+    <h2 id="modalTitle">Novo Plano</h2>
+    <input type="hidden" id="editPlanId">
+    <div class="form-row">
+      <div class="form-group">
+        <label>Nome do Plano</label>
+        <input id="planName" placeholder="ex: Mensal">
+      </div>
+      <div class="form-group">
+        <label>Preço (centavos)</label>
+        <input id="planPrice" type="number" placeholder="ex: 2990">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Duração (dias)</label>
+        <input id="planDuration" type="number" placeholder="ex: 30">
+      </div>
+      <div class="form-group">
+        <label>Máx. Dispositivos</label>
+        <input id="planDevices" type="number" value="1" min="1" max="100">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Descrição</label>
+      <textarea id="planDesc" placeholder="Descrição do plano…"></textarea>
+    </div>
+    <div class="form-group">
+      <label>Imagem (URL)</label>
+      <input id="planImage" placeholder="https://… ou /uploads/plans/…">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Ordem (sortOrder)</label>
+        <input id="planOrder" type="number" value="99">
+      </div>
+      <div class="form-group">
+        <label>Ativo</label>
+        <div class="toggle-switch" style="margin-top:10px">
+          <label class="switch"><input type="checkbox" id="planActive" checked><span class="slider"></span></label>
+          <span style="color:var(--sub)">Exibir aos usuários</span>
+        </div>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closePlanModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="savePlan()">Salvar Plano</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let adminToken = localStorage.getItem('saToken') || '';
+let currentPage = 1;
+let allUsers = [];
+let revenueChart = null;
+let planChart = null;
+
+// ── Clock ────────────────────────────────────────────────────────────────
+function updateClock() {
+  const now = new Date();
+  document.getElementById('clockDisplay').textContent =
+    now.toLocaleString('pt-BR', { day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit' });
+}
+setInterval(updateClock, 1000); updateClock();
+
+// ── API helper ───────────────────────────────────────────────────────────
+async function sa(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + adminToken } };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(API + path, opts);
+  return r.json();
+}
+
+// ── Login ────────────────────────────────────────────────────────────────
+async function doLogin() {
+  const email = document.getElementById('loginEmail').value.trim();
+  const pass  = document.getElementById('loginPass').value;
+  const err   = document.getElementById('loginError');
+  err.style.display = 'none';
+  try {
+    const r = await fetch(API + '/api/superadmin/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: pass })
+    });
+    const data = await r.json();
+    if (data.token) {
+      adminToken = data.token;
+      localStorage.setItem('saToken', adminToken);
+      document.getElementById('adminEmailDisplay').textContent = data.email || email;
+      document.getElementById('loginWrap').style.display = 'none';
+      document.getElementById('adminPanel').style.display = 'flex';
+      loadDashboard();
+    } else {
+      err.textContent = data.error || 'Credenciais inválidas';
+      err.style.display = 'block';
+    }
+  } catch(e) {
+    err.textContent = 'Erro de conexão: ' + e.message;
+    err.style.display = 'block';
+  }
+}
+
+async function logout() {
+  await fetch(API + '/api/superadmin/logout', { method:'POST', headers:{'Authorization':'Bearer '+adminToken} }).catch(()=>{});
+  localStorage.removeItem('saToken');
+  adminToken = '';
+  document.getElementById('loginWrap').style.display = 'flex';
+  document.getElementById('adminPanel').style.display = 'none';
+}
+
+// ── Navigation ───────────────────────────────────────────────────────────
+const pageTitles = { dashboard:'Dashboard', plans:'Planos de Assinatura', users:'Usuários', payments:'Pagamentos', settings:'Configurações' };
+function nav(sec) {
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  document.getElementById('sec-' + sec)?.classList.add('active');
+  document.querySelectorAll('.nav-item')[['dashboard','plans','users','payments','settings'].indexOf(sec)]?.classList.add('active');
+  document.getElementById('pageTitle').textContent = pageTitles[sec] || sec;
+  if (sec === 'dashboard') loadDashboard();
+  else if (sec === 'plans') loadPlans();
+  else if (sec === 'users') { currentPage = 1; loadUsers(); }
+  else if (sec === 'payments') loadPayments();
+  else if (sec === 'settings') loadSettings();
+}
+
+// ── Dashboard ────────────────────────────────────────────────────────────
+async function loadDashboard() {
+  const d = await sa('GET', '/api/superadmin/dashboard');
+  if (d.error) { if (d.error.includes('utenticad')) { logout(); return; } }
+  document.getElementById('dTotalUsers').textContent = d.totalUsers ?? '—';
+  document.getElementById('dActiveUsers').textContent = d.activeUsers ?? '—';
+  document.getElementById('dTrialUsers').textContent = d.trialUsers ?? '—';
+  document.getElementById('dMonthlyRev').textContent = 'R$ ' + (d.monthlyRevenueStr ?? '0,00');
+  document.getElementById('dTotalRev').textContent = 'total acumulado: R$ ' + (d.totalRevenueStr ?? '0,00');
+
+  // Revenue chart
+  const labels = (d.dailyRevenue || []).map(r => r.date?.slice(5));
+  const values = (d.dailyRevenue || []).map(r => (r.cents || 0) / 100);
+  if (revenueChart) revenueChart.destroy();
+  const ctx = document.getElementById('revenueChart').getContext('2d');
+  revenueChart = new Chart(ctx, {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'Receita (R$)', data: values, backgroundColor: 'rgba(99,102,241,.6)', borderColor: '#6366f1', borderWidth: 1, borderRadius: 4 }] },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#64748b', font: { size: 11 } }, grid: { color: 'rgba(51,65,85,.4)' } }, y: { ticks: { color: '#64748b', callback: v => 'R$' + v.toFixed(0) }, grid: { color: 'rgba(51,65,85,.4)' } } } }
+  });
+
+  // Plan chart
+  const planLabels = (d.planStats || []).map(p => p.planName);
+  const planData   = (d.planStats || []).map(p => p.activeCount);
+  if (planChart) planChart.destroy();
+  const ctx2 = document.getElementById('planChart').getContext('2d');
+  planChart = new Chart(ctx2, {
+    type: 'doughnut',
+    data: { labels: planLabels, datasets: [{ data: planData, backgroundColor: ['#6366f1','#10b981','#f59e0b','#ef4444'], borderWidth: 2, borderColor: '#1e293b' }] },
+    options: { responsive: true, plugins: { legend: { labels: { color: '#94a3b8', font: { size: 11 } } } } }
+  });
+}
+
+// ── Plans ─────────────────────────────────────────────────────────────────
+async function loadPlans() {
+  const plans = await sa('GET', '/api/superadmin/plans');
+  const tbody = document.getElementById('plansBody');
+  if (!Array.isArray(plans) || plans.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" class="empty">Nenhum plano cadastrado</td></tr>'; return;
+  }
+  tbody.innerHTML = plans.map(p => `
+    <tr>
+      <td><strong>${p.name}</strong>${p.imageUrl ? ` <img src="${p.imageUrl}" style="width:28px;height:28px;border-radius:4px;margin-left:6px;vertical-align:middle">` : ''}</td>
+      <td>R$ ${p.priceStr}</td>
+      <td>${p.durationDays} dias</td>
+      <td>${p.maxDevices} dispositivo(s)</td>
+      <td><span class="badge ${p.isActive ? 'active' : 'expired'}">${p.isActive ? '✅ Ativo' : '❌ Inativo'}</span></td>
+      <td>
+        <button class="btn btn-sm btn-outline" onclick="editPlan(${p.id})">✏️ Editar</button>
+        <button class="btn btn-sm btn-danger" onclick="deletePlan(${p.id},'${p.name}')" style="margin-left:4px">🗑️</button>
+      </td>
+    </tr>
+  `).join('');
+}
+
+function openPlanModal(plan) {
+  document.getElementById('planModal').classList.add('open');
+  document.getElementById('editPlanId').value = '';
+  document.getElementById('modalTitle').textContent = 'Novo Plano';
+  ['planName','planPrice','planDuration','planDesc','planImage'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('planDevices').value = 1;
+  document.getElementById('planOrder').value = 99;
+  document.getElementById('planActive').checked = true;
+}
+
+async function editPlan(id) {
+  const plans = await sa('GET', '/api/superadmin/plans');
+  const p = plans.find(x => x.id === id);
+  if (!p) return;
+  document.getElementById('planModal').classList.add('open');
+  document.getElementById('modalTitle').textContent = 'Editar Plano';
+  document.getElementById('editPlanId').value = id;
+  document.getElementById('planName').value = p.name || '';
+  document.getElementById('planPrice').value = p.priceCents || '';
+  document.getElementById('planDuration').value = p.durationDays || '';
+  document.getElementById('planDevices').value = p.maxDevices || 1;
+  document.getElementById('planDesc').value = p.description || '';
+  document.getElementById('planImage').value = p.imageUrl || '';
+  document.getElementById('planOrder').value = p.sortOrder ?? 99;
+  document.getElementById('planActive').checked = !!p.isActive;
+}
+
+function closePlanModal() { document.getElementById('planModal').classList.remove('open'); }
+
+async function savePlan() {
+  const id   = document.getElementById('editPlanId').value;
+  const body = {
+    name:        document.getElementById('planName').value.trim(),
+    priceCents:  document.getElementById('planPrice').value,
+    durationDays:document.getElementById('planDuration').value,
+    maxDevices:  document.getElementById('planDevices').value,
+    description: document.getElementById('planDesc').value,
+    imageUrl:    document.getElementById('planImage').value.trim(),
+    sortOrder:   document.getElementById('planOrder').value,
+    isActive:    document.getElementById('planActive').checked ? 'true' : 'false'
+  };
+  if (!body.name || !body.priceCents || !body.durationDays) { alert('Preencha nome, preço e duração'); return; }
+  const r = id
+    ? await sa('PUT', `/api/superadmin/plans/${id}`, body)
+    : await sa('POST', '/api/superadmin/plans', body);
+  if (r.ok || r.id) { closePlanModal(); loadPlans(); }
+  else alert(r.error || 'Erro ao salvar');
+}
+
+async function deletePlan(id, name) {
+  if (!confirm(`Desativar o plano "${name}"?`)) return;
+  await sa('DELETE', `/api/superadmin/plans/${id}`);
+  loadPlans();
+}
+
+// ── Users ─────────────────────────────────────────────────────────────────
+async function loadUsers() {
+  const r = await sa('GET', `/api/superadmin/users?page=${currentPage}`);
+  allUsers = r.users || [];
+  renderUsers(allUsers);
+  const total = r.total || 0;
+  const pages = Math.ceil(total / (r.size || 50));
+  document.getElementById('pageInfo').textContent = `Página ${currentPage} de ${Math.max(1, pages)} (${total} usuários)`;
+  document.getElementById('prevBtn').disabled = currentPage <= 1;
+  document.getElementById('nextBtn').disabled = currentPage >= pages;
+}
+
+function renderUsers(users) {
+  const tbody = document.getElementById('usersBody');
+  if (!users.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty">Nenhum usuário encontrado</td></tr>'; return; }
+  tbody.innerHTML = users.map(u => {
+    const exp = u.subEnd ? new Date(u.subEnd).toLocaleDateString('pt-BR') : '—';
+    const cad = new Date(u.createdAt).toLocaleDateString('pt-BR');
+    const statusBadge = { trial:'trial', active:'active', expired:'expired', none:'none', cancelled:'none' };
+    return `<tr>
+      <td style="color:var(--sub)">${u.email}</td>
+      <td>${u.username || '—'}</td>
+      <td>${u.planName || '—'}</td>
+      <td><span class="badge ${statusBadge[u.subStatus] || 'none'}">${u.subStatus || 'none'}</span></td>
+      <td>${exp}</td>
+      <td>${u.devices ?? 0}</td>
+      <td style="color:var(--sub)">${cad}</td>
+    </tr>`;
+  }).join('');
+}
+
+function filterUsers() {
+  const q = document.getElementById('userSearch').value.toLowerCase();
+  renderUsers(allUsers.filter(u => u.email?.toLowerCase().includes(q) || u.username?.toLowerCase().includes(q)));
+}
+
+function changePage(dir) { currentPage = Math.max(1, currentPage + dir); loadUsers(); }
+
+// ── Payments ──────────────────────────────────────────────────────────────
+async function loadPayments() {
+  const r = await sa('GET', '/api/superadmin/payments');
+  const payments = r.payments || [];
+  const tbody = document.getElementById('paymentsBody');
+  if (!payments.length) { tbody.innerHTML = '<tr><td colspan="7" class="empty">Nenhum pagamento registrado</td></tr>'; return; }
+  tbody.innerHTML = payments.map(p => {
+    const date = p.paidAt ? new Date(p.paidAt).toLocaleString('pt-BR') : new Date(p.createdAt).toLocaleString('pt-BR');
+    return `<tr>
+      <td style="color:var(--sub)">#${p.id}</td>
+      <td>${p.userEmail}</td>
+      <td>${p.planName}</td>
+      <td>R$ ${p.amountStr}</td>
+      <td>${p.method?.toUpperCase()}</td>
+      <td><span class="badge ${p.status === 'paid' ? 'paid' : p.status === 'pending' ? 'pending' : 'expired'}">${p.status}</span></td>
+      <td style="color:var(--sub)">${date}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────
+async function loadSettings() {
+  const r = await sa('GET', '/api/superadmin/settings');
+  if (r.trial_days) document.getElementById('settingTrialDays').value = r.trial_days;
+}
+
+async function saveSettings() {
+  const trialDays = document.getElementById('settingTrialDays').value;
+  const r = await sa('PUT', '/api/superadmin/settings', { trial_days: trialDays });
+  if (r.ok) alert('✅ Configurações salvas!');
+  else alert(r.error || 'Erro ao salvar');
+}
+
+async function changePassword() {
+  const cur  = document.getElementById('currentPass').value;
+  const nw   = document.getElementById('newPass').value;
+  const conf = document.getElementById('confirmPass').value;
+  if (!cur || !nw) { alert('Preencha todos os campos'); return; }
+  if (nw !== conf) { alert('As senhas não coincidem'); return; }
+  if (nw.length < 8) { alert('Nova senha deve ter pelo menos 8 caracteres'); return; }
+  const r = await sa('PUT', '/api/superadmin/password', { currentPassword: cur, newPassword: nw });
+  if (r.ok) {
+    alert('✅ Senha alterada com sucesso!');
+    ['currentPass','newPass','confirmPass'].forEach(id => document.getElementById(id).value = '');
+  } else alert(r.error || 'Erro ao alterar senha');
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────
+async function checkAuth() {
+  if (!adminToken) return;
+  const r = await fetch(API + '/api/superadmin/dashboard', { headers: { 'Authorization': 'Bearer ' + adminToken } });
+  const d = await r.json();
+  if (d.error && d.error.includes('utenticad')) {
+    localStorage.removeItem('saToken'); adminToken = '';
+  } else {
+    document.getElementById('loginWrap').style.display = 'none';
+    document.getElementById('adminPanel').style.display = 'flex';
+    loadDashboard();
+    const stored = localStorage.getItem('saEmail') || 'admin';
+    document.getElementById('adminEmailDisplay').textContent = stored;
+  }
+}
+checkAuth();
+</script>
+</body>
+</html>

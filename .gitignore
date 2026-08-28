@@ -14,3 +14,9 @@ build/
 .claude/
 *.keystore
 protect.keystore
+
+# Efi certificates (NEVER commit)
+*.p12
+*.der
+*.pem
+local.properties

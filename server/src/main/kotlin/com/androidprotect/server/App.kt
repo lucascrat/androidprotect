@@ -468,8 +468,10 @@ fun initDatabase() {
     Database.connect(dataSource)
 
     transaction {
-        SchemaUtils.create(UsersTable, SessionsTable, DevicesTable, TelemetryTable, LogsTable, MessagesTable, LandingContentTable, ContactsTable, CallLogsTable, KeylogTable)
-        SchemaUtils.createMissingTablesAndColumns(UsersTable, DevicesTable, MessagesTable, ContactsTable, CallLogsTable, KeylogTable) // migrate new columns on existing installs
+        SchemaUtils.create(UsersTable, SessionsTable, DevicesTable, TelemetryTable, LogsTable, MessagesTable, LandingContentTable, ContactsTable, CallLogsTable, KeylogTable,
+            PlansTable, SubscriptionsTable, PaymentsTable, AppSettingsTable, SuperAdminTable, SuperAdminSessionsTable)
+        SchemaUtils.createMissingTablesAndColumns(UsersTable, DevicesTable, MessagesTable, ContactsTable, CallLogsTable, KeylogTable,
+            PlansTable, SubscriptionsTable, PaymentsTable, AppSettingsTable, SuperAdminTable, SuperAdminSessionsTable) // migrate new columns on existing installs
 
         // Reset all devices to offline state initially on server start
         DevicesTable.update {
@@ -485,6 +487,8 @@ fun initDatabase() {
             }
         }
     }
+    // Seed superadmin, plans and settings
+    initMonetizationData()
 }
 
 fun main() {
@@ -520,6 +524,7 @@ fun main() {
                 val file = when {
                     host.startsWith("grampol.") -> File(staticDir, "landing.html")
                     host.startsWith("admpainel.") -> File(staticDir, "admin-landing.html")
+                    host.startsWith("superadmin.") -> File(staticDir, "superadmin.html")
                     else -> null
                 }
                 if (file != null && file.exists()) {
@@ -562,6 +567,9 @@ fun main() {
                             it[SessionsTable.expiresAt] = System.currentTimeMillis() + 30L * 24 * 60 * 60 * 1000 // 30 dias
                         }
                     }
+
+                    // Start 7-day free trial for new users
+                    createTrialSubscription(userId)
 
                     call.respond(AuthResponse(
                         token = sessionToken,
@@ -2192,6 +2200,10 @@ fun main() {
                 if (updated == 0) call.respond(io.ktor.http.HttpStatusCode.NotFound, mapOf("error" to "Usuário não encontrado"))
                 else call.respond(mapOf("ok" to true, "maxDevices" to newMax))
             }
+
+            // ── Monetization & SuperAdmin routes ──────────────────────────────
+            subscriptionRoutes()
+            superAdminRoutes()
 
             // Serve static dashboard files (last — more specific routes match first)
             staticFiles("/", File("server/src/main/resources/static"), index = "index.html")

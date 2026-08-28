@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Planos – AndroidProtect</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+:root{--bg:#0f172a;--surface:#1e293b;--border:#334155;--accent:#6366f1;--green:#10b981;--yellow:#f59e0b;--red:#ef4444;--text:#f1f5f9;--sub:#94a3b8}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+.topbar{background:var(--surface);border-bottom:1px solid var(--border);padding:14px 24px;display:flex;align-items:center;justify-content:space-between}
+.topbar .logo{font-weight:800;font-size:1.1rem;color:#fff;display:flex;align-items:center;gap:8px}
+.topbar .logo span{background:var(--accent);border-radius:8px;padding:4px 8px;font-size:.9rem}
+.topbar .user-info{color:var(--sub);font-size:.85rem}
+.container{max-width:1000px;margin:0 auto;padding:32px 20px}
+.status-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:24px;margin-bottom:32px;display:flex;align-items:center;gap:20px}
+.status-icon{width:48px;height:48px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.5rem;flex-shrink:0}
+.status-icon.trial{background:rgba(245,158,11,.15)}
+.status-icon.active{background:rgba(16,185,129,.15)}
+.status-icon.expired{background:rgba(239,68,68,.15)}
+.status-icon.none{background:rgba(99,102,241,.15)}
+.status-text h2{font-size:1rem;font-weight:600;margin-bottom:4px}
+.status-text p{color:var(--sub);font-size:.85rem}
+.badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:.75rem;font-weight:600}
+.badge.trial{background:rgba(245,158,11,.15);color:var(--yellow)}
+.badge.active{background:rgba(16,185,129,.15);color:var(--green)}
+.badge.expired{background:rgba(239,68,68,.15);color:var(--red)}
+.section-title{font-size:1.25rem;font-weight:700;margin-bottom:20px}
+.plans-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:20px;margin-bottom:40px}
+.plan-card{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:24px;cursor:pointer;transition:all .2s;position:relative}
+.plan-card:hover{border-color:var(--accent);transform:translateY(-2px)}
+.plan-card.selected{border-color:var(--accent);background:rgba(99,102,241,.07)}
+.plan-card.featured{border-color:var(--accent)}
+.plan-badge{position:absolute;top:-10px;left:50%;transform:translateX(-50%);background:var(--accent);color:#fff;font-size:.7rem;font-weight:700;padding:3px 12px;border-radius:20px;white-space:nowrap}
+.plan-name{font-weight:700;font-size:1rem;margin-bottom:4px}
+.plan-price{font-size:1.75rem;font-weight:800;color:var(--accent);margin-bottom:4px}
+.plan-price span{font-size:.9rem;font-weight:400;color:var(--sub)}
+.plan-duration{color:var(--sub);font-size:.8rem;margin-bottom:12px}
+.plan-devices{font-size:.82rem;color:var(--sub);padding-top:12px;border-top:1px solid var(--border)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;padding:12px 24px;border-radius:10px;font-weight:600;font-size:.9rem;cursor:pointer;border:none;transition:all .2s}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:#4f46e5}
+.btn-outline{background:transparent;color:var(--sub);border:1px solid var(--border)}
+.btn-outline:hover{border-color:var(--accent);color:var(--accent)}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+.pay-section{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:28px;margin-top:8px}
+.pay-section h3{font-size:1rem;font-weight:700;margin-bottom:20px}
+.pix-box{text-align:center}
+.pix-qr{border-radius:12px;margin-bottom:16px;max-width:200px;border:4px solid #fff}
+.pix-code-area{background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:16px;word-break:break-all;font-size:.75rem;color:var(--sub);max-height:80px;overflow:auto}
+.pix-copy-btn{width:100%;margin-bottom:12px}
+.pix-status{font-size:.82rem;color:var(--sub);display:flex;align-items:center;gap:6px;justify-content:center}
+.pix-status .dot{width:8px;height:8px;border-radius:50%;background:var(--yellow);animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.success-anim{text-align:center;padding:32px}
+.success-anim .check{font-size:3rem;margin-bottom:12px}
+.success-anim h3{font-weight:700;font-size:1.2rem;margin-bottom:6px}
+.success-anim p{color:var(--sub);font-size:.9rem}
+.loader{width:20px;height:20px;border:2px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+</style>
+</head>
+<body>
+<div class="topbar">
+  <div class="logo"><span>AP</span> AndroidProtect</div>
+  <div class="user-info" id="topUserInfo">Carregando…</div>
+</div>
+
+<div class="container">
+  <!-- Status atual -->
+  <div class="status-card" id="statusCard" style="display:none">
+    <div class="status-icon" id="statusIcon">⏳</div>
+    <div class="status-text">
+      <div id="statusBadge"></div>
+      <h2 id="statusTitle" style="margin-top:6px"></h2>
+      <p id="statusSub"></p>
+    </div>
+  </div>
+
+  <div class="section-title">Escolha seu plano</div>
+  <div class="plans-grid" id="plansGrid"></div>
+
+  <!-- Pagamento PIX -->
+  <div class="pay-section" id="paySection" style="display:none">
+    <h3 id="payTitle">Pagamento via PIX</h3>
+    <div class="pix-box" id="pixBox">
+      <div style="color:var(--sub);font-size:.9rem">Gerando cobrança…</div>
+    </div>
+    <div class="success-anim" id="successBox" style="display:none">
+      <div class="check">✅</div>
+      <h3>Pagamento confirmado!</h3>
+      <p>Seu plano foi ativado com sucesso.</p>
+      <button class="btn btn-primary" style="margin-top:20px" onclick="location.href='/'">Ir para o painel</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = '';
+let authToken = localStorage.getItem('authToken') || localStorage.getItem('token') || '';
+let selectedPlanId = null;
+let currentPaymentId = null;
+let pollInterval = null;
+
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (authToken) opts.headers['Authorization'] = 'Bearer ' + authToken;
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(API + path, opts);
+  return r.json();
+}
+
+async function init() {
+  if (!authToken) { location.href = '/'; return; }
+  try {
+    const me = await api('GET', '/api/auth/me');
+    if (me.error) { localStorage.clear(); location.href = '/'; return; }
+    document.getElementById('topUserInfo').textContent = me.email || me.username || '';
+    await loadStatus();
+    await loadPlans();
+  } catch(e) { location.href = '/'; }
+}
+
+async function loadStatus() {
+  const s = await api('GET', '/api/subscription/status');
+  const card = document.getElementById('statusCard');
+  card.style.display = 'flex';
+  const icon = document.getElementById('statusIcon');
+  const badge = document.getElementById('statusBadge');
+  const title = document.getElementById('statusTitle');
+  const sub = document.getElementById('statusSub');
+  if (s.status === 'trial') {
+    icon.className = 'status-icon trial'; icon.textContent = '⏳';
+    badge.innerHTML = '<span class="badge trial">Trial Gratuito</span>';
+    title.textContent = s.daysRemaining + ' dia(s) restante(s) no trial';
+    sub.textContent = 'Assine um plano para continuar monitorando após o período gratuito.';
+  } else if (s.status === 'active') {
+    icon.className = 'status-icon active'; icon.textContent = '✅';
+    badge.innerHTML = '<span class="badge active">Ativo — ' + (s.plan?.name || '') + '</span>';
+    title.textContent = s.daysRemaining + ' dia(s) restante(s)';
+    sub.textContent = 'Seu plano está ativo. Obrigado!';
+  } else if (s.status === 'expired') {
+    icon.className = 'status-icon expired'; icon.textContent = '🔴';
+    badge.innerHTML = '<span class="badge expired">Expirado</span>';
+    title.textContent = 'Acesso encerrado';
+    sub.textContent = 'Seu trial ou plano expirou. Renove para continuar.';
+  } else {
+    icon.className = 'status-icon none'; icon.textContent = '💳';
+    badge.innerHTML = '<span class="badge trial">Sem plano</span>';
+    title.textContent = 'Sem assinatura ativa';
+    sub.textContent = 'Escolha um plano abaixo para começar.';
+  }
+}
+
+async function loadPlans() {
+  const plans = await api('GET', '/api/plans');
+  const grid = document.getElementById('plansGrid');
+  grid.innerHTML = '';
+  plans.forEach(p => {
+    const card = document.createElement('div');
+    card.className = 'plan-card';
+    card.dataset.id = p.id;
+    card.innerHTML = `
+      <div class="plan-name">${p.name}</div>
+      <div class="plan-price">R$ ${p.priceStr}<span>/ ${p.durationDays >= 365 ? 'ano' : p.durationDays >= 180 ? '6 meses' : p.durationDays >= 90 ? '3 meses' : 'mês'}</span></div>
+      <div class="plan-duration">${p.durationDays} dias de acesso</div>
+      <div class="plan-devices">Até ${p.maxDevices} dispositivo(s)</div>
+    `;
+    card.addEventListener('click', () => selectPlan(p));
+    grid.appendChild(card);
+  });
+}
+
+function selectPlan(p) {
+  selectedPlanId = p.id;
+  document.querySelectorAll('.plan-card').forEach(c => c.classList.remove('selected'));
+  document.querySelector(`.plan-card[data-id="${p.id}"]`)?.classList.add('selected');
+  showPaySection(p);
+}
+
+async function showPaySection(p) {
+  const section = document.getElementById('paySection');
+  const pixBox = document.getElementById('pixBox');
+  const title = document.getElementById('payTitle');
+  title.textContent = `Pagamento — ${p.name} (R$ ${p.priceStr})`;
+  section.style.display = 'block';
+  document.getElementById('successBox').style.display = 'none';
+  pixBox.style.display = 'block';
+  pixBox.innerHTML = '<div style="color:var(--sub);display:flex;align-items:center;gap:8px;justify-content:center"><div class="loader"></div> Gerando cobrança PIX…</div>';
+  section.scrollIntoView({ behavior: 'smooth' });
+
+  const result = await api('POST', '/api/subscription/pay', { planId: String(p.id) });
+  if (result.error) {
+    pixBox.innerHTML = `<div style="color:var(--red)">${result.error}</div>`;
+    return;
+  }
+
+  if (result.status === 'paid') {
+    showSuccess();
+    return;
+  }
+
+  currentPaymentId = result.paymentId;
+  renderPix(result);
+  startPolling();
+}
+
+function renderPix(r) {
+  const pixBox = document.getElementById('pixBox');
+  const qrHtml = r.pixQrcode
+    ? `<img src="${r.pixQrcode}" class="pix-qr" alt="QR Code PIX">`
+    : '<div style="color:var(--sub);font-size:.85rem;margin-bottom:16px">QR code não disponível. Use o código abaixo.</div>';
+  pixBox.innerHTML = `
+    ${qrHtml}
+    <div style="font-size:.9rem;font-weight:600;margin-bottom:10px">Valor: <strong>R$ ${r.amountStr}</strong></div>
+    ${r.pixCode ? `
+    <div class="pix-code-area" id="pixCodeText">${r.pixCode}</div>
+    <button class="btn btn-primary pix-copy-btn" onclick="copyPix()">📋 Copiar código PIX</button>` : ''}
+    <div class="pix-status"><div class="dot"></div> Aguardando pagamento…</div>
+    <div style="color:var(--sub);font-size:.78rem;margin-top:8px">O código expira em 1 hora. Após o pagamento, a ativação é automática.</div>
+  `;
+}
+
+function copyPix() {
+  const code = document.getElementById('pixCodeText')?.textContent || '';
+  navigator.clipboard.writeText(code).then(() => alert('Código copiado!'));
+}
+
+function startPolling() {
+  clearInterval(pollInterval);
+  pollInterval = setInterval(async () => {
+    if (!currentPaymentId) return;
+    const r = await api('GET', `/api/payment/${currentPaymentId}`);
+    if (r.status === 'paid') { clearInterval(pollInterval); showSuccess(); }
+  }, 5000);
+}
+
+function showSuccess() {
+  document.getElementById('pixBox').style.display = 'none';
+  document.getElementById('successBox').style.display = 'block';
+  loadStatus();
+}
+
+init();
+</script>
+</body>
+</html>
