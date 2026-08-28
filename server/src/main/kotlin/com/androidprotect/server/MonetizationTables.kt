@@ -174,15 +174,19 @@ fun activateSubscription(userId: Int, planId: Int): Int {
 fun initMonetizationData() {
     val now = System.currentTimeMillis()
 
-    // SuperAdmin default account
+    // SuperAdmin default account — credentials from env vars (SUPERADMIN_EMAIL / SUPERADMIN_PASSWORD)
+    // NEVER hardcode passwords in source code.
     if (transaction { SuperAdminTable.selectAll().count() } == 0L) {
+        val adminEmail = System.getenv("SUPERADMIN_EMAIL") ?: "hlsistemas2025@gmail.com"
+        val adminPass  = System.getenv("SUPERADMIN_PASSWORD")
+            ?: error("SUPERADMIN_PASSWORD env var must be set on first boot to create the admin account")
         transaction {
             SuperAdminTable.insert {
-                it[email]    = "hlsistemas2025@gmail.com"
-                it[passHash] = hashPassword("Admin2026@@@@")
+                it[email]    = adminEmail
+                it[passHash] = hashPassword(adminPass)
             }
         }
-        println("SUPERADMIN: Default account created")
+        println("SUPERADMIN: Default account created for $adminEmail")
     }
 
     // Default settings
