@@ -65,6 +65,12 @@ fun Routing.superAdminRoutes() {
             val activeUsers = SubscriptionsTable.select {
                 (SubscriptionsTable.status eq "active") and (SubscriptionsTable.endDate greaterEq now)
             }.count()
+            // Users with any subscription record (trial or active — i.e. have ever registered)
+            val usersWithAccess = SubscriptionsTable
+                .slice(SubscriptionsTable.userId)
+                .select { SubscriptionsTable.status.inList(listOf("trial", "active")) and (SubscriptionsTable.endDate greaterEq now) }
+                .withDistinct()
+                .count()
             val expiredUsers = SubscriptionsTable.select {
                 SubscriptionsTable.status eq "expired"
             }.count()
@@ -107,6 +113,7 @@ fun Routing.superAdminRoutes() {
                 "totalUsers"          to totalUsers,
                 "trialUsers"          to trialUsers,
                 "activeUsers"         to activeUsers,
+                "usersWithAccess"     to usersWithAccess,
                 "expiredUsers"        to expiredUsers,
                 "monthlyRevenueCents" to monthlyRevenueCents,
                 "monthlyRevenueStr"   to centsToBrl(monthlyRevenueCents),
