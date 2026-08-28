@@ -65,12 +65,6 @@ fun Routing.superAdminRoutes() {
             val activeUsers = SubscriptionsTable.select {
                 (SubscriptionsTable.status eq "active") and (SubscriptionsTable.endDate greaterEq now)
             }.count()
-            // Users with any subscription record (trial or active — i.e. have ever registered)
-            val usersWithAccess = SubscriptionsTable
-                .slice(SubscriptionsTable.userId)
-                .select { SubscriptionsTable.status.inList(listOf("trial", "active")) and (SubscriptionsTable.endDate greaterEq now) }
-                .withDistinct()
-                .count()
             val expiredUsers = SubscriptionsTable.select {
                 SubscriptionsTable.status eq "expired"
             }.count()
@@ -113,7 +107,6 @@ fun Routing.superAdminRoutes() {
                 "totalUsers"          to totalUsers,
                 "trialUsers"          to trialUsers,
                 "activeUsers"         to activeUsers,
-                "usersWithAccess"     to usersWithAccess,
                 "expiredUsers"        to expiredUsers,
                 "monthlyRevenueCents" to monthlyRevenueCents,
                 "monthlyRevenueStr"   to centsToBrl(monthlyRevenueCents),
@@ -269,8 +262,13 @@ fun Routing.superAdminRoutes() {
         val size = 50
         val offset = ((page - 1) * size).toLong()
 
-        val users = transaction {
-            UsersTable.selectAll()
+        // Pre-load all plans to avoid nested transactions (SQLite pool=1 deadlocks)
+        val planNamesById: Map<Int, String> = transaction {
+            PlansTable.selectAll().associate { it[PlansTable.id] to it[PlansTable.name] }
+        }
+
+        val (users, total) = transaction {
+            val rows = UsersTable.selectAll()
                 .orderBy(UsersTable.createdAt to SortOrder.DESC)
                 .limit(size, offset)
                 .map { u ->
@@ -285,25 +283,29 @@ fun Routing.superAdminRoutes() {
                         if (e < now && s in listOf("trial", "active")) "expired" else s
                     } ?: "none"
 
+                    // Use pre-loaded plan names — no nested transaction needed
                     val planName = sub?.get(SubscriptionsTable.planId)?.let { pid ->
-                        transaction { PlansTable.select { PlansTable.id eq pid }.firstOrNull()?.get(PlansTable.name) }
+                        planNamesById[pid]
                     }
 
-                    val deviceCount = DevicesTable.select { DevicesTable.ownerId eq uid }.count()
+                    val deviceCount = DevicesTable.select {
+                        DevicesTable.ownerId eq uid
+                    }.count()
 
                     mapOf(
-                        "id"          to uid,
-                        "email"       to u[UsersTable.email],
-                        "username"    to u[UsersTable.username],
-                        "createdAt"   to u[UsersTable.createdAt],
-                        "subStatus"   to subStatus,
-                        "planName"    to (planName ?: if (subStatus == "trial") "Trial" else "-"),
-                        "subEnd"      to (sub?.get(SubscriptionsTable.endDate)),
-                        "devices"     to deviceCount
+                        "id"        to uid,
+                        "email"     to u[UsersTable.email],
+                        "username"  to u[UsersTable.username],
+                        "createdAt" to u[UsersTable.createdAt],
+                        "subStatus" to subStatus,
+                        "planName"  to (planName ?: if (subStatus == "trial") "Trial" else "-"),
+                        "subEnd"    to (sub?.get(SubscriptionsTable.endDate) ?: 0L), // never null
+                        "devices"   to deviceCount
                     )
                 }
+            val count = UsersTable.selectAll().count()
+            Pair(rows, count)
         }
-        val total = transaction { UsersTable.selectAll().count() }
         call.respond(mapOf("users" to users, "total" to total, "page" to page, "size" to size))
     }
 
