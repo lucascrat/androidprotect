@@ -31,6 +31,10 @@ private suspend fun ApplicationCall.respondJson(data: Any?) {
     respondText(data.toJson().toString(), ContentType.Application.Json)
 }
 
+private suspend fun ApplicationCall.respondJson(status: HttpStatusCode, data: Any?) {
+    respondText(data.toJson().toString(), ContentType.Application.Json, status)
+}
+
 fun Routing.superAdminRoutes() {
 
     // ── POST /api/superadmin/login ───────────────────────────────────────
@@ -198,7 +202,7 @@ fun Routing.superAdminRoutes() {
                     it[PlansTable.createdAt]   = System.currentTimeMillis()
                 } get PlansTable.id
             }
-            call.respond(mapOf("ok" to true, "id" to newId))
+            call.respondJson(mapOf("ok" to true, "id" to newId))
         } catch (e: Exception) {
             call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro interno")))
         }
@@ -268,7 +272,7 @@ fun Routing.superAdminRoutes() {
             part.dispose()
         }
         if (fileUrl.isBlank()) call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Nenhum arquivo recebido"))
-        else call.respond(mapOf("ok" to true, "url" to fileUrl))
+        else call.respondJson(mapOf("ok" to true, "url" to fileUrl))
     }
 
     // Serve plan images
@@ -435,7 +439,7 @@ fun Routing.superAdminRoutes() {
                             (SubscriptionsTable.status.inList(listOf("trial","active")))
                         }) { it[SubscriptionsTable.status] = "cancelled" }
                     }
-                    call.respond(mapOf("ok" to true, "message" to "Assinatura cancelada"))
+                    call.respondJson(mapOf("ok" to true, "message" to "Assinatura cancelada"))
                 }
                 "trial" -> {
                     val trialDays = body["days"]?.toIntOrNull() ?: 7
@@ -454,7 +458,7 @@ fun Routing.superAdminRoutes() {
                             it[SubscriptionsTable.createdAt] = now
                         }
                     }
-                    call.respond(mapOf("ok" to true, "message" to "Trial de $trialDays dias ativado"))
+                    call.respondJson(mapOf("ok" to true, "message" to "Trial de $trialDays dias ativado"))
                 }
                 else -> {
                     val planId = body["planId"]?.toIntOrNull()
@@ -482,7 +486,7 @@ fun Routing.superAdminRoutes() {
                             it[UsersTable.maxDevices] = plan[PlansTable.maxDevices]
                         }
                     }
-                    call.respond(mapOf("ok" to true, "subscriptionId" to subId,
+                    call.respondJson(mapOf("ok" to true, "subscriptionId" to subId,
                         "message" to "Plano ${plan[PlansTable.name]} ativado por $days dias"))
                 }
             }
@@ -523,6 +527,46 @@ fun Routing.superAdminRoutes() {
         call.respondJson(mapOf("payments" to payments))
         } catch (e: Exception) {
             call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro ao listar pagamentos")))
+        }
+    }
+
+    // ── POST /api/superadmin/payments/{id}/approve — confirma pagamento manual ──
+    // Necessário para PIX estático (sem API Efi não há webhook de confirmação).
+    post("/api/superadmin/payments/{id}/approve") {
+        if (getSuperAdminToken(call) == null)
+            return@post call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+        val paymentId = call.parameters["id"]?.toIntOrNull()
+            ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "ID inválido"))
+        try {
+            val payment = transaction {
+                PaymentsTable.select { PaymentsTable.id eq paymentId }.firstOrNull()
+            } ?: return@post call.respond(HttpStatusCode.NotFound, mapOf("error" to "Pagamento não encontrado"))
+
+            if (payment[PaymentsTable.status] == "paid")
+                return@post call.respondJson(mapOf("ok" to true, "message" to "Pagamento já estava confirmado"))
+
+            val userId = payment[PaymentsTable.userId]
+            val planId = payment[PaymentsTable.planId]
+            val subId  = activateSubscription(userId, planId)
+
+            transaction {
+                PaymentsTable.update({ PaymentsTable.id eq paymentId }) {
+                    it[PaymentsTable.status]         = "paid"
+                    it[PaymentsTable.subscriptionId] = subId
+                    it[PaymentsTable.paidAt]         = System.currentTimeMillis()
+                }
+                PlansTable.select { PlansTable.id eq planId }.firstOrNull()?.let { plan ->
+                    UsersTable.update({ UsersTable.id eq userId }) {
+                        it[UsersTable.maxDevices] = plan[PlansTable.maxDevices]
+                    }
+                }
+            }
+            println("PAYMENT: Payment $paymentId manually approved for user $userId plan $planId")
+            call.respondJson(mapOf("ok" to true, "subscriptionId" to subId,
+                "message" to "Pagamento confirmado e plano ativado"))
+        } catch (e: Exception) {
+            call.respondJson(HttpStatusCode.InternalServerError,
+                mapOf("error" to (e.message ?: "Erro ao aprovar pagamento")))
         }
     }
 }
