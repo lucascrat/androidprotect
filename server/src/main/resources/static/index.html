@@ -1089,15 +1089,20 @@
     const qrHtml = r.pixQrcode
       ? `<img src="${r.pixQrcode}" class="mp-pix-qr" alt="QR Code PIX">`
       : '<div style="color:#64748b;font-size:.82rem;margin-bottom:12px">QR code não disponível. Use o código abaixo.</div>';
+    // autoConfirm=false → PIX estático: liberação após conferência do pagamento
+    const hint = r.autoConfirm === false
+      ? 'Após o pagamento, seu plano é liberado assim que confirmarmos o recebimento. Esta tela atualiza sozinha.'
+      : 'O código expira em 1 hora. Ativação automática após o pagamento.';
     area.innerHTML = `
       ${qrHtml}
       <div style="font-size:.88rem;font-weight:600;margin-bottom:10px">Valor: <strong>R$ ${mpEsc(r.amountStr)}</strong></div>
+      ${r.pixKey ? `<div style="color:#94a3b8;font-size:.78rem;margin-bottom:10px">Chave PIX: <strong style="color:#e2e8f0">${mpEsc(r.pixKey)}</strong></div>` : ''}
       ${r.pixCode ? `
         <div class="mp-pix-code" id="mpPixCodeText">${mpEsc(r.pixCode)}</div>
         <button class="mp-btn mp-btn-primary" onclick="mpCopyPix()" style="width:100%;margin-bottom:10px">📋 Copiar código PIX</button>
       ` : ''}
       <div class="mp-pix-status"><div class="dot"></div> Aguardando pagamento…</div>
-      <div style="color:#64748b;font-size:.74rem;margin-top:8px">O código expira em 1 hora. Ativação automática após pagamento.</div>
+      <div style="color:#64748b;font-size:.74rem;margin-top:8px">${hint}</div>
     `;
   }
 
