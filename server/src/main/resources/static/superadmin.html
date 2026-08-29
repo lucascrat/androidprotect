@@ -351,7 +351,7 @@ input:checked+.slider:before{transform:translateX(17px)}
           </div>
           <div class="table-scroll">
             <table>
-              <thead><tr><th>Email</th><th>Nome</th><th>Plano</th><th>Status</th><th>Expira</th><th>Dispositivos</th><th>Cadastro</th></tr></thead>
+              <thead><tr><th>Email</th><th>Nome</th><th>Plano</th><th>Status</th><th>Expira</th><th>Dispositivos</th><th>Cadastro</th><th>Ações</th></tr></thead>
               <tbody id="usersBody"></tbody>
             </table>
           </div>
@@ -467,11 +467,46 @@ input:checked+.slider:before{transform:translateX(17px)}
   </div>
 </div>
 
+<!-- ─── CHANGE USER PLAN MODAL ─────────────────────────────── -->
+<div class="modal-overlay" id="changePlanModal">
+  <div class="modal">
+    <h2>✏️ Alterar Plano do Usuário</h2>
+    <p style="color:var(--sub);font-size:.82rem;margin-bottom:16px">
+      Usuário: <strong id="cpUserEmail" style="color:var(--text)"></strong>
+    </p>
+    <div class="form-group">
+      <label>Ação</label>
+      <select id="cpAction" onchange="updateCpFields()">
+        <option value="assign">Atribuir Plano Pago</option>
+        <option value="trial">Ativar / Estender Trial</option>
+        <option value="cancel">Cancelar Assinatura</option>
+      </select>
+    </div>
+    <div id="cpPlanRow" class="form-group">
+      <label>Plano</label>
+      <select id="cpPlanId"></select>
+    </div>
+    <div id="cpDaysRow" class="form-group">
+      <label>Duração em dias <span style="font-weight:400;color:var(--sub)">(deixe em branco para usar o padrão do plano)</span></label>
+      <input id="cpDays" type="number" placeholder="Ex: 30" min="1" max="3650">
+    </div>
+    <div id="cpTrialRow" class="form-group" style="display:none">
+      <label>Dias de Trial</label>
+      <input id="cpTrialDays" type="number" value="7" min="1" max="365">
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeChangePlanModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveChangePlan()">✅ Confirmar</button>
+    </div>
+  </div>
+</div>
+
 <script>
 const API = '';
 let adminToken = localStorage.getItem('saToken') || '';
 let currentPage = 1;
 let allUsers = [];
+let allPlans = [];
 let revenueChart = null;
 let planChart = null;
 
@@ -703,10 +738,11 @@ async function deletePlan(id, name) {
 
 // ── Users ──────────────────────────────────────────────────────────
 async function loadUsers() {
-  document.getElementById('usersBody').innerHTML = '<tr><td colspan="7" class="empty">Carregando…</td></tr>';
+  document.getElementById('usersBody').innerHTML = '<tr><td colspan="8" class="empty">Carregando…</td></tr>';
+  if (!allPlans.length) { const rp = await sa('GET', '/api/superadmin/plans'); if (Array.isArray(rp)) allPlans = rp; }
   const r = await sa('GET', `/api/superadmin/users?page=${currentPage}`);
   if (r.error) {
-    document.getElementById('usersBody').innerHTML = `<tr><td colspan="7" class="empty" style="color:var(--red)">Erro: ${esc(r.error)}</td></tr>`;
+    document.getElementById('usersBody').innerHTML = `<tr><td colspan="8" class="empty" style="color:var(--red)">Erro: ${esc(r.error)}</td></tr>`;
     return;
   }
   allUsers = r.users || [];
@@ -722,7 +758,7 @@ async function loadUsers() {
 function renderUsers(users) {
   const tbody = document.getElementById('usersBody');
   if (!users.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty">Nenhum usuário encontrado</td></tr>'; return;
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">Nenhum usuário encontrado</td></tr>'; return;
   }
   const statusBadge = { trial:'trial', active:'active', expired:'expired', none:'none', cancelled:'none' };
   tbody.innerHTML = users.map(u => {
@@ -737,8 +773,74 @@ function renderUsers(users) {
       <td>${exp}</td>
       <td style="text-align:center">${u.devices ?? 0}</td>
       <td style="color:var(--sub);font-size:.79rem">${cad}</td>
+      <td style="white-space:nowrap">
+        <button class="btn btn-sm btn-outline" onclick="openChangePlanModal(${u.id},'${esc(u.email)}')">🔄 Plano</button>
+        <button class="btn btn-sm btn-danger" onclick="deleteUser(${u.id},'${esc(u.email)}')" style="margin-left:4px">🗑️</button>
+      </td>
     </tr>`;
   }).join('');
+}
+
+async function deleteUser(id, email) {
+  if (!confirm(`Excluir o usuário "${email}"?\n\nTodos os dados (pagamentos, assinaturas, sessões) serão removidos permanentemente.`)) return;
+  const r = await sa('DELETE', `/api/superadmin/users/${id}`);
+  if (r.ok) { alert('✅ Usuário excluído com sucesso'); loadUsers(); }
+  else alert(r.error || 'Erro ao excluir usuário');
+}
+
+let editingUserId = null;
+
+function openChangePlanModal(id, email) {
+  editingUserId = id;
+  document.getElementById('changePlanModal').classList.add('open');
+  document.getElementById('cpUserEmail').textContent = email;
+  document.getElementById('cpAction').value = 'assign';
+  document.getElementById('cpDays').value = '';
+  document.getElementById('cpTrialDays').value = 7;
+  renderCpPlanOptions();
+  updateCpFields();
+}
+
+function closeChangePlanModal() {
+  document.getElementById('changePlanModal').classList.remove('open');
+  editingUserId = null;
+}
+
+function renderCpPlanOptions() {
+  const sel = document.getElementById('cpPlanId');
+  const active = allPlans.filter(p => p.isActive);
+  sel.innerHTML = active.length
+    ? active.map(p => `<option value="${p.id}">R$ ${esc(p.priceStr)} — ${esc(p.name)} (${p.durationDays} dias, ${p.maxDevices} disp.)</option>`).join('')
+    : '<option value="">Nenhum plano ativo</option>';
+}
+
+function updateCpFields() {
+  const action = document.getElementById('cpAction').value;
+  document.getElementById('cpPlanRow').style.display = action === 'assign' ? '' : 'none';
+  document.getElementById('cpDaysRow').style.display = action === 'assign' ? '' : 'none';
+  document.getElementById('cpTrialRow').style.display = action === 'trial' ? '' : 'none';
+}
+
+async function saveChangePlan() {
+  if (!editingUserId) return;
+  const action = document.getElementById('cpAction').value;
+  const body = { action };
+  if (action === 'assign') {
+    body.planId = document.getElementById('cpPlanId').value;
+    const days = document.getElementById('cpDays').value.trim();
+    if (days) body.days = days;
+    if (!body.planId) { alert('Selecione um plano'); return; }
+  } else if (action === 'trial') {
+    body.days = document.getElementById('cpTrialDays').value || '7';
+  }
+  const r = await sa('PUT', `/api/superadmin/users/${editingUserId}/plan`, body);
+  if (r.ok) {
+    alert('✅ ' + (r.message || 'Alterado com sucesso'));
+    closeChangePlanModal();
+    loadUsers();
+  } else {
+    alert(r.error || 'Erro ao alterar plano');
+  }
 }
 
 function filterUsers() {

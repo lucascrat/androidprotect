@@ -11,6 +11,19 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
 import org.jetbrains.exposed.sql.transactions.transaction
 
+// Shared JSON helper — kotlinx.serialization cannot handle Map<String,Any?> at runtime
+internal fun Any?.toJsonEl(): JsonElement = when (this) {
+    null         -> JsonNull
+    is Boolean   -> JsonPrimitive(this)
+    is Number    -> JsonPrimitive(this)
+    is String    -> JsonPrimitive(this)
+    is Map<*, *> -> JsonObject(entries.associate { (k, v) -> k.toString() to v.toJsonEl() })
+    is List<*>   -> JsonArray(map { it.toJsonEl() })
+    else         -> JsonPrimitive(toString())
+}
+internal suspend fun ApplicationCall.respondJson2(data: Any?) =
+    respondText(data.toJsonEl().toString(), ContentType.Application.Json)
+
 fun Routing.subscriptionRoutes() {
 
     // ── GET /api/plans — list active plans (public) ────────────────────────
@@ -31,14 +44,14 @@ fun Routing.subscriptionRoutes() {
                     )
                 }
         }
-        call.respond(plans)
+        call.respondJson2(plans)
     }
 
     // ── GET /api/subscription/status ──────────────────────────────────────
     get("/api/subscription/status") {
         val userId = getSessionUserId(call)
             ?: return@get call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
-        call.respond(getUserSubscriptionStatus(userId))
+        call.respondJson2(getUserSubscriptionStatus(userId))
     }
 
     // ── POST /api/subscription/pay — create PIX payment ──────────────────
@@ -84,7 +97,7 @@ fun Routing.subscriptionRoutes() {
                         it[PaymentsTable.pixQrcodeBase64] = pixResult.imagemQrcode
                     }
                 }
-                call.respond(mapOf(
+                call.respondJson2(mapOf(
                     "paymentId"    to paymentId,
                     "method"       to "pix",
                     "status"       to "pending",

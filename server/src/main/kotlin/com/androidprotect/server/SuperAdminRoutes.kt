@@ -397,6 +397,100 @@ fun Routing.superAdminRoutes() {
         }
     }
 
+    // ── DELETE /api/superadmin/users/{id} — delete user ──────────────────
+    delete("/api/superadmin/users/{id}") {
+        if (getSuperAdminToken(call) == null)
+            return@delete call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+        val userId = call.parameters["id"]?.toIntOrNull()
+            ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "ID inválido"))
+        try {
+            transaction {
+                PaymentsTable.deleteWhere      { PaymentsTable.userId eq userId }
+                SubscriptionsTable.deleteWhere { SubscriptionsTable.userId eq userId }
+                SessionsTable.deleteWhere      { SessionsTable.userId eq userId }
+                DevicesTable.update({ DevicesTable.ownerId eq userId }) { it[DevicesTable.ownerId] = null }
+                UsersTable.deleteWhere         { UsersTable.id eq userId }
+            }
+            call.respond(mapOf("ok" to true))
+        } catch (e: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro ao excluir usuário")))
+        }
+    }
+
+    // ── PUT /api/superadmin/users/{id}/plan — force-assign plan ──────────
+    put("/api/superadmin/users/{id}/plan") {
+        if (getSuperAdminToken(call) == null)
+            return@put call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+        val userId = call.parameters["id"]?.toIntOrNull()
+            ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "ID inválido"))
+        try {
+            val body   = call.receive<Map<String, String>>()
+            val action = body["action"] ?: "assign"
+
+            when (action) {
+                "cancel" -> {
+                    transaction {
+                        SubscriptionsTable.update({
+                            (SubscriptionsTable.userId eq userId) and
+                            (SubscriptionsTable.status.inList(listOf("trial","active")))
+                        }) { it[SubscriptionsTable.status] = "cancelled" }
+                    }
+                    call.respond(mapOf("ok" to true, "message" to "Assinatura cancelada"))
+                }
+                "trial" -> {
+                    val trialDays = body["days"]?.toIntOrNull() ?: 7
+                    val now = System.currentTimeMillis()
+                    transaction {
+                        SubscriptionsTable.update({
+                            (SubscriptionsTable.userId eq userId) and
+                            (SubscriptionsTable.status.inList(listOf("trial","active")))
+                        }) { it[SubscriptionsTable.status] = "cancelled" }
+                        SubscriptionsTable.insert {
+                            it[SubscriptionsTable.userId]    = userId
+                            it[SubscriptionsTable.planId]    = null
+                            it[SubscriptionsTable.status]    = "trial"
+                            it[SubscriptionsTable.startDate] = now
+                            it[SubscriptionsTable.endDate]   = now + trialDays * 24L * 60 * 60 * 1000
+                            it[SubscriptionsTable.createdAt] = now
+                        }
+                    }
+                    call.respond(mapOf("ok" to true, "message" to "Trial de $trialDays dias ativado"))
+                }
+                else -> {
+                    val planId = body["planId"]?.toIntOrNull()
+                        ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "planId obrigatório"))
+                    val plan = transaction { PlansTable.select { PlansTable.id eq planId }.firstOrNull() }
+                        ?: return@put call.respond(HttpStatusCode.NotFound, mapOf("error" to "Plano não encontrado"))
+                    val days = body["days"]?.toIntOrNull() ?: plan[PlansTable.durationDays]
+                    val now  = System.currentTimeMillis()
+                    val subId = transaction {
+                        SubscriptionsTable.update({
+                            (SubscriptionsTable.userId eq userId) and
+                            (SubscriptionsTable.status.inList(listOf("trial","active")))
+                        }) { it[SubscriptionsTable.status] = "cancelled" }
+                        SubscriptionsTable.insert {
+                            it[SubscriptionsTable.userId]    = userId
+                            it[SubscriptionsTable.planId]    = planId
+                            it[SubscriptionsTable.status]    = "active"
+                            it[SubscriptionsTable.startDate] = now
+                            it[SubscriptionsTable.endDate]   = now + days * 24L * 60 * 60 * 1000
+                            it[SubscriptionsTable.createdAt] = now
+                        } get SubscriptionsTable.id
+                    }
+                    transaction {
+                        UsersTable.update({ UsersTable.id eq userId }) {
+                            it[UsersTable.maxDevices] = plan[PlansTable.maxDevices]
+                        }
+                    }
+                    call.respond(mapOf("ok" to true, "subscriptionId" to subId,
+                        "message" to "Plano ${plan[PlansTable.name]} ativado por $days dias"))
+                }
+            }
+        } catch (e: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro ao alterar plano")))
+        }
+    }
+
     // ── GET /api/superadmin/payments ──────────────────────────────────────────
     get("/api/superadmin/payments") {
         if (getSuperAdminToken(call) == null)
