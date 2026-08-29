@@ -18,7 +18,7 @@
 }
 html,body{height:100%;font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);font-size:14px}
 
-/* ── Sidebar ───────────────────────────────────────────────── */
+/* ── Sidebar ──────────────────────────────────────────── */
 .sidebar{
   width:var(--sidebar-w);min-height:100vh;background:var(--sidebar);
   border-right:1px solid var(--border);display:flex;flex-direction:column;
@@ -45,7 +45,7 @@ html,body{height:100%;font-family:'Inter',sans-serif;background:var(--bg);color:
 .btn-logout{width:100%;background:transparent;border:1px solid var(--border);color:var(--sub);border-radius:8px;padding:7px;cursor:pointer;font-size:.78rem;transition:all .18s;font-family:inherit}
 .btn-logout:hover{border-color:var(--red);color:var(--red)}
 
-/* ── Main layout ───────────────────────────────────────────── */
+/* ── Main layout ────────────────────────────────────────── */
 .main{margin-left:var(--sidebar-w);display:flex;flex-direction:column;min-height:100vh}
 .topbar{
   background:var(--surface);border-bottom:1px solid var(--border);
@@ -64,7 +64,7 @@ html,body{height:100%;font-family:'Inter',sans-serif;background:var(--bg);color:
 .topbar .time{color:var(--sub);font-size:.78rem;white-space:nowrap}
 .content{padding:20px;flex:1;overflow-x:hidden}
 
-/* ── KPI Cards ─────────────────────────────────────────────── */
+/* ── KPI Cards ──────────────────────────────────────────── */
 .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:22px}
 .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px}
 .card .label{font-size:.75rem;color:var(--sub);font-weight:500;margin-bottom:10px;display:flex;align-items:center;gap:6px}
@@ -76,12 +76,12 @@ html,body{height:100%;font-family:'Inter',sans-serif;background:var(--bg);color:
 .card.red .value{color:var(--red)}
 .card.blue .value{color:var(--blue)}
 
-/* ── Charts ────────────────────────────────────────────────── */
+/* ── Charts ────────────────────────────────────────────── */
 .charts-row{display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-bottom:22px}
 .chart-box{background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:18px;min-width:0}
 .chart-box h3{font-size:.85rem;font-weight:600;margin-bottom:14px;color:var(--sub)}
 
-/* ── Tables ────────────────────────────────────────────────── */
+/* ── Tables ────────────────────────────────────────────── */
 .table-box{background:var(--surface);border:1px solid var(--border);border-radius:14px;overflow:hidden;margin-bottom:18px}
 .table-header{padding:14px 18px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:10px}
 .table-header h3{font-size:.9rem;font-weight:700}
@@ -98,7 +98,7 @@ tr:hover td{background:rgba(99,102,241,.04)}
 .badge.paid{background:rgba(16,185,129,.15);color:var(--green)}
 .badge.pending{background:rgba(245,158,11,.15);color:var(--yellow)}
 
-/* ── Buttons ───────────────────────────────────────────────── */
+/* ── Buttons ────────────────────────────────────────────── */
 .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 14px;border-radius:8px;font-weight:600;font-size:.8rem;cursor:pointer;border:none;transition:all .18s;font-family:inherit;white-space:nowrap}
 .btn-primary{background:var(--accent);color:#fff}
 .btn-primary:hover{background:var(--accent2)}
@@ -108,7 +108,7 @@ tr:hover td{background:rgba(99,102,241,.04)}
 .btn-outline{background:transparent;color:var(--sub);border:1px solid var(--border)}
 .btn-outline:hover{border-color:var(--accent);color:var(--accent)}
 
-/* ── Modal ─────────────────────────────────────────────────── */
+/* ── Modal ────────────────────────────────────────────── */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:999;padding:16px}
 .modal-overlay.open{display:flex}
 .modal{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:24px;width:100%;max-width:500px;max-height:90vh;overflow-y:auto}
@@ -121,7 +121,7 @@ tr:hover td{background:rgba(99,102,241,.04)}
 .form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .modal-actions{display:flex;gap:10px;justify-content:flex-end;margin-top:18px;flex-wrap:wrap}
 
-/* ── Toggle switch ─────────────────────────────────────────── */
+/* ── Toggle switch ────────────────────────────────────────── */
 .toggle-switch{display:flex;align-items:center;gap:8px}
 .switch{position:relative;width:38px;height:21px;flex-shrink:0}
 .switch input{opacity:0;width:0;height:0;position:absolute}
@@ -130,11 +130,11 @@ tr:hover td{background:rgba(99,102,241,.04)}
 input:checked+.slider{background:var(--accent)}
 input:checked+.slider:before{transform:translateX(17px)}
 
-/* ── Sections ──────────────────────────────────────────────── */
+/* ── Sections ────────────────────────────────────────────── */
 .section{display:none}
 .section.active{display:block}
 
-/* ── Login ─────────────────────────────────────────────────── */
+/* ── Login ────────────────────────────────────────────── */
 .login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);padding:16px}
 .login-card{background:var(--surface);border:1px solid var(--border);border-radius:20px;padding:36px;width:100%;max-width:380px}
 .login-card .logo{font-weight:800;font-size:1.1rem;margin-bottom:6px;display:flex;align-items:center;gap:10px}
@@ -142,7 +142,7 @@ input:checked+.slider:before{transform:translateX(17px)}
 .login-card .sub{color:var(--sub);font-size:.83rem;margin-bottom:24px}
 .login-error{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:var(--red);padding:10px 14px;border-radius:8px;font-size:.8rem;margin-bottom:14px;display:none}
 
-/* ── Search & pagination ───────────────────────────────────── */
+/* ── Search & pagination ───────────────────────────────────────── */
 .search-box{background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-size:.83rem;font-family:inherit;outline:none;width:200px;max-width:100%}
 .search-box:focus{border-color:var(--accent)}
 .empty{text-align:center;padding:36px;color:var(--sub)}
@@ -151,12 +151,12 @@ input:checked+.slider:before{transform:translateX(17px)}
 .page-btn:hover{border-color:var(--accent);color:var(--accent)}
 .page-btn:disabled{opacity:.4;cursor:not-allowed}
 
-/* ── Settings grid ─────────────────────────────────────────── */
+/* ── Settings grid ──────────────────────────────────────────── */
 .settings-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;max-width:820px}
 
-/* ══════════════════════════════════════════════════════════════
+/* ══════════════════════════════════════════════════════════
    RESPONSIVE — Tablet
-══════════════════════════════════════════════════════════════ */
+══════════════════════════════════════════════════════════ */
 @media(max-width:1100px){
   .cards{grid-template-columns:1fr 1fr}
 }
@@ -164,9 +164,9 @@ input:checked+.slider:before{transform:translateX(17px)}
   .charts-row{grid-template-columns:1fr}
 }
 
-/* ══════════════════════════════════════════════════════════════
+/* ══════════════════════════════════════════════════════════
    RESPONSIVE — Mobile (≤ 768px)
-══════════════════════════════════════════════════════════════ */
+══════════════════════════════════════════════════════════ */
 @media(max-width:768px){
   /* Sidebar: hidden off-screen, slides in as drawer */
   .sidebar{transform:translateX(-100%)}
@@ -216,9 +216,9 @@ input:checked+.slider:before{transform:translateX(17px)}
   .login-card{padding:28px 20px}
 }
 
-/* ══════════════════════════════════════════════════════════════
+/* ══════════════════════════════════════════════════════════
    RESPONSIVE — Small phones (≤ 400px)
-══════════════════════════════════════════════════════════════ */
+══════════════════════════════════════════════════════════ */
 @media(max-width:400px){
   .cards{grid-template-columns:1fr}
   .card .value{font-size:1.55rem}
@@ -227,7 +227,7 @@ input:checked+.slider:before{transform:translateX(17px)}
 </head>
 <body>
 
-<!-- ─── LOGIN ─────────────────────────────────────────────── -->
+<!-- ─── LOGIN ──────────────────────────────────────────────── -->
 <div class="login-wrap" id="loginWrap">
   <div class="login-card">
     <div class="logo"><div class="icon">🛡️</div> SuperAdmin</div>
@@ -246,7 +246,7 @@ input:checked+.slider:before{transform:translateX(17px)}
   </div>
 </div>
 
-<!-- ─── ADMIN PANEL ──────────────────────────────────────── -->
+<!-- ─── ADMIN PANEL ────────────────────────────────────────────── -->
 <div id="adminPanel" style="display:none;width:100%">
 
   <!-- Sidebar overlay (mobile tap-to-close) -->
@@ -290,7 +290,7 @@ input:checked+.slider:before{transform:translateX(17px)}
 
     <div class="content">
 
-      <!-- ── DASHBOARD ──────────────────────────────────── -->
+      <!-- ── DASHBOARD ───────────────────────────────────── -->
       <div class="section active" id="sec-dashboard">
         <div class="cards">
           <div class="card accent">
@@ -320,13 +320,13 @@ input:checked+.slider:before{transform:translateX(17px)}
             <canvas id="revenueChart" height="120"></canvas>
           </div>
           <div class="chart-box">
-            <h3>🥧 Distribuição por plano</h3>
+            <h3>🫙 Distribuição por plano</h3>
             <canvas id="planChart" height="180"></canvas>
           </div>
         </div>
       </div>
 
-      <!-- ── PLANS ──────────────────────────────────────── -->
+      <!-- ── PLANS ────────────────────────────────────────── -->
       <div class="section" id="sec-plans">
         <div class="table-box">
           <div class="table-header">
@@ -342,7 +342,7 @@ input:checked+.slider:before{transform:translateX(17px)}
         </div>
       </div>
 
-      <!-- ── USERS ──────────────────────────────────────── -->
+      <!-- ── USERS ────────────────────────────────────────── -->
       <div class="section" id="sec-users">
         <div class="table-box">
           <div class="table-header">
@@ -363,20 +363,20 @@ input:checked+.slider:before{transform:translateX(17px)}
         </div>
       </div>
 
-      <!-- ── PAYMENTS ───────────────────────────────────── -->
+      <!-- ── PAYMENTS ───────────────────────────────────────── -->
       <div class="section" id="sec-payments">
         <div class="table-box">
           <div class="table-header"><h3>Pagamentos</h3></div>
           <div class="table-scroll">
             <table>
-              <thead><tr><th>ID</th><th>Usuário</th><th>Plano</th><th>Valor</th><th>Método</th><th>Status</th><th>Data</th></tr></thead>
+              <thead><tr><th>ID</th><th>Usuário</th><th>Plano</th><th>Valor</th><th>Método</th><th>Status</th><th>Data</th><th>Ações</th></tr></thead>
               <tbody id="paymentsBody"></tbody>
             </table>
           </div>
         </div>
       </div>
 
-      <!-- ── SETTINGS ───────────────────────────────────── -->
+      <!-- ── SETTINGS ───────────────────────────────────────── -->
       <div class="section" id="sec-settings">
         <div class="settings-grid">
           <div class="table-box">
@@ -414,7 +414,7 @@ input:checked+.slider:before{transform:translateX(17px)}
   </div><!-- /main -->
 </div><!-- /adminPanel -->
 
-<!-- ─── PLAN MODAL ─────────────────────────────────────────── -->
+<!-- ─── PLAN MODAL ──────────────────────────────────────────────── -->
 <div class="modal-overlay" id="planModal">
   <div class="modal">
     <h2 id="modalTitle">Novo Plano</h2>
@@ -467,7 +467,7 @@ input:checked+.slider:before{transform:translateX(17px)}
   </div>
 </div>
 
-<!-- ─── CHANGE USER PLAN MODAL ─────────────────────────────── -->
+<!-- ─── CHANGE USER PLAN MODAL ─────────────────────────────────────── -->
 <div class="modal-overlay" id="changePlanModal">
   <div class="modal">
     <h2>✏️ Alterar Plano do Usuário</h2>
@@ -510,7 +510,7 @@ let allPlans = [];
 let revenueChart = null;
 let planChart = null;
 
-// ── Clock ────────────────────────────────────────────────────────
+// ── Clock ──────────────────────────────────────────────────
 function updateClock() {
   const now = new Date();
   document.getElementById('clockDisplay').textContent =
@@ -532,7 +532,7 @@ function closeSidebar() {
   document.body.style.overflow = '';
 }
 
-// ── API helper ───────────────────────────────────────────────────
+// ── API helper ───────────────────────────────────────────────
 async function sa(method, path, body) {
   const opts = { method, headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + adminToken } };
   if (body) opts.body = JSON.stringify(body);
@@ -544,7 +544,7 @@ async function sa(method, path, body) {
   }
 }
 
-// ── Login ────────────────────────────────────────────────────────
+// ── Login ──────────────────────────────────────────────────
 async function doLogin() {
   const email = document.getElementById('loginEmail').value.trim();
   const pass  = document.getElementById('loginPass').value;
@@ -586,7 +586,7 @@ async function logout() {
   document.getElementById('adminPanel').style.display = 'none';
 }
 
-// ── Navigation ───────────────────────────────────────────────────
+// ── Navigation ──────────────────────────────────────────────────
 const pageTitles = { dashboard:'Dashboard', plans:'Planos', users:'Usuários', payments:'Pagamentos', settings:'Configurações' };
 const navKeys = ['dashboard','plans','users','payments','settings'];
 function nav(sec) {
@@ -603,7 +603,7 @@ function nav(sec) {
   else if (sec === 'settings') loadSettings();
 }
 
-// ── Dashboard ────────────────────────────────────────────────────
+// ── Dashboard ──────────────────────────────────────────────────
 async function loadDashboard() {
   const d = await sa('GET', '/api/superadmin/dashboard');
   if (d.error) {
@@ -659,7 +659,7 @@ async function loadDashboard() {
   }
 }
 
-// ── Plans ──────────────────────────────────────────────────────────
+// ── Plans ──────────────────────────────────────────────────────
 async function loadPlans() {
   const plans = await sa('GET', '/api/superadmin/plans');
   const tbody = document.getElementById('plansBody');
@@ -736,7 +736,7 @@ async function deletePlan(id, name) {
   loadPlans();
 }
 
-// ── Users ──────────────────────────────────────────────────────────
+// ── Users ─────────────────────────────────────────────────────
 async function loadUsers() {
   document.getElementById('usersBody').innerHTML = '<tr><td colspan="8" class="empty">Carregando…</td></tr>';
   if (!allPlans.length) { const rp = await sa('GET', '/api/superadmin/plans'); if (Array.isArray(rp)) allPlans = rp; }
@@ -852,18 +852,21 @@ function filterUsers() {
 
 function changePage(dir) { currentPage = Math.max(1, currentPage + dir); loadUsers(); }
 
-// ── Payments ───────────────────────────────────────────────────────
+// ── Payments ──────────────────────────────────────────────────
 async function loadPayments() {
-  document.getElementById('paymentsBody').innerHTML = '<tr><td colspan="7" class="empty">Carregando…</td></tr>';
+  document.getElementById('paymentsBody').innerHTML = '<tr><td colspan="8" class="empty">Carregando…</td></tr>';
   const r = await sa('GET', '/api/superadmin/payments');
   const payments = r.payments || [];
   const tbody = document.getElementById('paymentsBody');
   if (!payments.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty">Nenhum pagamento registrado</td></tr>'; return;
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">Nenhum pagamento registrado</td></tr>'; return;
   }
   tbody.innerHTML = payments.map(p => {
     const date = p.paidAt ? new Date(p.paidAt).toLocaleString('pt-BR') : new Date(p.createdAt).toLocaleString('pt-BR');
     const st = p.status === 'paid' ? 'paid' : p.status === 'pending' ? 'pending' : 'expired';
+    const action = p.status === 'pending'
+      ? `<button class="btn btn-sm btn-primary" onclick="approvePayment(${p.id},'${esc(p.userEmail)}','${esc(p.amountStr)}')">✅ Confirmar</button>`
+      : '<span style="color:var(--sub2);font-size:.75rem">—</span>';
     return `<tr>
       <td style="color:var(--sub)">#${p.id}</td>
       <td style="font-size:.79rem">${esc(p.userEmail)}</td>
@@ -872,11 +875,19 @@ async function loadPayments() {
       <td>${(p.method||'').toUpperCase()}</td>
       <td><span class="badge ${st}">${p.status}</span></td>
       <td style="color:var(--sub);font-size:.79rem">${date}</td>
+      <td style="white-space:nowrap">${action}</td>
     </tr>`;
   }).join('');
 }
 
-// ── Settings ───────────────────────────────────────────────────────
+async function approvePayment(id, email, amount) {
+  if (!confirm(`Confirmar o pagamento #${id}?\n\nUsuário: ${email}\nValor: R$ ${amount}\n\nConfirme apenas depois de verificar o PIX na conta. O plano será ativado imediatamente.`)) return;
+  const r = await sa('POST', `/api/superadmin/payments/${id}/approve`);
+  if (r.ok) { alert('✅ ' + (r.message || 'Pagamento confirmado')); loadPayments(); }
+  else alert(r.error || 'Erro ao confirmar pagamento');
+}
+
+// ── Settings ──────────────────────────────────────────────────
 async function loadSettings() {
   const r = await sa('GET', '/api/superadmin/settings');
   if (r.trial_days) document.getElementById('settingTrialDays').value = r.trial_days;
@@ -903,13 +914,13 @@ async function changePassword() {
   } else alert(r.error || 'Erro ao alterar senha');
 }
 
-// ── Util ────────────────────────────────────────────────────────────
+// ── Util ──────────────────────────────────────────────────────
 function esc(s) {
   if (s == null) return '';
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ── Init ───────────────────────────────────────────────────────────
+// ── Init ─────────────────────────────────────────────────────
 async function checkAuth() {
   if (!adminToken) return;
   try {
