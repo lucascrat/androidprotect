@@ -57,6 +57,41 @@
 .mp-btn-outline:hover{border-color:#6366f1;color:#6366f1}
 .mp-loader{width:18px;height:18px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:mpSpin .7s linear infinite;display:inline-block}
 @keyframes mpSpin{to{transform:rotate(360deg)}}
+
+/* ── Meu Plano: card container — scroll livre em qualquer viewport ─ */
+.grid-card[data-tab="meu-plano"]{flex-direction:column}
+.grid-card[data-tab="meu-plano"] .mp-scroll-wrap{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+
+@media(max-width:767px){
+  /* card visível e com altura fixa só quando .mp-active */
+  .grid-card[data-tab="meu-plano"].mp-active{
+    display:flex!important;
+    flex-direction:column;
+    height:calc(100dvh - var(--topbar-h) - var(--nav-h) - 20px);
+    max-height:calc(100dvh - var(--topbar-h) - var(--nav-h) - 20px);
+    padding:14px!important;
+    overflow:hidden;
+  }
+  /* wrapper interno rola */
+  .grid-card[data-tab="meu-plano"].mp-active .mp-scroll-wrap{
+    flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;
+    padding-bottom:8px;
+  }
+  /* planos: 2 colunas no mobile */
+  .mp-plans-grid{grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px}
+  .mp-plan-card{padding:13px}
+  .mp-plan-price{font-size:1.25rem}
+  /* status card compacto */
+  .mp-status-card{padding:13px 14px;gap:11px;margin-bottom:16px}
+  .mp-status-icon{width:36px;height:36px;font-size:1.1rem}
+  /* QR code maior para facilitar leitura */
+  .mp-pix-qr{max-width:min(220px,80vw)}
+  /* caixa de pagamento */
+  .mp-pay-box{padding:14px}
+}
+@media(max-width:380px){
+  .mp-plans-grid{grid-template-columns:1fr}
+}
 </style>
     <script>
       (function(){
@@ -645,6 +680,7 @@
 
                 <!-- My Plan Panel -->
                 <div class="grid-card" data-tab="meu-plano" style="padding:24px;display:none">
+                  <div class="mp-scroll-wrap">
                     <div style="display:flex;align-items:center;gap:10px;margin-bottom:20px">
                         <i class="fa-solid fa-credit-card" style="color:#818cf8;font-size:1.1rem"></i>
                         <h3 style="font-size:1rem;font-weight:700">Meu Plano</h3>
@@ -679,6 +715,7 @@
                             <button class="mp-btn mp-btn-primary" style="margin-top:16px" onclick="mpReload()">🔄 Atualizar painel</button>
                         </div>
                     </div>
+                  </div><!-- /.mp-scroll-wrap -->
                 </div>
 
             </div>
@@ -919,7 +956,9 @@
     if (key === 'meu-plano') {
       // show only the meu-plano card; hide others
       document.querySelectorAll('.dashboard-grid .grid-card').forEach(c => {
-        c.style.display = (c.dataset.tab === 'meu-plano') ? '' : 'none';
+        const isMp = c.dataset.tab === 'meu-plano';
+        c.style.display = isMp ? '' : 'none';
+        c.classList.toggle('mp-active', isMp);
       });
       // update active nav state
       document.querySelectorAll('.snav-item').forEach(el => el.classList.remove('active'));
@@ -932,6 +971,9 @@
       if (typeof closeSidebar === 'function') closeSidebar();
       return;
     }
+    // leaving meu-plano: remove active class
+    const mpCard = document.querySelector('.grid-card[data-tab="meu-plano"]');
+    if (mpCard) mpCard.classList.remove('mp-active');
     if (typeof _origSidebarNav === 'function') return _origSidebarNav(key, ...rest);
   };
 })();
