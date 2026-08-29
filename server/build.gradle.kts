@@ -20,7 +20,10 @@ dependencies {
     implementation("org.xerial:sqlite-jdbc:3.45.1.0")
     implementation("com.zaxxer:HikariCP:5.1.0")
     implementation("software.amazon.awssdk:s3:2.25.15")
-    
+
+    // QR Code (PIX BR Code) — core apenas: Java puro, sem AWT (JRE alpine headless)
+    implementation("com.google.zxing:core:3.5.3")
+
     testImplementation("org.jetbrains.kotlin:kotlin-test")
 }
 
