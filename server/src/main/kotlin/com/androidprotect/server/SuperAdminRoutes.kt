@@ -27,7 +27,8 @@ private fun Any?.toJson(): JsonElement = when (this) {
 }
 
 private suspend fun ApplicationCall.respondJson(data: Any?) {
-    respondText(Json.encodeToString(data.toJson()), ContentType.Application.Json)
+    // JsonElement.toString() produces valid JSON — avoids needing explicit serializer
+    respondText(data.toJson().toString(), ContentType.Application.Json)
 }
 
 fun Routing.superAdminRoutes() {
