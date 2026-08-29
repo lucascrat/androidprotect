@@ -6,15 +6,33 @@ import io.ktor.server.application.*
 import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
+import kotlinx.serialization.json.*
 import org.jetbrains.exposed.sql.*
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
 import org.jetbrains.exposed.sql.transactions.transaction
 import java.io.File
 
+// kotlinx.serialization cannot handle Map<String, Any?> at runtime.
+// This helper converts arbitrary data to JsonElement so we can respond
+// with respondText(json, ContentType.Application.Json) safely.
+private fun Any?.toJson(): JsonElement = when (this) {
+    null        -> JsonNull
+    is Boolean  -> JsonPrimitive(this)
+    is Number   -> JsonPrimitive(this)
+    is String   -> JsonPrimitive(this)
+    is Map<*, *> -> JsonObject(entries.associate { (k, v) -> k.toString() to v.toJson() })
+    is List<*>  -> JsonArray(map { it.toJson() })
+    else        -> JsonPrimitive(toString())
+}
+
+private suspend fun ApplicationCall.respondJson(data: Any?) {
+    respondText(Json.encodeToString(data.toJson()), ContentType.Application.Json)
+}
+
 fun Routing.superAdminRoutes() {
 
-    // ── POST /api/superadmin/login ─────────────────────────────────────────
+    // ── POST /api/superadmin/login ───────────────────────────────────────
     post("/api/superadmin/login") {
         try {
             val body     = call.receive<Map<String, String>>()
@@ -49,10 +67,11 @@ fun Routing.superAdminRoutes() {
         call.respond(mapOf("ok" to true))
     }
 
-    // ── GET /api/superadmin/dashboard ─────────────────────────────────────
+    // ── GET /api/superadmin/dashboard ───────────────────────────────────────
     get("/api/superadmin/dashboard") {
         if (getSuperAdminToken(call) == null)
             return@get call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+        try {
 
         val now = System.currentTimeMillis()
         val monthStart = now - 30L * 24 * 60 * 60 * 1000
@@ -117,13 +136,17 @@ fun Routing.superAdminRoutes() {
                     .map { mapOf("date" to it.key, "cents" to it.value, "str" to centsToBrl(it.value)) }
             )
         }
-        call.respond(stats)
+        call.respondJson(stats)
+        } catch (e: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro interno no dashboard")))
+        }
     }
 
     // ── GET /api/superadmin/plans ──────────────────────────────────────────
     get("/api/superadmin/plans") {
         if (getSuperAdminToken(call) == null)
             return@get call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+        try {
         val plans = transaction {
             PlansTable.selectAll().orderBy(PlansTable.sortOrder to SortOrder.ASC).map {
                 mapOf(
@@ -141,10 +164,13 @@ fun Routing.superAdminRoutes() {
                 )
             }
         }
-        call.respond(plans)
+        call.respondJson(plans)
+        } catch (e: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro ao listar planos")))
+        }
     }
 
-    // ── POST /api/superadmin/plans — create plan ───────────────────────────
+    // ── POST /api/superadmin/plans — create plan ─────────────────────────────────
     post("/api/superadmin/plans") {
         if (getSuperAdminToken(call) == null)
             return@post call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -177,7 +203,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── PUT /api/superadmin/plans/{id} — update plan ──────────────────────
+    // ── PUT /api/superadmin/plans/{id} — update plan ────────────────────────────
     put("/api/superadmin/plans/{id}") {
         if (getSuperAdminToken(call) == null)
             return@put call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -204,7 +230,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── DELETE /api/superadmin/plans/{id} ─────────────────────────────────
+    // ── DELETE /api/superadmin/plans/{id} ─────────────────────────────────────────
     delete("/api/superadmin/plans/{id}") {
         if (getSuperAdminToken(call) == null)
             return@delete call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -218,7 +244,7 @@ fun Routing.superAdminRoutes() {
         else call.respond(mapOf("ok" to true))
     }
 
-    // ── POST /api/superadmin/plans/{id}/image — upload plan image ─────────
+    // ── POST /api/superadmin/plans/{id}/image — upload plan image ─────────────────
     post("/api/superadmin/plans/{id}/image") {
         if (getSuperAdminToken(call) == null)
             return@post call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -252,10 +278,11 @@ fun Routing.superAdminRoutes() {
         else call.respond(HttpStatusCode.NotFound)
     }
 
-    // ── GET /api/superadmin/users ──────────────────────────────────────────
+    // ── GET /api/superadmin/users ──────────────────────────────────────────────
     get("/api/superadmin/users") {
         if (getSuperAdminToken(call) == null)
             return@get call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+        try {
 
         val now  = System.currentTimeMillis()
         val page = call.request.queryParameters["page"]?.toIntOrNull()?.coerceAtLeast(1) ?: 1
@@ -306,21 +333,28 @@ fun Routing.superAdminRoutes() {
             val count = UsersTable.selectAll().count()
             Pair(rows, count)
         }
-        call.respond(mapOf("users" to users, "total" to total, "page" to page, "size" to size))
+        call.respondJson(mapOf("users" to users, "total" to total, "page" to page, "size" to size))
+        } catch (e: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro interno ao listar usuários")))
+        }
     }
 
-    // ── GET /api/superadmin/settings ──────────────────────────────────────
+    // ── GET /api/superadmin/settings ──────────────────────────────────────────
     get("/api/superadmin/settings") {
         if (getSuperAdminToken(call) == null)
             return@get call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+        try {
         val settings = transaction {
             AppSettingsTable.selectAll().associate { it[AppSettingsTable.key] to it[AppSettingsTable.value] }
         }
         val admin = transaction { SuperAdminTable.selectAll().firstOrNull()?.get(SuperAdminTable.email) }
-        call.respond(settings + mapOf("adminEmail" to (admin ?: "")))
+        call.respondJson(settings + mapOf("adminEmail" to (admin ?: "")))
+        } catch (e: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro ao carregar configurações")))
+        }
     }
 
-    // ── PUT /api/superadmin/settings ──────────────────────────────────────
+    // ── PUT /api/superadmin/settings ──────────────────────────────────────────
     put("/api/superadmin/settings") {
         if (getSuperAdminToken(call) == null)
             return@put call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -335,7 +369,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── PUT /api/superadmin/password ──────────────────────────────────────
+    // ── PUT /api/superadmin/password ──────────────────────────────────────────
     put("/api/superadmin/password") {
         if (getSuperAdminToken(call) == null)
             return@put call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -362,10 +396,11 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── GET /api/superadmin/payments ──────────────────────────────────────
+    // ── GET /api/superadmin/payments ──────────────────────────────────────────
     get("/api/superadmin/payments") {
         if (getSuperAdminToken(call) == null)
             return@get call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+        try {
         val page   = call.request.queryParameters["page"]?.toIntOrNull()?.coerceAtLeast(1) ?: 1
         val offset = ((page - 1) * 50).toLong()
 
@@ -390,6 +425,9 @@ fun Routing.superAdminRoutes() {
                     )
                 }
         }
-        call.respond(mapOf("payments" to payments))
+        call.respondJson(mapOf("payments" to payments))
+        } catch (e: Exception) {
+            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro ao listar pagamentos")))
+        }
     }
 }
