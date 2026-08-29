@@ -31,9 +31,13 @@ private suspend fun ApplicationCall.respondJson(data: Any?) {
     respondText(data.toJson().toString(), ContentType.Application.Json)
 }
 
+private suspend fun ApplicationCall.respondJson(status: HttpStatusCode, data: Any?) {
+    respondText(data.toJson().toString(), ContentType.Application.Json, status)
+}
+
 fun Routing.superAdminRoutes() {
 
-    // ── POST /api/superadmin/login ───────────────────────────────────────
+    // ── POST /api/superadmin/login ───────────────────────────────────────────
     post("/api/superadmin/login") {
         try {
             val body     = call.receive<Map<String, String>>()
@@ -60,7 +64,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── POST /api/superadmin/logout ────────────────────────────────────────
+    // ── POST /api/superadmin/logout ────────────────────────────────────────────
     post("/api/superadmin/logout") {
         val header = call.request.headers["Authorization"] ?: return@post call.respond(mapOf("ok" to true))
         val token  = header.removePrefix("Bearer ").trim()
@@ -68,7 +72,7 @@ fun Routing.superAdminRoutes() {
         call.respond(mapOf("ok" to true))
     }
 
-    // ── GET /api/superadmin/dashboard ───────────────────────────────────────
+    // ── GET /api/superadmin/dashboard ───────────────────────────────────────────
     get("/api/superadmin/dashboard") {
         if (getSuperAdminToken(call) == null)
             return@get call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -143,7 +147,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── GET /api/superadmin/plans ──────────────────────────────────────────
+    // ── GET /api/superadmin/plans ──────────────────────────────────────────────────────
     get("/api/superadmin/plans") {
         if (getSuperAdminToken(call) == null)
             return@get call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -171,7 +175,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── POST /api/superadmin/plans — create plan ─────────────────────────────────
+    // ── POST /api/superadmin/plans — create plan ──────────────────────────────────────────
     post("/api/superadmin/plans") {
         if (getSuperAdminToken(call) == null)
             return@post call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -198,13 +202,13 @@ fun Routing.superAdminRoutes() {
                     it[PlansTable.createdAt]   = System.currentTimeMillis()
                 } get PlansTable.id
             }
-            call.respond(mapOf("ok" to true, "id" to newId))
+            call.respondJson(mapOf("ok" to true, "id" to newId))
         } catch (e: Exception) {
             call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro interno")))
         }
     }
 
-    // ── PUT /api/superadmin/plans/{id} — update plan ────────────────────────────
+    // ── PUT /api/superadmin/plans/{id} — update plan ────────────────────────────────────────
     put("/api/superadmin/plans/{id}") {
         if (getSuperAdminToken(call) == null)
             return@put call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -231,7 +235,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── DELETE /api/superadmin/plans/{id} ─────────────────────────────────────────
+    // ── DELETE /api/superadmin/plans/{id} ────────────────────────────────────────────────────
     delete("/api/superadmin/plans/{id}") {
         if (getSuperAdminToken(call) == null)
             return@delete call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -245,7 +249,7 @@ fun Routing.superAdminRoutes() {
         else call.respond(mapOf("ok" to true))
     }
 
-    // ── POST /api/superadmin/plans/{id}/image — upload plan image ─────────────────
+    // ── POST /api/superadmin/plans/{id}/image — upload plan image ─────────────────────────────
     post("/api/superadmin/plans/{id}/image") {
         if (getSuperAdminToken(call) == null)
             return@post call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -268,7 +272,7 @@ fun Routing.superAdminRoutes() {
             part.dispose()
         }
         if (fileUrl.isBlank()) call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Nenhum arquivo recebido"))
-        else call.respond(mapOf("ok" to true, "url" to fileUrl))
+        else call.respondJson(mapOf("ok" to true, "url" to fileUrl))
     }
 
     // Serve plan images
@@ -279,7 +283,7 @@ fun Routing.superAdminRoutes() {
         else call.respond(HttpStatusCode.NotFound)
     }
 
-    // ── GET /api/superadmin/users ──────────────────────────────────────────────
+    // ── GET /api/superadmin/users ───────────────────────────────────────────────────────
     get("/api/superadmin/users") {
         if (getSuperAdminToken(call) == null)
             return@get call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -340,7 +344,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── GET /api/superadmin/settings ──────────────────────────────────────────
+    // ── GET /api/superadmin/settings ────────────────────────────────────────────────────
     get("/api/superadmin/settings") {
         if (getSuperAdminToken(call) == null)
             return@get call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -355,7 +359,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── PUT /api/superadmin/settings ──────────────────────────────────────────
+    // ── PUT /api/superadmin/settings ────────────────────────────────────────────────────
     put("/api/superadmin/settings") {
         if (getSuperAdminToken(call) == null)
             return@put call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -370,7 +374,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── PUT /api/superadmin/password ──────────────────────────────────────────
+    // ── PUT /api/superadmin/password ────────────────────────────────────────────────────
     put("/api/superadmin/password") {
         if (getSuperAdminToken(call) == null)
             return@put call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -397,7 +401,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── DELETE /api/superadmin/users/{id} — delete user ──────────────────
+    // ── DELETE /api/superadmin/users/{id} — delete user ─────────────────────────────────
     delete("/api/superadmin/users/{id}") {
         if (getSuperAdminToken(call) == null)
             return@delete call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -417,7 +421,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── PUT /api/superadmin/users/{id}/plan — force-assign plan ──────────
+    // ── PUT /api/superadmin/users/{id}/plan — force-assign plan ───────────────────────────
     put("/api/superadmin/users/{id}/plan") {
         if (getSuperAdminToken(call) == null)
             return@put call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -435,7 +439,7 @@ fun Routing.superAdminRoutes() {
                             (SubscriptionsTable.status.inList(listOf("trial","active")))
                         }) { it[SubscriptionsTable.status] = "cancelled" }
                     }
-                    call.respond(mapOf("ok" to true, "message" to "Assinatura cancelada"))
+                    call.respondJson(mapOf("ok" to true, "message" to "Assinatura cancelada"))
                 }
                 "trial" -> {
                     val trialDays = body["days"]?.toIntOrNull() ?: 7
@@ -454,7 +458,7 @@ fun Routing.superAdminRoutes() {
                             it[SubscriptionsTable.createdAt] = now
                         }
                     }
-                    call.respond(mapOf("ok" to true, "message" to "Trial de $trialDays dias ativado"))
+                    call.respondJson(mapOf("ok" to true, "message" to "Trial de $trialDays dias ativado"))
                 }
                 else -> {
                     val planId = body["planId"]?.toIntOrNull()
@@ -482,7 +486,7 @@ fun Routing.superAdminRoutes() {
                             it[UsersTable.maxDevices] = plan[PlansTable.maxDevices]
                         }
                     }
-                    call.respond(mapOf("ok" to true, "subscriptionId" to subId,
+                    call.respondJson(mapOf("ok" to true, "subscriptionId" to subId,
                         "message" to "Plano ${plan[PlansTable.name]} ativado por $days dias"))
                 }
             }
@@ -491,7 +495,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── GET /api/superadmin/payments ──────────────────────────────────────────
+    // ── GET /api/superadmin/payments ──────────────────────────────────────────────────────
     get("/api/superadmin/payments") {
         if (getSuperAdminToken(call) == null)
             return@get call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -523,6 +527,46 @@ fun Routing.superAdminRoutes() {
         call.respondJson(mapOf("payments" to payments))
         } catch (e: Exception) {
             call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro ao listar pagamentos")))
+        }
+    }
+
+    // ── POST /api/superadmin/payments/{id}/approve — confirma pagamento manual ──
+    // Necessário para PIX estático (sem API Efi não há webhook de confirmação).
+    post("/api/superadmin/payments/{id}/approve") {
+        if (getSuperAdminToken(call) == null)
+            return@post call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+        val paymentId = call.parameters["id"]?.toIntOrNull()
+            ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "ID inválido"))
+        try {
+            val payment = transaction {
+                PaymentsTable.select { PaymentsTable.id eq paymentId }.firstOrNull()
+            } ?: return@post call.respond(HttpStatusCode.NotFound, mapOf("error" to "Pagamento não encontrado"))
+
+            if (payment[PaymentsTable.status] == "paid")
+                return@post call.respondJson(mapOf("ok" to true, "message" to "Pagamento já estava confirmado"))
+
+            val userId = payment[PaymentsTable.userId]
+            val planId = payment[PaymentsTable.planId]
+            val subId  = activateSubscription(userId, planId)
+
+            transaction {
+                PaymentsTable.update({ PaymentsTable.id eq paymentId }) {
+                    it[PaymentsTable.status]         = "paid"
+                    it[PaymentsTable.subscriptionId] = subId
+                    it[PaymentsTable.paidAt]         = System.currentTimeMillis()
+                }
+                PlansTable.select { PlansTable.id eq planId }.firstOrNull()?.let { plan ->
+                    UsersTable.update({ UsersTable.id eq userId }) {
+                        it[UsersTable.maxDevices] = plan[PlansTable.maxDevices]
+                    }
+                }
+            }
+            println("PAYMENT: Payment $paymentId manually approved for user $userId plan $planId")
+            call.respondJson(mapOf("ok" to true, "subscriptionId" to subId,
+                "message" to "Pagamento confirmado e plano ativado"))
+        } catch (e: Exception) {
+            call.respondJson(HttpStatusCode.InternalServerError,
+                mapOf("error" to (e.message ?: "Erro ao aprovar pagamento")))
         }
     }
 }
