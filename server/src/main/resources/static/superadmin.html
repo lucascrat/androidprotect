@@ -369,7 +369,7 @@ input:checked+.slider:before{transform:translateX(17px)}
           <div class="table-header"><h3>Pagamentos</h3></div>
           <div class="table-scroll">
             <table>
-              <thead><tr><th>ID</th><th>Usuário</th><th>Plano</th><th>Valor</th><th>Método</th><th>Status</th><th>Data</th></tr></thead>
+              <thead><tr><th>ID</th><th>Usuário</th><th>Plano</th><th>Valor</th><th>Método</th><th>Status</th><th>Data</th><th>Ações</th></tr></thead>
               <tbody id="paymentsBody"></tbody>
             </table>
           </div>
@@ -854,16 +854,19 @@ function changePage(dir) { currentPage = Math.max(1, currentPage + dir); loadUse
 
 // ── Payments ───────────────────────────────────────────────────────
 async function loadPayments() {
-  document.getElementById('paymentsBody').innerHTML = '<tr><td colspan="7" class="empty">Carregando…</td></tr>';
+  document.getElementById('paymentsBody').innerHTML = '<tr><td colspan="8" class="empty">Carregando…</td></tr>';
   const r = await sa('GET', '/api/superadmin/payments');
   const payments = r.payments || [];
   const tbody = document.getElementById('paymentsBody');
   if (!payments.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="empty">Nenhum pagamento registrado</td></tr>'; return;
+    tbody.innerHTML = '<tr><td colspan="8" class="empty">Nenhum pagamento registrado</td></tr>'; return;
   }
   tbody.innerHTML = payments.map(p => {
     const date = p.paidAt ? new Date(p.paidAt).toLocaleString('pt-BR') : new Date(p.createdAt).toLocaleString('pt-BR');
     const st = p.status === 'paid' ? 'paid' : p.status === 'pending' ? 'pending' : 'expired';
+    const action = p.status === 'pending'
+      ? `<button class="btn btn-sm btn-primary" onclick="approvePayment(${p.id},'${esc(p.userEmail)}','${esc(p.amountStr)}')">✅ Confirmar</button>`
+      : '<span style="color:var(--sub2);font-size:.75rem">—</span>';
     return `<tr>
       <td style="color:var(--sub)">#${p.id}</td>
       <td style="font-size:.79rem">${esc(p.userEmail)}</td>
@@ -872,8 +875,16 @@ async function loadPayments() {
       <td>${(p.method||'').toUpperCase()}</td>
       <td><span class="badge ${st}">${p.status}</span></td>
       <td style="color:var(--sub);font-size:.79rem">${date}</td>
+      <td style="white-space:nowrap">${action}</td>
     </tr>`;
   }).join('');
+}
+
+async function approvePayment(id, email, amount) {
+  if (!confirm(`Confirmar o pagamento #${id}?\n\nUsuário: ${email}\nValor: R$ ${amount}\n\nConfirme apenas depois de verificar o PIX na conta. O plano será ativado imediatamente.`)) return;
+  const r = await sa('POST', `/api/superadmin/payments/${id}/approve`);
+  if (r.ok) { alert('✅ ' + (r.message || 'Pagamento confirmado')); loadPayments(); }
+  else alert(r.error || 'Erro ao confirmar pagamento');
 }
 
 // ── Settings ───────────────────────────────────────────────────────
