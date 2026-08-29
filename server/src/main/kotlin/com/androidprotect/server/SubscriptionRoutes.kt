@@ -29,7 +29,7 @@ internal suspend fun ApplicationCall.respondJson2(status: HttpStatusCode, data: 
 
 fun Routing.subscriptionRoutes() {
 
-    // ── GET /api/plans — list active plans (public) ────────────────────────
+    // ── GET /api/plans — list active plans (public) ─────────────────────────────
     get("/api/plans") {
         val plans = transaction {
             PlansTable.select { PlansTable.isActive eq true }
@@ -50,14 +50,14 @@ fun Routing.subscriptionRoutes() {
         call.respondJson2(plans)
     }
 
-    // ── GET /api/subscription/status ──────────────────────────────────────
+    // ── GET /api/subscription/status ──────────────────────────────────────────
     get("/api/subscription/status") {
         val userId = getSessionUserId(call)
             ?: return@get call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
         call.respondJson2(getUserSubscriptionStatus(userId))
     }
 
-    // ── POST /api/subscription/pay — create PIX payment ──────────────────
+    // ── POST /api/subscription/pay — create PIX payment ────────────────────────
     post("/api/subscription/pay") {
         val userId = getSessionUserId(call)
             ?: return@post call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -145,7 +145,7 @@ fun Routing.subscriptionRoutes() {
         }
     }
 
-    // ── GET /api/payment/{id} — check payment status ──────────────────────
+    // ── GET /api/payment/{id} — check payment status ────────────────────────────
     get("/api/payment/{id}") {
         val userId    = getSessionUserId(call)
             ?: return@get call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -190,7 +190,7 @@ fun Routing.subscriptionRoutes() {
         ))
     }
 
-    // ── POST /api/efi/webhook/pix — Efi payment notification ─────────────
+    // ── POST /api/efi/webhook/pix — Efi payment notification ─────────────────
     post("/api/efi/webhook/pix") {
         try {
             val body = call.receiveText()

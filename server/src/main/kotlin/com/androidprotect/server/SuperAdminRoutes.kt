@@ -37,7 +37,7 @@ private suspend fun ApplicationCall.respondJson(status: HttpStatusCode, data: An
 
 fun Routing.superAdminRoutes() {
 
-    // ── POST /api/superadmin/login ───────────────────────────────────────
+    // ── POST /api/superadmin/login ───────────────────────────────────────────
     post("/api/superadmin/login") {
         try {
             val body     = call.receive<Map<String, String>>()
@@ -64,7 +64,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── POST /api/superadmin/logout ────────────────────────────────────────
+    // ── POST /api/superadmin/logout ────────────────────────────────────────────
     post("/api/superadmin/logout") {
         val header = call.request.headers["Authorization"] ?: return@post call.respond(mapOf("ok" to true))
         val token  = header.removePrefix("Bearer ").trim()
@@ -72,7 +72,7 @@ fun Routing.superAdminRoutes() {
         call.respond(mapOf("ok" to true))
     }
 
-    // ── GET /api/superadmin/dashboard ───────────────────────────────────────
+    // ── GET /api/superadmin/dashboard ───────────────────────────────────────────
     get("/api/superadmin/dashboard") {
         if (getSuperAdminToken(call) == null)
             return@get call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -147,7 +147,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── GET /api/superadmin/plans ──────────────────────────────────────────
+    // ── GET /api/superadmin/plans ──────────────────────────────────────────────────────
     get("/api/superadmin/plans") {
         if (getSuperAdminToken(call) == null)
             return@get call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -175,7 +175,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── POST /api/superadmin/plans — create plan ─────────────────────────────────
+    // ── POST /api/superadmin/plans — create plan ──────────────────────────────────────────
     post("/api/superadmin/plans") {
         if (getSuperAdminToken(call) == null)
             return@post call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -208,7 +208,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── PUT /api/superadmin/plans/{id} — update plan ────────────────────────────
+    // ── PUT /api/superadmin/plans/{id} — update plan ────────────────────────────────────────
     put("/api/superadmin/plans/{id}") {
         if (getSuperAdminToken(call) == null)
             return@put call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -235,7 +235,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── DELETE /api/superadmin/plans/{id} ─────────────────────────────────────────
+    // ── DELETE /api/superadmin/plans/{id} ────────────────────────────────────────────────────
     delete("/api/superadmin/plans/{id}") {
         if (getSuperAdminToken(call) == null)
             return@delete call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -249,7 +249,7 @@ fun Routing.superAdminRoutes() {
         else call.respond(mapOf("ok" to true))
     }
 
-    // ── POST /api/superadmin/plans/{id}/image — upload plan image ─────────────────
+    // ── POST /api/superadmin/plans/{id}/image — upload plan image ─────────────────────────────
     post("/api/superadmin/plans/{id}/image") {
         if (getSuperAdminToken(call) == null)
             return@post call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -283,7 +283,7 @@ fun Routing.superAdminRoutes() {
         else call.respond(HttpStatusCode.NotFound)
     }
 
-    // ── GET /api/superadmin/users ──────────────────────────────────────────────
+    // ── GET /api/superadmin/users ───────────────────────────────────────────────────────
     get("/api/superadmin/users") {
         if (getSuperAdminToken(call) == null)
             return@get call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -344,7 +344,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── GET /api/superadmin/settings ──────────────────────────────────────────
+    // ── GET /api/superadmin/settings ────────────────────────────────────────────────────
     get("/api/superadmin/settings") {
         if (getSuperAdminToken(call) == null)
             return@get call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -359,7 +359,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── PUT /api/superadmin/settings ──────────────────────────────────────────
+    // ── PUT /api/superadmin/settings ────────────────────────────────────────────────────
     put("/api/superadmin/settings") {
         if (getSuperAdminToken(call) == null)
             return@put call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -374,7 +374,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── PUT /api/superadmin/password ──────────────────────────────────────────
+    // ── PUT /api/superadmin/password ────────────────────────────────────────────────────
     put("/api/superadmin/password") {
         if (getSuperAdminToken(call) == null)
             return@put call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -401,7 +401,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── DELETE /api/superadmin/users/{id} — delete user ──────────────────
+    // ── DELETE /api/superadmin/users/{id} — delete user ─────────────────────────────────
     delete("/api/superadmin/users/{id}") {
         if (getSuperAdminToken(call) == null)
             return@delete call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -421,7 +421,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── PUT /api/superadmin/users/{id}/plan — force-assign plan ──────────
+    // ── PUT /api/superadmin/users/{id}/plan — force-assign plan ───────────────────────────
     put("/api/superadmin/users/{id}/plan") {
         if (getSuperAdminToken(call) == null)
             return@put call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -495,7 +495,7 @@ fun Routing.superAdminRoutes() {
         }
     }
 
-    // ── GET /api/superadmin/payments ──────────────────────────────────────────
+    // ── GET /api/superadmin/payments ──────────────────────────────────────────────────────
     get("/api/superadmin/payments") {
         if (getSuperAdminToken(call) == null)
             return@get call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
