@@ -24,9 +24,12 @@ internal fun Any?.toJsonEl(): JsonElement = when (this) {
 internal suspend fun ApplicationCall.respondJson2(data: Any?) =
     respondText(data.toJsonEl().toString(), ContentType.Application.Json)
 
+internal suspend fun ApplicationCall.respondJson2(status: HttpStatusCode, data: Any?) =
+    respondText(data.toJsonEl().toString(), ContentType.Application.Json, status)
+
 fun Routing.subscriptionRoutes() {
 
-    // ── GET /api/plans — list active plans (public) ────────────────────────
+    // ── GET /api/plans — list active plans (public) ─────────────────────────────
     get("/api/plans") {
         val plans = transaction {
             PlansTable.select { PlansTable.isActive eq true }
@@ -47,14 +50,14 @@ fun Routing.subscriptionRoutes() {
         call.respondJson2(plans)
     }
 
-    // ── GET /api/subscription/status ──────────────────────────────────────
+    // ── GET /api/subscription/status ──────────────────────────────────────────
     get("/api/subscription/status") {
         val userId = getSessionUserId(call)
             ?: return@get call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
         call.respondJson2(getUserSubscriptionStatus(userId))
     }
 
-    // ── POST /api/subscription/pay — create PIX payment ──────────────────
+    // ── POST /api/subscription/pay — create PIX payment ────────────────────────
     post("/api/subscription/pay") {
         val userId = getSessionUserId(call)
             ?: return@post call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -101,6 +104,7 @@ fun Routing.subscriptionRoutes() {
                     "paymentId"    to paymentId,
                     "method"       to "pix",
                     "status"       to "pending",
+                    "autoConfirm"  to true,
                     "pixCode"      to pixResult.pixCopiaECola,
                     "pixQrcode"    to pixResult.imagemQrcode,
                     "amountCents"  to amountCents,
@@ -108,21 +112,28 @@ fun Routing.subscriptionRoutes() {
                     "planName"     to planName
                 ))
             } else {
-                // Sandbox / Efi not configured: auto-approve for testing
-                val subId = activateSubscription(userId, planId)
+                // API Efi não configurada: gera PIX estático a partir da chave.
+                // O cliente consegue pagar; a confirmação é manual no painel superadmin
+                // (sem a API não há webhook de confirmação automática).
+                val txid    = "AP%08d".format(paymentId)
+                val payload = PixBrCode.buildPayload(amountCents, txid)
+                val qrcode  = PixBrCode.qrCodeSvgDataUri(payload)
+
                 transaction {
                     PaymentsTable.update({ PaymentsTable.id eq paymentId }) {
-                        it[PaymentsTable.status]         = "paid"
-                        it[PaymentsTable.subscriptionId] = subId
-                        it[PaymentsTable.paidAt]         = now
-                        it[PaymentsTable.efiTxid]        = "SANDBOX_${paymentId}"
+                        it[PaymentsTable.efiTxid]         = txid
+                        it[PaymentsTable.pixCopiaECola]   = payload
+                        it[PaymentsTable.pixQrcodeBase64] = qrcode
                     }
                 }
-                call.respond(mapOf(
+                call.respondJson2(mapOf(
                     "paymentId"   to paymentId,
                     "method"      to "pix",
-                    "status"      to "paid",
-                    "message"     to "Pagamento aprovado (sandbox)",
+                    "status"      to "pending",
+                    "autoConfirm" to false,
+                    "pixCode"     to payload,
+                    "pixQrcode"   to qrcode,
+                    "pixKey"      to PixBrCode.pixKey(),
                     "amountCents" to amountCents,
                     "amountStr"   to centsToBrl(amountCents),
                     "planName"    to planName
@@ -130,11 +141,11 @@ fun Routing.subscriptionRoutes() {
             }
         } catch (e: Exception) {
             println("PAYMENT: Error creating payment: ${e.message}")
-            call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro interno")))
+            call.respondJson2(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro interno")))
         }
     }
 
-    // ── GET /api/payment/{id} — check payment status ──────────────────────
+    // ── GET /api/payment/{id} — check payment status ────────────────────────────
     get("/api/payment/{id}") {
         val userId    = getSessionUserId(call)
             ?: return@get call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
@@ -167,7 +178,7 @@ fun Routing.subscriptionRoutes() {
             }
         }
 
-        call.respond(mapOf(
+        call.respondJson2(mapOf(
             "paymentId"   to paymentId,
             "status"      to currentStatus,
             "method"      to payment[PaymentsTable.method],
@@ -179,7 +190,7 @@ fun Routing.subscriptionRoutes() {
         ))
     }
 
-    // ── POST /api/efi/webhook/pix — Efi payment notification ─────────────
+    // ── POST /api/efi/webhook/pix — Efi payment notification ─────────────────
     post("/api/efi/webhook/pix") {
         try {
             val body = call.receiveText()
