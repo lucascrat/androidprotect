@@ -27,16 +27,37 @@ object EfiClient {
     @Volatile private var tokenExpiresAt: Long = 0L
 
     fun isConfigured(): Boolean {
-        val certPath     = System.getenv("EFI_CERT_PATH")
+        val hasCert      = !System.getenv("EFI_CERT_PATH").isNullOrBlank() ||
+                           !System.getenv("EFI_CERT_B64").isNullOrBlank()
         val clientId     = System.getenv("EFI_CLIENT_ID")
         val clientSecret = System.getenv("EFI_CLIENT_SECRET")
         val pixKey       = System.getenv("EFI_PIX_KEY")
-        return !certPath.isNullOrBlank() && !clientId.isNullOrBlank() &&
+        return hasCert && !clientId.isNullOrBlank() &&
                !clientSecret.isNullOrBlank() && !pixKey.isNullOrBlank()
     }
 
+    /**
+     * Resolve o caminho do certificado PKCS12.
+     * Suporta duas formas:
+     *   EFI_CERT_PATH — caminho direto para o arquivo .p12 dentro do container
+     *   EFI_CERT_B64  — conteúdo do .p12 em Base64; decodificado em arquivo temporário
+     */
+    private fun resolveCertPath(): String? {
+        System.getenv("EFI_CERT_PATH")?.takeIf { it.isNotBlank() }?.let { return it }
+        val b64 = System.getenv("EFI_CERT_B64")?.takeIf { it.isNotBlank() } ?: return null
+        return try {
+            val bytes = Base64.getDecoder().decode(b64.trim())
+            val tmp   = File.createTempFile("efi_cert_", ".p12").also { it.deleteOnExit() }
+            tmp.writeBytes(bytes)
+            tmp.absolutePath
+        } catch (e: Exception) {
+            println("EFI: Falha ao decodificar EFI_CERT_B64: ${e.message}")
+            null
+        }
+    }
+
     private fun buildSslClient(): HttpClient {
-        val certPath     = System.getenv("EFI_CERT_PATH") ?: return HttpClient.newHttpClient()
+        val certPath     = resolveCertPath() ?: return HttpClient.newHttpClient()
         val certPassword = (System.getenv("EFI_CERT_PASSWORD") ?: "").toCharArray()
         return try {
             val ks = KeyStore.getInstance("PKCS12")
