@@ -143,12 +143,16 @@ fun createTrialSubscription(userId: Int) {
     }
 }
 
-/** Activates a subscription for userId on planId from now. */
+/** Activates a subscription for userId on planId from now.
+ *  Also updates UsersTable.maxDevices to the plan's device limit so that
+ *  all confirmation paths (Efi webhook, client polling, manual admin approval)
+ *  grant the correct device quota automatically. */
 fun activateSubscription(userId: Int, planId: Int): Int {
     val now = System.currentTimeMillis()
     val plan = transaction { PlansTable.select { PlansTable.id eq planId }.firstOrNull() }
         ?: error("Plan $planId not found")
-    val durationMs = plan[PlansTable.durationDays].toLong() * 24 * 60 * 60 * 1000
+    val durationMs  = plan[PlansTable.durationDays].toLong() * 24 * 60 * 60 * 1000
+    val planDevices = plan[PlansTable.maxDevices]
 
     // Cancel any active/trial subs
     transaction {
@@ -158,7 +162,7 @@ fun activateSubscription(userId: Int, planId: Int): Int {
         }) { it[SubscriptionsTable.status] = "cancelled" }
     }
 
-    return transaction {
+    val subId = transaction {
         SubscriptionsTable.insert {
             it[SubscriptionsTable.userId]    = userId
             it[SubscriptionsTable.planId]    = planId
@@ -168,6 +172,16 @@ fun activateSubscription(userId: Int, planId: Int): Int {
             it[SubscriptionsTable.createdAt] = now
         } get SubscriptionsTable.id
     }
+
+    // Grant the plan's device quota on the user account so the device limit
+    // is respected immediately — regardless of which confirmation path fired.
+    transaction {
+        UsersTable.update({ UsersTable.id eq userId }) {
+            it[UsersTable.maxDevices] = planDevices
+        }
+    }
+
+    return subId
 }
 
 /** Seeds superadmin account, default plans and settings if they don't exist. */
