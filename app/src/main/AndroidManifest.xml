@@ -43,6 +43,8 @@
     <!-- ── Log de chamadas e contatos ── -->
     <uses-permission android:name="android.permission.READ_CALL_LOG" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- Gravação de ligações (detectar saída — deprecated API 29 mas ainda funciona) -->
+    <uses-permission android:name="android.permission.PROCESS_OUTGOING_CALLS" />
 
     <!-- ── Reconhecimento de Atividade ── -->
     <uses-permission android:name="android.permission.ACTIVITY_RECOGNITION" />

