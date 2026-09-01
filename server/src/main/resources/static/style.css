@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   AndroidProtect – Modern Dashboard CSS (v29)
+   AndroidProtect – Modern Dashboard CSS (v30)
    Mobile-first PWA design · Dark glass theme
    ═══════════════════════════════════════════════════════════════ */
 
@@ -577,7 +577,7 @@ ul { list-style:none; }
 
 /* Card placement – desktop */
 .map-card { grid-column:1; grid-row:1 / 3; min-height:480px; }
-.commands-card { grid-column:2; grid-row:1; }
+.commands-card { grid-column:2; grid-row:1 / 3; } /* espelha o map-card para não deixar célula vazia */
 .streams-card { grid-column:1 / -1; }
 .gallery-card { grid-column:1; }
 .audio-card { grid-column:2; }
