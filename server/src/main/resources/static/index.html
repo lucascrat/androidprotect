@@ -929,7 +929,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=39"></script>
+    <script src="app.js?v=40"></script>
     <script>
 // ── Histórico de Passagens ───────────────────────────────────────────────────────────
 (function(){
@@ -1207,20 +1207,30 @@
     try{
       const token=localStorage.getItem('ap_token')||'';
       const r=await fetch(`/api/device/${currentDeviceId}/telemetry-history?days=${days}`,{headers:{'Authorization':'Bearer '+token}});
+      if(!r.ok){
+        if(tl) tl.innerHTML=`<div class="hist-empty" style="color:#ef4444"><i class="fa-solid fa-triangle-exclamation fa-2x"></i><p>Erro ${r.status} ao buscar dados GPS. Tente novamente.</p></div>`;
+        return;
+      }
       const pts=await r.json();
       histCurrentPts=Array.isArray(pts)?pts:[];
 
       if(!histCurrentPts.length){
-        if(tl) tl.innerHTML='<div class="hist-empty"><i class="fa-solid fa-magnifying-glass fa-2x" style="opacity:.3"></i><p>Nenhum ponto GPS encontrado neste período.</p></div>';
+        if(tl) tl.innerHTML='<div class="hist-empty"><i class="fa-solid fa-satellite-dish fa-2x" style="opacity:.3"></i><p>Nenhum ponto GPS encontrado neste período.</p><p style="font-size:12px;opacity:.5;margin-top:6px">O dispositivo pode estar com GPS desativado ou ainda não enviou localização.</p></div>';
         return;
       }
 
       const segs=detectSegments(histCurrentPts);
       histCurrentSegs=segs;
       renderSummary(segs,histCurrentPts);
+      if(!segs.length){
+        // GPS points exist but detectSegments couldn't form full segments
+        // (e.g. very few points or device stationary the entire period).
+        if(tl) tl.innerHTML=`<div class="hist-empty"><i class="fa-solid fa-location-dot fa-2x" style="opacity:.3"></i><p>${histCurrentPts.length} ponto(s) GPS encontrado(s), mas sem passagens detectáveis.</p><p style="font-size:12px;opacity:.5;margin-top:6px">O dispositivo pode ter ficado parado ou enviado poucos pontos. Tente um período maior.</p></div>`;
+        return;
+      }
       renderSegments(segs);
     }catch(e){
-      if(tl) tl.innerHTML='<div class="hist-empty" style="color:#ef4444"><i class="fa-solid fa-triangle-exclamation fa-2x"></i><p>Erro ao carregar histórico.</p></div>';
+      if(tl) tl.innerHTML=`<div class="hist-empty" style="color:#ef4444"><i class="fa-solid fa-triangle-exclamation fa-2x"></i><p>Erro ao carregar histórico: ${e.message||'falha de rede'}</p></div>`;
     }
   };
 
