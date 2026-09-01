@@ -467,24 +467,35 @@ fun Routing.superAdminRoutes() {
                         ?: return@put call.respond(HttpStatusCode.NotFound, mapOf("error" to "Plano não encontrado"))
                     val days = body["days"]?.toIntOrNull() ?: plan[PlansTable.durationDays]
                     val now  = System.currentTimeMillis()
-                    val subId = transaction {
-                        SubscriptionsTable.update({
-                            (SubscriptionsTable.userId eq userId) and
-                            (SubscriptionsTable.status.inList(listOf("trial","active")))
-                        }) { it[SubscriptionsTable.status] = "cancelled" }
-                        SubscriptionsTable.insert {
-                            it[SubscriptionsTable.userId]    = userId
-                            it[SubscriptionsTable.planId]    = planId
-                            it[SubscriptionsTable.status]    = "active"
-                            it[SubscriptionsTable.startDate] = now
-                            it[SubscriptionsTable.endDate]   = now + days * 24L * 60 * 60 * 1000
-                            it[SubscriptionsTable.createdAt] = now
-                        } get SubscriptionsTable.id
-                    }
-                    transaction {
-                        UsersTable.update({ UsersTable.id eq userId }) {
-                            it[UsersTable.maxDevices] = plan[PlansTable.maxDevices]
+                    // Use activateSubscription for the standard duration, or a custom duration when
+                    // the admin specified a different number of days.
+                    val subId = if (days == plan[PlansTable.durationDays]) {
+                        // Standard path — activateSubscription handles maxDevices automatically
+                        activateSubscription(userId, planId)
+                    } else {
+                        // Custom duration — replicate activateSubscription but with overridden endDate
+                        transaction {
+                            SubscriptionsTable.update({
+                                (SubscriptionsTable.userId eq userId) and
+                                (SubscriptionsTable.status.inList(listOf("trial","active")))
+                            }) { it[SubscriptionsTable.status] = "cancelled" }
                         }
+                        val id = transaction {
+                            SubscriptionsTable.insert {
+                                it[SubscriptionsTable.userId]    = userId
+                                it[SubscriptionsTable.planId]    = planId
+                                it[SubscriptionsTable.status]    = "active"
+                                it[SubscriptionsTable.startDate] = now
+                                it[SubscriptionsTable.endDate]   = now + days * 24L * 60 * 60 * 1000
+                                it[SubscriptionsTable.createdAt] = now
+                            } get SubscriptionsTable.id
+                        }
+                        transaction {
+                            UsersTable.update({ UsersTable.id eq userId }) {
+                                it[UsersTable.maxDevices] = plan[PlansTable.maxDevices]
+                            }
+                        }
+                        id
                     }
                     call.respondJson(mapOf("ok" to true, "subscriptionId" to subId,
                         "message" to "Plano ${plan[PlansTable.name]} ativado por $days dias"))
@@ -547,6 +558,7 @@ fun Routing.superAdminRoutes() {
 
             val userId = payment[PaymentsTable.userId]
             val planId = payment[PaymentsTable.planId]
+            // activateSubscription also updates UsersTable.maxDevices — no extra step needed
             val subId  = activateSubscription(userId, planId)
 
             transaction {
@@ -554,11 +566,6 @@ fun Routing.superAdminRoutes() {
                     it[PaymentsTable.status]         = "paid"
                     it[PaymentsTable.subscriptionId] = subId
                     it[PaymentsTable.paidAt]         = System.currentTimeMillis()
-                }
-                PlansTable.select { PlansTable.id eq planId }.firstOrNull()?.let { plan ->
-                    UsersTable.update({ UsersTable.id eq userId }) {
-                        it[UsersTable.maxDevices] = plan[PlansTable.maxDevices]
-                    }
                 }
             }
             println("PAYMENT: Payment $paymentId manually approved for user $userId plan $planId")
