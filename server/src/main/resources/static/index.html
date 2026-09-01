@@ -17,6 +17,83 @@
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <link rel="stylesheet" href="style.css?v=35">
     <style>
+/* ── Histórico de Passagens ──────────────────────────────────────────── */
+.historico-card{display:flex;flex-direction:column;overflow:hidden}
+.hist-card-header{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px}
+.hist-header-controls{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.hist-body{display:flex;flex-direction:column;overflow:hidden;padding:0!important;gap:0}
+
+/* Summary bar */
+.hist-summary-bar{display:flex;align-items:center;gap:0;border-bottom:1px solid rgba(255,255,255,.07);flex-shrink:0;overflow-x:auto}
+.hist-sum-item{display:flex;flex-direction:column;align-items:center;gap:2px;padding:12px 18px;flex:1;min-width:80px;border-right:1px solid rgba(255,255,255,.06)}
+.hist-sum-item:last-child{border-right:none}
+.hist-sum-item i{font-size:.8rem;color:#64748b;margin-bottom:2px}
+.hist-sum-item span{font-size:1.1rem;font-weight:700;color:#e2e8f0}
+.hist-sum-item small{font-size:.68rem;color:#64748b;text-transform:uppercase;letter-spacing:.04em}
+
+/* Timeline */
+.hist-timeline{flex:1;overflow-y:auto;overflow-x:hidden;padding:16px 18px;display:flex;flex-direction:column;gap:0}
+.hist-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;height:200px;color:#64748b;text-align:center}
+.hist-loading{display:flex;align-items:center;gap:10px;color:#64748b;padding:24px;justify-content:center}
+
+/* Day group header */
+.hist-day-group{margin-bottom:24px}
+.hist-day-label{font-size:.72rem;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.06em;margin-bottom:12px;display:flex;align-items:center;gap:8px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,.06)}
+.hist-day-label i{color:#4f8ef7}
+
+/* Segment item */
+.hist-seg{display:flex;gap:12px;margin-bottom:4px;position:relative}
+.hist-seg:last-child{margin-bottom:0}
+
+/* Timeline spine */
+.hist-spine{display:flex;flex-direction:column;align-items:center;flex-shrink:0;width:28px}
+.hist-spine-dot{width:12px;height:12px;border-radius:50%;flex-shrink:0;margin-top:4px;z-index:1}
+.hist-spine-dot.stop{background:#f59e0b;box-shadow:0 0 8px rgba(245,158,11,.5)}
+.hist-spine-dot.move{background:#4f8ef7;box-shadow:0 0 8px rgba(79,142,247,.5)}
+.hist-spine-line{width:2px;flex:1;background:rgba(255,255,255,.08);margin-top:4px;margin-bottom:-4px}
+.hist-seg:last-child .hist-spine-line{display:none}
+
+/* Segment card */
+.hist-seg-card{flex:1;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.07);border-radius:10px;padding:12px 14px;margin-bottom:8px;transition:border-color .2s}
+.hist-seg-card:hover{border-color:rgba(255,255,255,.14)}
+.hist-seg-card.stop{border-left:3px solid #f59e0b}
+.hist-seg-card.move{border-left:3px solid #4f8ef7}
+
+.hist-seg-head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+.hist-seg-type{display:flex;align-items:center;gap:6px;font-size:.78rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em}
+.hist-seg-type.stop{color:#f59e0b}
+.hist-seg-type.move{color:#4f8ef7}
+.hist-seg-duration{font-size:.78rem;color:#94a3b8;background:rgba(255,255,255,.06);padding:2px 8px;border-radius:20px;flex-shrink:0}
+
+.hist-seg-time{font-size:.8rem;color:#64748b;margin-bottom:6px;font-family:'JetBrains Mono',monospace}
+.hist-seg-addr{font-size:.85rem;color:#cbd5e1;display:flex;align-items:flex-start;gap:6px;margin-bottom:6px}
+.hist-seg-addr i{color:#f59e0b;flex-shrink:0;margin-top:2px}
+.hist-seg-addr-loading{font-size:.8rem;color:#64748b;font-style:italic}
+
+.hist-seg-stats{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-top:4px}
+.hist-seg-stat{display:flex;align-items:center;gap:4px;font-size:.78rem;color:#94a3b8}
+.hist-seg-stat i{font-size:.72rem;color:#64748b}
+.hist-seg-stat strong{color:#e2e8f0}
+
+.hist-seg-actions{display:flex;align-items:center;gap:6px;margin-top:8px;flex-wrap:wrap}
+.hist-map-btn{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;font-size:.76rem;font-weight:600;background:rgba(79,142,247,.12);color:#4f8ef7;border:1px solid rgba(79,142,247,.25);cursor:pointer;transition:all .15s}
+.hist-map-btn:hover{background:rgba(79,142,247,.2);border-color:#4f8ef7}
+.hist-coords-btn{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;font-size:.76rem;font-weight:600;background:rgba(255,255,255,.05);color:#94a3b8;border:1px solid rgba(255,255,255,.1);cursor:pointer;transition:all .15s}
+.hist-coords-btn:hover{border-color:rgba(255,255,255,.2);color:#e2e8f0}
+
+/* Speed indicator pill */
+.hist-speed-pill{display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:12px;font-size:.73rem;font-weight:600}
+.hist-speed-pill.slow{background:rgba(16,185,129,.12);color:#10b981}
+.hist-speed-pill.medium{background:rgba(245,158,11,.12);color:#f59e0b}
+.hist-speed-pill.fast{background:rgba(239,68,68,.12);color:#ef4444}
+
+@media(max-width:767px){
+  .hist-sum-item{padding:10px 10px}
+  .hist-sum-item span{font-size:.95rem}
+  .hist-timeline{padding:12px}
+  .hist-seg-card{padding:10px 12px}
+}
+
 /* ── Meu Plano panel ──────────────────────────────────────────────────── */
 .mp-status-card{background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:14px;padding:18px 20px;display:flex;align-items:center;gap:16px;margin-bottom:24px}
 .mp-status-icon{width:44px;height:44px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:1.3rem;flex-shrink:0}
@@ -143,6 +220,10 @@
                     <button class="snav-item active" data-nav="map" onclick="sidebarNav('map')">
                         <i class="fa-solid fa-map-location-dot"></i>
                         <span>Mapa</span>
+                    </button>
+                    <button class="snav-item" data-nav="historico" onclick="sidebarNav('historico')">
+                        <i class="fa-solid fa-clock-rotate-left"></i>
+                        <span>Histórico</span>
                     </button>
                     <button class="snav-item" data-nav="control" onclick="sidebarNav('control')">
                         <i class="fa-solid fa-terminal"></i>
@@ -678,6 +759,65 @@
                     </div>
                 </div>
 
+                <!-- ── Histórico de Passagens Panel ───────────────────────────── -->
+                <div class="grid-card historico-card" data-tab="historico" style="display:none">
+                    <div class="card-header hist-card-header">
+                        <h3><i class="fa-solid fa-clock-rotate-left neon-text-blue"></i> Histórico de Passagens</h3>
+                        <div class="hist-header-controls">
+                            <select id="hist-days-select" class="trail-days-select" onchange="histLoad()">
+                                <option value="1">Hoje</option>
+                                <option value="3">3 dias</option>
+                                <option value="7" selected>7 dias</option>
+                                <option value="30">30 dias</option>
+                            </select>
+                            <button class="btn btn-sm btn-secondary" onclick="histLoad()" title="Atualizar">
+                                <i class="fa-solid fa-rotate-right"></i>
+                            </button>
+                            <button class="btn btn-sm btn-secondary" onclick="histExportCsv()" title="Exportar CSV">
+                                <i class="fa-solid fa-file-csv"></i> CSV
+                            </button>
+                        </div>
+                    </div>
+                    <div class="card-body hist-body">
+                        <!-- Summary bar -->
+                        <div class="hist-summary-bar" id="hist-summary-bar" style="display:none">
+                            <div class="hist-sum-item">
+                                <i class="fa-solid fa-route"></i>
+                                <span id="hist-sum-km">--</span>
+                                <small>km totais</small>
+                            </div>
+                            <div class="hist-sum-item">
+                                <i class="fa-solid fa-circle-pause"></i>
+                                <span id="hist-sum-stops">--</span>
+                                <small>paradas</small>
+                            </div>
+                            <div class="hist-sum-item">
+                                <i class="fa-solid fa-person-walking"></i>
+                                <span id="hist-sum-moves">--</span>
+                                <small>movimentos</small>
+                            </div>
+                            <div class="hist-sum-item">
+                                <i class="fa-solid fa-gauge-high"></i>
+                                <span id="hist-sum-maxspd">--</span>
+                                <small>km/h máx</small>
+                            </div>
+                            <div class="hist-sum-item">
+                                <i class="fa-solid fa-location-dot"></i>
+                                <span id="hist-sum-pts">--</span>
+                                <small>pontos GPS</small>
+                            </div>
+                        </div>
+
+                        <!-- Timeline -->
+                        <div class="hist-timeline" id="hist-timeline">
+                            <div class="hist-empty" id="hist-empty">
+                                <i class="fa-solid fa-clock-rotate-left fa-2x" style="opacity:.3"></i>
+                                <p>Selecione um dispositivo para ver o histórico de passagens.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- My Plan Panel -->
                 <div class="grid-card" data-tab="meu-plano" style="padding:24px;display:none">
                   <div class="mp-scroll-wrap">
@@ -789,8 +929,355 @@
         </div>
     </div>
 
-    <script src="app.js?v=35"></script>
+    <script src="app.js?v=38"></script>
     <script>
+// ── Histórico de Passagens ───────────────────────────────────────────────────────────
+(function(){
+  // ---- Helpers ----
+  function hEsc(s){ return s==null?'':String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function hFmt(ms){
+    if(ms<60000) return Math.round(ms/1000)+'s';
+    const m=Math.floor(ms/60000), h=Math.floor(m/60);
+    return h>0 ? h+'h '+( m%60>0?(m%60)+'min':'') : m+'min';
+  }
+  function hTime(ts){
+    const d=new Date(ts);
+    return d.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  }
+  function hDate(ts){
+    const d=new Date(ts);
+    return d.toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
+  }
+  function hDateKey(ts){ const d=new Date(ts); return d.toDateString(); }
+
+  // Haversine distance in km
+  function hDist(a,b){
+    const R=6371, dLat=(b.lat-a.lat)*Math.PI/180, dLng=(b.lng-a.lng)*Math.PI/180;
+    const x=Math.sin(dLat/2)**2+Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)**2;
+    return R*2*Math.atan2(Math.sqrt(x),Math.sqrt(1-x));
+  }
+
+  // Speed in km/h between two points
+  function hSpeed(a,b){
+    const km=hDist(a,b), hrs=(b.timestamp-a.timestamp)/3600000;
+    return hrs>0 ? km/hrs : 0;
+  }
+
+  // ---- Passage detection ----
+  // Segments: STOP = device stayed within STOP_RADIUS m for >= STOP_MIN_MS
+  // MOVE = consecutive points with meaningful movement between them
+  const STOP_RADIUS_KM = 0.08;  // 80 m
+  const STOP_MIN_MS    = 3 * 60 * 1000; // 3 min
+
+  function detectSegments(points){
+    if(!points||points.length<2) return [];
+    const sorted=[...points].sort((a,b)=>a.timestamp-b.timestamp);
+    const segs=[];
+    let i=0;
+
+    while(i<sorted.length){
+      // Try to detect a stop starting at i
+      let j=i+1;
+      while(j<sorted.length && hDist(sorted[i],sorted[j])<=STOP_RADIUS_KM) j++;
+      const stopDur=sorted[Math.min(j,sorted.length)-1].timestamp - sorted[i].timestamp;
+
+      if(j>i+1 && stopDur>=STOP_MIN_MS){
+        // Found a stop
+        const stopPts=sorted.slice(i,j);
+        // Center of stop
+        const lat=stopPts.reduce((s,p)=>s+p.lat,0)/stopPts.length;
+        const lng=stopPts.reduce((s,p)=>s+p.lng,0)/stopPts.length;
+        segs.push({
+          type:'stop',
+          startTs:stopPts[0].timestamp,
+          endTs:stopPts[stopPts.length-1].timestamp,
+          lat, lng,
+          pts:stopPts,
+          accuracy: Math.round(stopPts.reduce((s,p)=>s+p.accuracy,0)/stopPts.length)
+        });
+        i=j;
+      } else {
+        // Collect movement until we hit a stop candidate
+        const movePts=[sorted[i]];
+        let k=i+1;
+        while(k<sorted.length){
+          movePts.push(sorted[k]);
+          // Peek ahead: is next a stop?
+          if(k+1<sorted.length){
+            let jj=k+1;
+            while(jj<sorted.length && hDist(sorted[k],sorted[jj])<=STOP_RADIUS_KM) jj++;
+            const peekDur=sorted[Math.min(jj,sorted.length)-1].timestamp - sorted[k].timestamp;
+            if(jj>k+1 && peekDur>=STOP_MIN_MS) break; // next stop found
+          }
+          k++;
+        }
+        if(movePts.length<2){ i=k; continue; }
+        // Compute movement stats
+        let totalKm=0, maxSpd=0;
+        for(let m=1;m<movePts.length;m++){
+          const d=hDist(movePts[m-1],movePts[m]);
+          const spd=hSpeed(movePts[m-1],movePts[m]);
+          totalKm+=d; if(spd>maxSpd) maxSpd=spd;
+        }
+        const avgSpd=movePts.length>=2
+          ? totalKm/((movePts[movePts.length-1].timestamp-movePts[0].timestamp)/3600000)||0
+          : 0;
+        segs.push({
+          type:'move',
+          startTs:movePts[0].timestamp,
+          endTs:movePts[movePts.length-1].timestamp,
+          pts:movePts,
+          lat:movePts[0].lat, lng:movePts[0].lng,
+          endLat:movePts[movePts.length-1].lat,
+          endLng:movePts[movePts.length-1].lng,
+          totalKm, maxSpd:Math.round(maxSpd), avgSpd:Math.round(avgSpd)
+        });
+        i=k;
+      }
+    }
+    return segs;
+  }
+
+  // ---- Reverse geocode (rate-limited) ----
+  const geocodeCache={};
+  async function histGeocode(lat,lng){
+    const key=lat.toFixed(4)+','+lng.toFixed(4);
+    if(geocodeCache[key]) return geocodeCache[key];
+    try{
+      const r=await fetch(`https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=pt-BR`,{headers:{'User-Agent':'AndroidProtect/1.0'}});
+      const j=await r.json();
+      const a=j.address||{};
+      const parts=[a.road||a.pedestrian||a.path||'', a.house_number||'', a.suburb||a.neighbourhood||a.district||'', a.city||a.town||a.village||'', a.state||''].filter(Boolean);
+      const label=parts.length ? parts.join(', ') : j.display_name||'Localização desconhecida';
+      geocodeCache[key]=label;
+      return label;
+    }catch(e){ return null; }
+  }
+
+  // ---- Rendering ----
+  let histGeocodeQueue=[];
+  let histGeocodeRunning=false;
+
+  async function runGeocodeQueue(){
+    if(histGeocodeRunning) return;
+    histGeocodeRunning=true;
+    while(histGeocodeQueue.length){
+      const task=histGeocodeQueue.shift();
+      await task();
+      await new Promise(r=>setTimeout(r,1200)); // respect Nominatim 1 req/s limit
+    }
+    histGeocodeRunning=false;
+  }
+
+  function renderSegments(segs){
+    const tl=document.getElementById('hist-timeline');
+    if(!tl) return;
+    if(!segs.length){
+      tl.innerHTML='<div class="hist-empty"><i class="fa-solid fa-magnifying-glass fa-2x" style="opacity:.3"></i><p>Nenhuma passagem detectada neste período.</p></div>';
+      return;
+    }
+    // Group by day
+    const days=[];
+    const dayMap={};
+    segs.forEach(s=>{
+      const dk=hDateKey(s.startTs);
+      if(!dayMap[dk]){ dayMap[dk]={label:hDate(s.startTs),segs:[]}; days.push(dayMap[dk]); }
+      dayMap[dk].segs.push(s);
+    });
+
+    tl.innerHTML='';
+    histGeocodeQueue=[];
+
+    days.forEach(day=>{
+      const grp=document.createElement('div');
+      grp.className='hist-day-group';
+      grp.innerHTML=`<div class="hist-day-label"><i class="fa-solid fa-calendar-day"></i>${hEsc(day.label)}</div>`;
+      tl.appendChild(grp);
+
+      day.segs.forEach((seg,si)=>{
+        const dur=seg.endTs-seg.startTs;
+        const isStop=seg.type==='stop';
+
+        // Speed classification
+        let spdClass='', spdLabel='';
+        if(!isStop){
+          if(seg.avgSpd<20){ spdClass='slow'; spdLabel='Lento'; }
+          else if(seg.avgSpd<60){ spdClass='medium'; spdLabel='Moderado'; }
+          else { spdClass='fast'; spdLabel='Rápido'; }
+        }
+
+        const segEl=document.createElement('div');
+        segEl.className='hist-seg';
+
+        const statsHtml=isStop
+          ? `<div class="hist-seg-stats">
+               <div class="hist-seg-stat"><i class="fa-solid fa-clock"></i> Permanência: <strong>${hFmt(dur)}</strong></div>
+               <div class="hist-seg-stat"><i class="fa-solid fa-location-crosshairs"></i> ±${seg.accuracy||'--'}m</div>
+             </div>`
+          : `<div class="hist-seg-stats">
+               <div class="hist-seg-stat"><i class="fa-solid fa-route"></i> <strong>${seg.totalKm.toFixed(2)} km</strong></div>
+               <div class="hist-seg-stat"><i class="fa-solid fa-gauge-high"></i> Máx <strong>${seg.maxSpd} km/h</strong></div>
+               <div class="hist-seg-stat"><i class="fa-solid fa-gauge"></i> Méd <strong>${seg.avgSpd} km/h</strong></div>
+               <span class="hist-speed-pill ${spdClass}">${spdLabel}</span>
+             </div>`;
+
+        const addrId=`hist-addr-${Date.now()}-${si}`;
+        const mapLat=isStop?seg.lat:seg.endLat, mapLng=isStop?seg.lng:seg.endLng;
+
+        segEl.innerHTML=`
+          <div class="hist-spine">
+            <div class="hist-spine-dot ${seg.type}"></div>
+            <div class="hist-spine-line"></div>
+          </div>
+          <div class="hist-seg-card ${seg.type}">
+            <div class="hist-seg-head">
+              <div class="hist-seg-type ${seg.type}">
+                <i class="fa-solid ${isStop?'fa-circle-pause':'fa-person-running'}"></i>
+                ${isStop?'Parada':'Movimento'}
+              </div>
+              <span class="hist-seg-duration"><i class="fa-regular fa-clock"></i> ${hFmt(dur)}</span>
+            </div>
+            <div class="hist-seg-time">
+              <i class="fa-solid fa-arrow-right-from-bracket" style="font-size:.7rem"></i> ${hTime(seg.startTs)}
+              &nbsp;→&nbsp;
+              <i class="fa-solid fa-arrow-right-to-bracket" style="font-size:.7rem"></i> ${hTime(seg.endTs)}
+            </div>
+            <div class="hist-seg-addr" id="${addrId}">
+              <i class="fa-solid ${isStop?'fa-location-dot':'fa-road'}"></i>
+              <span class="hist-seg-addr-loading">Obtendo endereço…</span>
+            </div>
+            ${statsHtml}
+            <div class="hist-seg-actions">
+              <button class="hist-map-btn" onclick="histShowOnMap(${seg.lat},${seg.lng})">
+                <i class="fa-solid fa-map-location-dot"></i> Ver no mapa
+              </button>
+              <button class="hist-coords-btn" onclick="histCopyCoords(${seg.lat},${seg.lng})">
+                <i class="fa-solid fa-copy"></i> ${seg.lat.toFixed(5)}, ${seg.lng.toFixed(5)}
+              </button>
+            </div>
+          </div>`;
+        grp.appendChild(segEl);
+
+        // Queue geocoding
+        const addrLat=seg.lat, addrLng=seg.lng;
+        histGeocodeQueue.push(async()=>{
+          const label=await histGeocode(addrLat,addrLng);
+          const el=document.getElementById(addrId);
+          if(el) el.innerHTML=`<i class="fa-solid ${isStop?'fa-location-dot':'fa-road'}"></i><span>${hEsc(label||'Endereço não encontrado')}</span>`;
+        });
+      });
+    });
+
+    runGeocodeQueue();
+  }
+
+  // ---- Summary stats ----
+  function renderSummary(segs,pts){
+    const bar=document.getElementById('hist-summary-bar');
+    if(!bar) return;
+    const stops=segs.filter(s=>s.type==='stop').length;
+    const moves=segs.filter(s=>s.type==='move');
+    const totalKm=moves.reduce((s,m)=>s+m.totalKm,0);
+    const maxSpd=moves.reduce((s,m)=>Math.max(s,m.maxSpd),0);
+    document.getElementById('hist-sum-km').textContent=totalKm.toFixed(1);
+    document.getElementById('hist-sum-stops').textContent=stops;
+    document.getElementById('hist-sum-moves').textContent=moves.length;
+    document.getElementById('hist-sum-maxspd').textContent=maxSpd||'--';
+    document.getElementById('hist-sum-pts').textContent=pts.length;
+    bar.style.display='flex';
+  }
+
+  // ---- Load ----
+  let histCurrentSegs=[], histCurrentPts=[];
+
+  window.histLoad=async function(){
+    if(typeof currentDeviceId==='undefined'||!currentDeviceId){
+      const tl=document.getElementById('hist-timeline');
+      if(tl) tl.innerHTML='<div class="hist-empty"><i class="fa-solid fa-mobile-screen fa-2x" style="opacity:.3"></i><p>Selecione um dispositivo primeiro.</p></div>';
+      const bar=document.getElementById('hist-summary-bar');
+      if(bar) bar.style.display='none';
+      return;
+    }
+    const days=document.getElementById('hist-days-select')?.value||7;
+    const tl=document.getElementById('hist-timeline');
+    if(tl) tl.innerHTML='<div class="hist-loading"><i class="fa-solid fa-spinner fa-spin"></i> Carregando pontos GPS…</div>';
+    const bar=document.getElementById('hist-summary-bar');
+    if(bar) bar.style.display='none';
+
+    try{
+      const token=localStorage.getItem('ap_token')||'';
+      const r=await fetch(`/api/device/${currentDeviceId}/telemetry-history?days=${days}`,{headers:{'Authorization':'Bearer '+token}});
+      const pts=await r.json();
+      histCurrentPts=Array.isArray(pts)?pts:[];
+
+      if(!histCurrentPts.length){
+        if(tl) tl.innerHTML='<div class="hist-empty"><i class="fa-solid fa-magnifying-glass fa-2x" style="opacity:.3"></i><p>Nenhum ponto GPS encontrado neste período.</p></div>';
+        return;
+      }
+
+      const segs=detectSegments(histCurrentPts);
+      histCurrentSegs=segs;
+      renderSummary(segs,histCurrentPts);
+      renderSegments(segs);
+    }catch(e){
+      if(tl) tl.innerHTML='<div class="hist-empty" style="color:#ef4444"><i class="fa-solid fa-triangle-exclamation fa-2x"></i><p>Erro ao carregar histórico.</p></div>';
+    }
+  };
+
+  // ---- Actions ----
+  window.histShowOnMap=function(lat,lng){
+    // Switch to map tab and pan there
+    if(typeof sidebarNav==='function') sidebarNav('map');
+    if(typeof map!=='undefined'&&map) setTimeout(()=>map.setView([lat,lng],17),200);
+  };
+
+  window.histCopyCoords=function(lat,lng){
+    navigator.clipboard.writeText(`${lat.toFixed(6)},${lng.toFixed(6)}`).then(()=>alert('Coordenadas copiadas!')).catch(()=>{});
+  };
+
+  window.histExportCsv=function(){
+    if(!histCurrentSegs.length){ alert('Nenhum dado para exportar.'); return; }
+    const rows=[['Tipo','Início','Fim','Duração (min)','Latitude','Longitude','Distância (km)','Vel. Máx (km/h)','Vel. Méd (km/h)']];
+    histCurrentSegs.forEach(s=>{
+      const dur=Math.round((s.endTs-s.startTs)/60000);
+      rows.push([
+        s.type==='stop'?'Parada':'Movimento',
+        new Date(s.startTs).toLocaleString('pt-BR'),
+        new Date(s.endTs).toLocaleString('pt-BR'),
+        dur,
+        s.lat.toFixed(6),
+        s.lng.toFixed(6),
+        s.type==='move'?s.totalKm.toFixed(3):'',
+        s.type==='move'?s.maxSpd:'',
+        s.type==='move'?s.avgSpd:''
+      ]);
+    });
+    const csv=rows.map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n');
+    const blob=new Blob(['﻿'+csv],{type:'text/csv;charset=utf-8'});
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(blob);
+    a.download=`historico_${new Date().toISOString().slice(0,10)}.csv`;
+    a.click();
+  };
+
+  // ---- Hook into sidebarNav ----
+  const _origNav2=window.sidebarNav;
+  window.sidebarNav=function(key,...rest){
+    if(key==='historico'){
+      document.querySelectorAll('.dashboard-grid .grid-card').forEach(c=>{
+        c.style.display=c.dataset.tab==='historico'?'':'none';
+      });
+      document.querySelectorAll('.snav-item').forEach(el=>el.classList.remove('active'));
+      const btn=document.querySelector('.snav-item[data-nav="historico"]');
+      if(btn) btn.classList.add('active');
+      if(typeof closeSidebar==='function') closeSidebar();
+      histLoad();
+      return;
+    }
+    if(typeof _origNav2==='function') return _origNav2(key,...rest);
+  };
+})();
+
 // ── Meu Plano ────────────────────────────────────────────────────────────────────────
 (function(){
   const AUTH = () => localStorage.getItem('ap_token') || '';
@@ -951,7 +1438,7 @@
   }
 
   // Hook into sidebarNav — when 'meu-plano' is selected, load data
-  const _origSidebarNav = window.sidebarNav;
+  const _origSidebarNavMp = window.sidebarNav;
   window.sidebarNav = function(key, ...rest) {
     if (key === 'meu-plano') {
       // show only the meu-plano card; hide others
@@ -974,7 +1461,7 @@
     // leaving meu-plano: remove active class
     const mpCard = document.querySelector('.grid-card[data-tab="meu-plano"]');
     if (mpCard) mpCard.classList.remove('mp-active');
-    if (typeof _origSidebarNav === 'function') return _origSidebarNav(key, ...rest);
+    if (typeof _origSidebarNavMp === 'function') return _origSidebarNavMp(key, ...rest);
   };
 })();
 </script>
