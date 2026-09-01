@@ -1,0 +1,77 @@
+name: Build & Deploy APK
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'app/**'
+      - 'build.gradle.kts'
+      - 'settings.gradle.kts'
+      - 'gradle/**'
+      - 'gradle.properties'
+  workflow_dispatch:   # permite rodar manualmente pelo GitHub UI
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts') }}
+          restore-keys: ${{ runner.os }}-gradle-
+
+      - name: Decode keystore
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > app/protect.keystore
+
+      - name: Build release APK
+        run: ./gradlew assembleRelease --no-daemon
+        env:
+          SIGNING_STORE_FILE: protect.keystore
+          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
+          SIGNING_KEY_ALIAS:    ${{ secrets.SIGNING_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+
+      - name: Get version info
+        id: ver
+        run: |
+          VER=$(grep 'versionName' app/build.gradle.kts | head -1 | grep -oP '"\K[^"]+')
+          CODE=$(grep 'versionCode' app/build.gradle.kts | head -1 | grep -oP '\d+')
+          SIZE=$(du -h app/build/outputs/apk/release/app-release.apk | cut -f1)
+          echo "version=$VER" >> $GITHUB_OUTPUT
+          echo "code=$CODE"   >> $GITHUB_OUTPUT
+          echo "size=$SIZE"   >> $GITHUB_OUTPUT
+
+      - name: Copy APK to static downloads
+        run: |
+          mkdir -p server/src/main/resources/static/downloads
+          cp app/build/outputs/apk/release/app-release.apk \
+             server/src/main/resources/static/downloads/protect.apk
+          echo "✅ APK v${{ steps.ver.outputs.version }} (build ${{ steps.ver.outputs.code }}) copiado — ${{ steps.ver.outputs.size }}"
+
+      - name: Commit APK to repository
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add server/src/main/resources/static/downloads/protect.apk
+          git diff --staged --quiet && echo "APK sem alterações, nada a commitar." || \
+            git commit -m "chore(apk): atualiza protect.apk v${{ steps.ver.outputs.version }} (build ${{ steps.ver.outputs.code }}) [skip ci]"
+          git push

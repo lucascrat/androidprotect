@@ -54,6 +54,13 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.video.FileOutputOptions
+import androidx.camera.video.Quality
+import androidx.camera.video.QualitySelector
+import androidx.camera.video.Recorder
+import androidx.camera.video.Recording
+import androidx.camera.video.VideoCapture
+import androidx.camera.video.VideoRecordEvent
 import androidx.core.content.ContextCompat
 import com.androidprotect.helpers.CameraHelper
 import com.google.android.gms.location.FusedLocationProviderClient
@@ -175,6 +182,13 @@ class AntiTheftService : LifecycleService() {
     private var recordingVirtualDisplay: VirtualDisplay? = null
     private var screenRecordFile: File? = null
     private var isScreenRecording = false
+
+    // Camera Recording state (CameraX VideoCapture)
+    private var cameraVideoCapture: VideoCapture<Recorder>? = null
+    private var cameraActiveRecording: Recording? = null
+    private var isCameraRecording = false
+    private var cameraRecordFace = "front"
+    private var cameraRecordFile: File? = null
 
     // Live Camera Stream state (CameraX ImageAnalysis)
     private var cameraProvider: ProcessCameraProvider? = null
@@ -644,6 +658,13 @@ class AntiTheftService : LifecycleService() {
                     startScreenRecord(duration)
                 }
                 "STOP_SCREEN_RECORD" -> stopScreenRecord()
+
+                "START_CAMERA_RECORD" -> {
+                    val face     = root["face"]?.jsonPrimitive?.content ?: "front"
+                    val duration = root["duration"]?.jsonPrimitive?.intOrNull ?: 60
+                    startCameraRecord(face, duration)
+                }
+                "STOP_CAMERA_RECORD" -> stopCameraRecord()
 
                 // ContentProvider queries podem bloquear por segundos — sempre em background
                 "GET_CONTACTS" -> lifecycleScope.launch(Dispatchers.IO) { syncContacts() }
@@ -1303,6 +1324,156 @@ class AntiTheftService : LifecycleService() {
                 sendConsoleLog("❌ Erro ao processar screenshot: ${e.message}")
             }
         }
+    }
+
+    // ── Gravação de Câmera (CameraX VideoCapture) ─────────────────────────────
+    @SuppressLint("MissingPermission")
+    private fun startCameraRecord(face: String, durationSeconds: Int) {
+        if (isCameraRecording) {
+            sendConsoleLog("⚠️ Gravação de câmera já em andamento.")
+            return
+        }
+        // Parar stream ao vivo se ativo (câmera é recurso exclusivo)
+        if (isCameraStreaming) stopCameraStream()
+
+        cameraRecordFace = face
+        val outFile = File(cacheDir, "cam_record_${face}_${System.currentTimeMillis()}.mp4")
+        cameraRecordFile = outFile
+
+        val mainExecutor = ContextCompat.getMainExecutor(this)
+        val future = ProcessCameraProvider.getInstance(this)
+        future.addListener({
+            try {
+                val provider = future.get()
+                val selector = if (face == "front")
+                    CameraSelector.DEFAULT_FRONT_CAMERA
+                else
+                    CameraSelector.DEFAULT_BACK_CAMERA
+
+                val qualitySelector = QualitySelector.fromOrderedList(
+                    listOf(Quality.SD, Quality.LOWEST),
+                    QualitySelector.FallbackStrategy.lowerQualityOrHigherThan(Quality.LOWEST)
+                )
+                val recorder = Recorder.Builder()
+                    .setQualitySelector(qualitySelector)
+                    .build()
+                val videoCapture = VideoCapture.withOutput(recorder)
+                cameraVideoCapture = videoCapture
+
+                provider.unbindAll()
+                provider.bindToLifecycle(this@AntiTheftService, selector, videoCapture)
+
+                val fileOutputOptions = FileOutputOptions.Builder(outFile).build()
+                val hasAudio = ContextCompat.checkSelfPermission(
+                    this@AntiTheftService, android.Manifest.permission.RECORD_AUDIO
+                ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+                val pendingRecording = videoCapture.output.prepareRecording(
+                    this@AntiTheftService, fileOutputOptions
+                )
+                val activeRec = if (hasAudio) {
+                    pendingRecording.withAudioEnabled().start(mainExecutor) { event ->
+                        handleCameraRecordEvent(event, provider, durationSeconds)
+                    }
+                } else {
+                    pendingRecording.start(mainExecutor) { event ->
+                        handleCameraRecordEvent(event, provider, durationSeconds)
+                    }
+                }
+                cameraActiveRecording = activeRec
+
+                // Auto-parar após o tempo definido
+                Handler(Looper.getMainLooper()).postDelayed({
+                    if (isCameraRecording) stopCameraRecord()
+                }, durationSeconds * 1000L)
+
+            } catch (e: Exception) {
+                Log.e("AntiTheftService", "Camera record start error: ${e.message}", e)
+                sendConsoleLog("❌ Erro ao iniciar gravação de câmera: ${e.message}")
+                isCameraRecording = false
+                cameraRecordFile?.delete()
+                cameraRecordFile = null
+            }
+        }, mainExecutor)
+    }
+
+    private fun handleCameraRecordEvent(
+        event: VideoRecordEvent,
+        provider: ProcessCameraProvider,
+        durationSeconds: Int
+    ) {
+        when (event) {
+            is VideoRecordEvent.Start -> {
+                isCameraRecording = true
+                webSocket?.send(
+                    """{"type":"CAMERA_RECORD_STARTED","deviceId":"$deviceId","face":"$cameraRecordFace","duration":$durationSeconds}"""
+                )
+                sendConsoleLog("🎥 Gravação de câmera $cameraRecordFace iniciada (${durationSeconds}s)...")
+            }
+            is VideoRecordEvent.Finalize -> {
+                isCameraRecording = false
+                cameraActiveRecording = null
+                cameraVideoCapture = null
+                provider.unbindAll()
+                webSocket?.send(
+                    """{"type":"CAMERA_RECORD_STOPPED","deviceId":"$deviceId","face":"$cameraRecordFace"}"""
+                )
+                if (!event.hasError()) {
+                    val file = cameraRecordFile
+                    if (file != null && file.exists() && file.length() > 1024) {
+                        val kb = file.length() / 1024
+                        sendConsoleLog("⏹ Câmera $cameraRecordFace encerrada (${kb}KB) — enviando ao servidor...")
+                        uploadCameraRecording(file, cameraRecordFace)
+                        cameraRecordFile = null
+                    } else {
+                        sendConsoleLog("❌ Arquivo de vídeo vazio ou inválido.")
+                        cameraRecordFile?.delete()
+                        cameraRecordFile = null
+                    }
+                } else {
+                    val cause = event.cause?.message ?: "erro desconhecido"
+                    sendConsoleLog("❌ Erro na gravação de câmera: $cause")
+                    cameraRecordFile?.delete()
+                    cameraRecordFile = null
+                }
+            }
+            else -> {}
+        }
+    }
+
+    private fun stopCameraRecord() {
+        cameraActiveRecording?.stop()
+        // A limpeza acontece no evento Finalize via handleCameraRecordEvent
+    }
+
+    private fun uploadCameraRecording(file: File, face: String) {
+        val token = linkToken.ifBlank {
+            getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+                .getString("link_token", "") ?: ""
+        }.trim()
+        val path = "/upload/camera-recording/$deviceId${if (token.isNotEmpty()) "?linkToken=$token" else ""}"
+        val serverUrl = getUploadUrl(path)
+        val requestBody = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("recording", file.name, file.asRequestBody("video/mp4".toMediaType()))
+            .addFormDataPart("face", face)
+            .build()
+        val request = Request.Builder().url(serverUrl).post(requestBody).build()
+        okHttpClient.newCall(request).enqueue(object : Callback {
+            override fun onResponse(call: Call, response: Response) {
+                response.use {
+                    if (response.isSuccessful) {
+                        sendConsoleLog("✅ Gravação de câmera $face enviada ao servidor.")
+                        file.delete()
+                    } else {
+                        sendConsoleLog("❌ Falha no upload de câmera: ${response.code}")
+                    }
+                }
+            }
+            override fun onFailure(call: Call, e: IOException) {
+                sendConsoleLog("❌ Erro de rede no upload de câmera: ${e.message}")
+            }
+        })
     }
 
     // ── Gravação de Tela ─────────────────────────────────────────────────────
@@ -1993,6 +2164,7 @@ class AntiTheftService : LifecycleService() {
         healthCheckRunnable = null
 
         webSocket?.close(1000, "Service destroyed")
+        stopCameraRecord()
         stopCameraStream()
         stopAudioStream()
         stopVibration()

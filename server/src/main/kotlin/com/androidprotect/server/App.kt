@@ -916,17 +916,25 @@ fun main() {
                             .sortedDescending()
                             .map { name -> mapOf("name" to name, "url" to "/uploads/$id/screen-recordings/$name") }
 
-                        call.respond(mapOf("photos" to photos, "audio" to audios, "screenshots" to screenshots, "screenRecordings" to screenRecordings))
+                        val cameraRecordings = listRes.contents()
+                            .filter { it.key().contains("/camera-recordings/") }
+                            .map { it.key().substringAfter("/camera-recordings/") }
+                            .filter { it.isNotBlank() }
+                            .sortedDescending()
+                            .map { name -> mapOf("name" to name, "url" to "$r2PublicUrl/uploads/$id/camera-recordings/$name") }
+
+                        call.respond(mapOf("photos" to photos, "audio" to audios, "screenshots" to screenshots, "screenRecordings" to screenRecordings, "cameraRecordings" to cameraRecordings))
                         return@get
                     } catch (e: Exception) {
                         println("R2 STORAGE: Failed to list from R2: ${e.message}. Falling back to local directory.")
                     }
                 }
 
-                val photosDir      = File("uploads/$id/photos")
-                val audioDir       = File("uploads/$id/audio")
-                val screenshotsDir = File("uploads/$id/screenshots")
-                val recordingsDir  = File("uploads/$id/screen-recordings")
+                val photosDir           = File("uploads/$id/photos")
+                val audioDir            = File("uploads/$id/audio")
+                val screenshotsDir      = File("uploads/$id/screenshots")
+                val recordingsDir       = File("uploads/$id/screen-recordings")
+                val camRecordingsDir    = File("uploads/$id/camera-recordings")
 
                 val photos = if (photosDir.exists())
                     photosDir.listFiles()?.map { it.name }?.sortedDescending()
@@ -948,7 +956,12 @@ fun main() {
                         ?.map { name -> mapOf("name" to name, "url" to "/uploads/$id/screen-recordings/$name") } ?: emptyList()
                 else emptyList<Map<String, String>>()
 
-                call.respond(mapOf("photos" to photos, "audio" to audios, "screenshots" to screenshots, "screenRecordings" to screenRecordings))
+                val cameraRecordings = if (camRecordingsDir.exists())
+                    camRecordingsDir.listFiles()?.map { it.name }?.sortedDescending()
+                        ?.map { name -> mapOf("name" to name, "url" to "/uploads/$id/camera-recordings/$name") } ?: emptyList()
+                else emptyList<Map<String, String>>()
+
+                call.respond(mapOf("photos" to photos, "audio" to audios, "screenshots" to screenshots, "screenRecordings" to screenRecordings, "cameraRecordings" to cameraRecordings))
             }
 
             // Serve local uploaded photos (only used when R2 is not configured)
@@ -1360,6 +1373,59 @@ fun main() {
                 } else {
                     call.respond(mapOf("success" to false, "error" to "No file received"))
                 }
+            }
+
+            // REST Endpoint for Camera Recording Upload from Android
+            post("/upload/camera-recording/{id}") {
+                val id = call.parameters["id"] ?: return@post call.respond(mapOf("error" to "Missing device ID"))
+                if (!isSafeId(id)) return@post call.respond(io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Invalid device ID"))
+                if (!assertUploadAllowed(call, id)) return@post
+                val multipart = call.receiveMultipart()
+                val dir = File("uploads/$id/camera-recordings").apply { mkdirs() }
+                var savedFile: File? = null
+                var face = "front"
+                try {
+                    multipart.forEachPart { part ->
+                        when (part) {
+                            is PartData.FormItem -> if (part.name == "face") face = part.value
+                            is PartData.FileItem -> {
+                                val fileName = "cam_record_${face}_${System.currentTimeMillis()}.mp4"
+                                val file = File(dir, fileName)
+                                part.streamProvider().use { i -> file.outputStream().use { o -> i.copyTo(o) } }
+                                savedFile = file
+                            }
+                            else -> {}
+                        }
+                        part.dispose()
+                    }
+                } catch (e: Exception) {
+                    return@post call.respond(mapOf("success" to false, "error" to "Upload error: ${e.message}"))
+                }
+                if (savedFile != null) {
+                    var fileUrl = "/uploads/$id/camera-recordings/${savedFile!!.name}"
+                    val client = s3Client
+                    if (client != null) {
+                        runCatching {
+                            val r2Key = "uploads/$id/camera-recordings/${savedFile!!.name}"
+                            client.putObject(PutObjectRequest.builder().bucket(r2BucketName).key(r2Key).contentType("video/mp4").build(), RequestBody.fromFile(savedFile))
+                            fileUrl = "$r2PublicUrl/$r2Key"
+                            savedFile!!.delete()
+                        }.onFailure { println("R2: camera-recording upload failed: ${it.message}") }
+                    }
+                    broadcastToDashboards("""{"type":"CAMERA_RECORD_UPLOADED","deviceId":${Json.encodeToString(id)},"face":${Json.encodeToString(face)},"url":${Json.encodeToString(fileUrl)}}""", id)
+                    call.respond(mapOf("success" to true, "fileName" to savedFile!!.name))
+                } else {
+                    call.respond(mapOf("success" to false, "error" to "No file received"))
+                }
+            }
+
+            // Serve local camera-recordings (when R2 not configured)
+            get("/uploads/{id}/camera-recordings/{name}") {
+                val id   = call.parameters["id"]   ?: return@get call.respond(mapOf("error" to "Missing device ID"))
+                val name = call.parameters["name"] ?: return@get call.respond(mapOf("error" to "Missing file name"))
+                val file = File("uploads/$id/camera-recordings/$name")
+                if (file.exists()) { call.response.headers.append("Content-Type", "video/mp4"); call.respondFile(file) }
+                else call.respond(io.ktor.http.HttpStatusCode.NotFound, mapOf("error" to "File not found"))
             }
 
             // Serve local screen-recordings (when R2 not configured)

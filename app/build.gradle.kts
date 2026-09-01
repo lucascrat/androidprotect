@@ -21,8 +21,8 @@ android {
         applicationId = "com.androidprotect"
         minSdk = 21                                    // Android 5.0 — cobre ~99% dos dispositivos
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -116,11 +116,12 @@ dependencies {
     // ── Google Play Services ─────────────────────────────────────────────────
     implementation("com.google.android.gms:play-services-location:21.3.0")
 
-    // ── CameraX (captura headless) ───────────────────────────────────────────
+    // ── CameraX (captura headless + gravação de vídeo) ───────────────────────
     val cameraxVersion = "1.4.2"
     implementation("androidx.camera:camera-core:$cameraxVersion")
     implementation("androidx.camera:camera-camera2:$cameraxVersion")
     implementation("androidx.camera:camera-lifecycle:$cameraxVersion")
+    implementation("androidx.camera:camera-video:$cameraxVersion")
 
     // ── Rede ─────────────────────────────────────────────────────────────────
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
