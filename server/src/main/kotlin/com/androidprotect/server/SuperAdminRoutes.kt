@@ -325,14 +325,15 @@ fun Routing.superAdminRoutes() {
                     }.count()
 
                     mapOf(
-                        "id"        to uid,
-                        "email"     to u[UsersTable.email],
-                        "username"  to u[UsersTable.username],
-                        "createdAt" to u[UsersTable.createdAt],
-                        "subStatus" to subStatus,
-                        "planName"  to (planName ?: if (subStatus == "trial") "Trial" else "-"),
-                        "subEnd"    to (sub?.get(SubscriptionsTable.endDate) ?: 0L), // never null
-                        "devices"   to deviceCount
+                        "id"         to uid,
+                        "email"      to u[UsersTable.email],
+                        "username"   to u[UsersTable.username],
+                        "createdAt"  to u[UsersTable.createdAt],
+                        "subStatus"  to subStatus,
+                        "planName"   to (planName ?: if (subStatus == "trial") "Trial" else "-"),
+                        "subEnd"     to (sub?.get(SubscriptionsTable.endDate) ?: 0L),
+                        "devices"    to deviceCount,
+                        "maxDevices" to u[UsersTable.maxDevices]
                     )
                 }
             val count = UsersTable.selectAll().count()
@@ -538,6 +539,63 @@ fun Routing.superAdminRoutes() {
         call.respondJson(mapOf("payments" to payments))
         } catch (e: Exception) {
             call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro ao listar pagamentos")))
+        }
+    }
+
+    // ── POST /api/superadmin/users — cria novo usuário ───────────────────────
+    post("/api/superadmin/users") {
+        if (getSuperAdminToken(call) == null)
+            return@post call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+        try {
+            val body       = call.receive<Map<String, String>>()
+            val email      = body["email"]?.trim()?.lowercase()
+                ?: return@post call.respondJson(HttpStatusCode.BadRequest, mapOf("error" to "E-mail obrigatório"))
+            val password   = body["password"]
+                ?: return@post call.respondJson(HttpStatusCode.BadRequest, mapOf("error" to "Senha obrigatória"))
+            if (password.length < 6)
+                return@post call.respondJson(HttpStatusCode.BadRequest, mapOf("error" to "Senha deve ter pelo menos 6 caracteres"))
+            val username   = body["username"]?.trim() ?: email.substringBefore("@")
+            val maxDevices = body["maxDevices"]?.toIntOrNull()?.coerceIn(1, 999) ?: 1
+
+            val exists = transaction { UsersTable.select { UsersTable.email eq email }.count() > 0 }
+            if (exists)
+                return@post call.respondJson(HttpStatusCode.Conflict, mapOf("error" to "E-mail já cadastrado"))
+
+            val linkToken = generateLinkToken()
+            val newId = transaction {
+                UsersTable.insert {
+                    it[UsersTable.email]      = email
+                    it[UsersTable.username]   = username
+                    it[UsersTable.passHash]   = hashPassword(password)
+                    it[UsersTable.linkToken]  = linkToken
+                    it[UsersTable.maxDevices] = maxDevices
+                    it[UsersTable.createdAt]  = System.currentTimeMillis()
+                } get UsersTable.id
+            }
+            call.respondJson(mapOf("ok" to true, "id" to newId, "linkToken" to linkToken,
+                "message" to "Usuário criado com sucesso"))
+        } catch (e: Exception) {
+            call.respondJson(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro ao criar usuário")))
+        }
+    }
+
+    // ── PUT /api/superadmin/users/{id}/max-devices — atualiza limite de conexões ──
+    put("/api/superadmin/users/{id}/max-devices") {
+        if (getSuperAdminToken(call) == null)
+            return@put call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+        val userId = call.parameters["id"]?.toIntOrNull()
+            ?: return@put call.respondJson(HttpStatusCode.BadRequest, mapOf("error" to "ID inválido"))
+        try {
+            val body       = call.receive<Map<String, String>>()
+            val maxDevices = body["maxDevices"]?.toIntOrNull()?.coerceIn(1, 999)
+                ?: return@put call.respondJson(HttpStatusCode.BadRequest, mapOf("error" to "maxDevices inválido"))
+            val updated = transaction {
+                UsersTable.update({ UsersTable.id eq userId }) { it[UsersTable.maxDevices] = maxDevices }
+            }
+            if (updated == 0) call.respondJson(HttpStatusCode.NotFound, mapOf("error" to "Usuário não encontrado"))
+            else call.respondJson(mapOf("ok" to true, "maxDevices" to maxDevices))
+        } catch (e: Exception) {
+            call.respondJson(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro ao atualizar")))
         }
     }
 

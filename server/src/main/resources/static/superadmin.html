@@ -347,11 +347,14 @@ input:checked+.slider:before{transform:translateX(17px)}
         <div class="table-box">
           <div class="table-header">
             <h3>Usuários</h3>
-            <input class="search-box" id="userSearch" placeholder="🔍 Buscar por email…" oninput="filterUsers()">
+            <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+              <input class="search-box" id="userSearch" placeholder="🔍 Buscar por email…" oninput="filterUsers()">
+              <button class="btn btn-primary btn-sm" onclick="openCreateUserModal()">+ Criar Usuário</button>
+            </div>
           </div>
           <div class="table-scroll">
             <table>
-              <thead><tr><th>Email</th><th>Nome</th><th>Plano</th><th>Status</th><th>Expira</th><th>Dispositivos</th><th>Cadastro</th><th>Ações</th></tr></thead>
+              <thead><tr><th>Email</th><th>Nome</th><th>Plano</th><th>Status</th><th>Expira</th><th>Aparelhos</th><th>Conexões</th><th>Cadastro</th><th>Ações</th></tr></thead>
               <tbody id="usersBody"></tbody>
             </table>
           </div>
@@ -497,6 +500,62 @@ input:checked+.slider:before{transform:translateX(17px)}
     <div class="modal-actions">
       <button class="btn btn-outline" onclick="closeChangePlanModal()">Cancelar</button>
       <button class="btn btn-primary" onclick="saveChangePlan()">✅ Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── CREATE USER MODAL ─────────────────────────────────────────── -->
+<div class="modal-overlay" id="createUserModal">
+  <div class="modal">
+    <h2>➕ Criar Novo Usuário</h2>
+    <div class="form-row">
+      <div class="form-group">
+        <label>E-mail *</label>
+        <input type="email" id="cuEmail" placeholder="usuario@email.com" autocomplete="off">
+      </div>
+      <div class="form-group">
+        <label>Nome de usuário</label>
+        <input id="cuUsername" placeholder="Opcional">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Senha *</label>
+        <input type="password" id="cuPassword" placeholder="Min. 6 caracteres" autocomplete="new-password">
+      </div>
+      <div class="form-group">
+        <label>Conexões permitidas</label>
+        <input type="number" id="cuMaxDevices" value="1" min="1" max="999">
+      </div>
+    </div>
+    <p style="font-size:.76rem;color:var(--sub);margin-top:-4px;margin-bottom:10px">
+      💡 "Conexões" = máximo de aparelhos Android que este usuário pode vincular.
+    </p>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeCreateUserModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveCreateUser()">✅ Criar Usuário</button>
+    </div>
+  </div>
+</div>
+
+<!-- ─── EDIT MAX DEVICES MODAL ────────────────────────────────────────── -->
+<div class="modal-overlay" id="editConnModal">
+  <div class="modal" style="max-width:360px">
+    <h2>🔗 Alterar Conexões</h2>
+    <p style="color:var(--sub);font-size:.82rem;margin-bottom:14px">
+      Usuário: <strong id="ecUserEmail" style="color:var(--text)"></strong>
+    </p>
+    <input type="hidden" id="ecUserId">
+    <div class="form-group">
+      <label>Número máximo de aparelhos vinculados</label>
+      <input type="number" id="ecMaxDevices" min="1" max="999" style="font-size:1.2rem;text-align:center;font-weight:700">
+    </div>
+    <p style="font-size:.75rem;color:var(--sub);margin-top:-8px;margin-bottom:10px">
+      O usuário poderá vincular até este número de aparelhos Android.
+    </p>
+    <div class="modal-actions">
+      <button class="btn btn-outline" onclick="closeEditConnModal()">Cancelar</button>
+      <button class="btn btn-primary" onclick="saveEditConn()">💾 Salvar</button>
     </div>
   </div>
 </div>
@@ -738,11 +797,11 @@ async function deletePlan(id, name) {
 
 // ── Users ─────────────────────────────────────────────────────
 async function loadUsers() {
-  document.getElementById('usersBody').innerHTML = '<tr><td colspan="8" class="empty">Carregando…</td></tr>';
+  document.getElementById('usersBody').innerHTML = '<tr><td colspan="9" class="empty">Carregando…</td></tr>';
   if (!allPlans.length) { const rp = await sa('GET', '/api/superadmin/plans'); if (Array.isArray(rp)) allPlans = rp; }
   const r = await sa('GET', `/api/superadmin/users?page=${currentPage}`);
   if (r.error) {
-    document.getElementById('usersBody').innerHTML = `<tr><td colspan="8" class="empty" style="color:var(--red)">Erro: ${esc(r.error)}</td></tr>`;
+    document.getElementById('usersBody').innerHTML = `<tr><td colspan="9" class="empty" style="color:var(--red)">Erro: ${esc(r.error)}</td></tr>`;
     return;
   }
   allUsers = r.users || [];
@@ -758,20 +817,29 @@ async function loadUsers() {
 function renderUsers(users) {
   const tbody = document.getElementById('usersBody');
   if (!users.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="empty">Nenhum usuário encontrado</td></tr>'; return;
+    tbody.innerHTML = '<tr><td colspan="9" class="empty">Nenhum usuário encontrado</td></tr>'; return;
   }
   const statusBadge = { trial:'trial', active:'active', expired:'expired', none:'none', cancelled:'none' };
   tbody.innerHTML = users.map(u => {
     const exp = u.subEnd ? new Date(u.subEnd).toLocaleDateString('pt-BR') : '—';
     const cad = u.createdAt ? new Date(u.createdAt).toLocaleDateString('pt-BR') : '—';
     const st  = u.subStatus || 'none';
+    const maxD = u.maxDevices ?? 1;
+    const devCount = u.devices ?? 0;
+    // Highlight if at/over limit
+    const connStyle = devCount >= maxD ? 'color:var(--yellow);font-weight:700' : 'color:var(--green)';
     return `<tr>
       <td style="color:var(--sub);font-size:.79rem">${esc(u.email)}</td>
       <td>${esc(u.username || '—')}</td>
       <td>${esc(u.planName || '—')}</td>
       <td><span class="badge ${statusBadge[st] || 'none'}">${st}</span></td>
       <td>${exp}</td>
-      <td style="text-align:center">${u.devices ?? 0}</td>
+      <td style="text-align:center">${devCount}</td>
+      <td style="text-align:center;white-space:nowrap">
+        <span style="${connStyle}" title="${devCount}/${maxD} aparelhos">${maxD}</span>
+        <button class="btn btn-sm btn-outline" style="padding:2px 6px;margin-left:4px;font-size:.7rem"
+                onclick="openEditConnModal(${u.id},'${esc(u.email)}',${maxD})" title="Alterar conexões">✏️</button>
+      </td>
       <td style="color:var(--sub);font-size:.79rem">${cad}</td>
       <td style="white-space:nowrap">
         <button class="btn btn-sm btn-outline" onclick="openChangePlanModal(${u.id},'${esc(u.email)}')">🔄 Plano</button>
@@ -840,6 +908,59 @@ async function saveChangePlan() {
     loadUsers();
   } else {
     alert(r.error || 'Erro ao alterar plano');
+  }
+}
+
+// ── Create User ─────────────────────────────────────────────────
+function openCreateUserModal() {
+  document.getElementById('createUserModal').classList.add('open');
+  ['cuEmail','cuUsername','cuPassword'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('cuMaxDevices').value = 1;
+}
+function closeCreateUserModal() { document.getElementById('createUserModal').classList.remove('open'); }
+
+async function saveCreateUser() {
+  const email    = document.getElementById('cuEmail').value.trim().toLowerCase();
+  const username = document.getElementById('cuUsername').value.trim();
+  const password = document.getElementById('cuPassword').value;
+  const maxDev   = parseInt(document.getElementById('cuMaxDevices').value) || 1;
+  if (!email) { alert('Informe o e-mail'); return; }
+  if (!password || password.length < 6) { alert('Senha deve ter pelo menos 6 caracteres'); return; }
+  const r = await sa('POST', '/api/superadmin/users', { email, username, password, maxDevices: String(maxDev) });
+  if (r.ok) {
+    alert(`✅ Usuário criado!\n\nE-mail: ${email}\nToken de vinculação: ${r.linkToken || '—'}`);
+    closeCreateUserModal();
+    loadUsers();
+  } else {
+    alert(r.error || 'Erro ao criar usuário');
+  }
+}
+
+// ── Edit Max Connections ─────────────────────────────────────────
+function openEditConnModal(id, email, currentMax) {
+  document.getElementById('ecUserId').value = id;
+  document.getElementById('ecUserEmail').textContent = email;
+  document.getElementById('ecMaxDevices').value = currentMax;
+  document.getElementById('editConnModal').classList.add('open');
+}
+function closeEditConnModal() { document.getElementById('editConnModal').classList.remove('open'); }
+
+async function saveEditConn() {
+  const userId = document.getElementById('ecUserId').value;
+  const maxDev = parseInt(document.getElementById('ecMaxDevices').value);
+  if (!maxDev || maxDev < 1) { alert('Valor inválido (mínimo: 1)'); return; }
+  const r = await sa('PUT', `/api/superadmin/users/${userId}/max-devices`, { maxDevices: String(maxDev) });
+  if (r.ok) {
+    closeEditConnModal();
+    // Update local cache so the table re-renders without a full reload
+    const u = allUsers.find(x => x.id == userId);
+    if (u) u.maxDevices = r.maxDevices;
+    renderUsers(allUsers.filter(u => {
+      const q = document.getElementById('userSearch').value.toLowerCase();
+      return !q || (u.email||'').toLowerCase().includes(q) || (u.username||'').toLowerCase().includes(q);
+    }));
+  } else {
+    alert(r.error || 'Erro ao salvar');
   }
 }
 
