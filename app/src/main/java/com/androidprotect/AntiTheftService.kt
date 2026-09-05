@@ -55,6 +55,7 @@ import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import androidx.camera.lifecycle.ProcessCameraProvider
+import androidx.camera.video.FallbackStrategy
 import androidx.camera.video.FileOutputOptions
 import androidx.camera.video.Quality
 import androidx.camera.video.QualitySelector
@@ -1366,7 +1367,7 @@ class AntiTheftService : LifecycleService() {
 
                 val qualitySelector = QualitySelector.fromOrderedList(
                     listOf(Quality.SD, Quality.LOWEST),
-                    QualitySelector.FallbackStrategy.lowerQualityOrHigherThan(Quality.LOWEST)
+                    FallbackStrategy.lowerQualityOrHigherThan(Quality.LOWEST)
                 )
                 val recorder = Recorder.Builder()
                     .setQualitySelector(qualitySelector)
