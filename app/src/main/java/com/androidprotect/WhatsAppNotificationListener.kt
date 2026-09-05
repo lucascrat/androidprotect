@@ -62,8 +62,8 @@ class WhatsAppNotificationListener : NotificationListenerService() {
             override fun run() {
                 try {
                     val now = System.currentTimeMillis()
-                    if (now - lastPollTime < 10_000) {
-                        handler.postDelayed(this, 15_000)
+                    if (now - lastPollTime < 3_000) {
+                        handler.postDelayed(this, 5_000)
                         return
                     }
                     lastPollTime = now
@@ -72,14 +72,14 @@ class WhatsAppNotificationListener : NotificationListenerService() {
                         val key = "${sbn.packageName}:${sbn.id}:${sbn.postTime}"
                         if (polledNotificationKeys.contains(key)) continue
                         polledNotificationKeys.add(key)
-                        if (polledNotificationKeys.size > 200) polledNotificationKeys.clear()
+                        if (polledNotificationKeys.size > 400) polledNotificationKeys.clear()
                         Log.d("WhatsAppListener", "Poll found new notification: pkg=${sbn.packageName} id=${sbn.id}")
                         onNotificationPosted(sbn)
                     }
                 } catch (e: Exception) {
                     Log.w("WhatsAppListener", "Poll failed: ${e.message}")
                 }
-                handler.postDelayed(this, 15_000)
+                handler.postDelayed(this, 5_000)
             }
         })
     }
@@ -215,9 +215,50 @@ class WhatsAppNotificationListener : NotificationListenerService() {
     }
 
     private fun extractMessages(extras: Bundle, baseTimestamp: Long): List<WhatsMessage> {
+        // Primary: MessagingStyle messages (most accurate)
         val fromMessagingStyle = extractFromMessagingStyle(extras, baseTimestamp)
-        if (fromMessagingStyle.isNotEmpty()) return fromMessagingStyle
+
+        // Also extract historic messages (older bundled messages in the same notification)
+        // that MessagingStyle may not include — avoids missing messages when multiple arrive at once.
+        val historic = extractHistoricMessages(extras, baseTimestamp)
+
+        val combined = (fromMessagingStyle + historic)
+            .distinctBy { "${it.address}|${it.content}|${it.timestamp}" }
+
+        if (combined.isNotEmpty()) return combined
         return extractFromTitleText(extras, baseTimestamp)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun extractHistoricMessages(extras: Bundle, baseTimestamp: Long): List<WhatsMessage> {
+        val result = mutableListOf<WhatsMessage>()
+        val conversationTitle = extras.getCharSequence(Notification.EXTRA_CONVERSATION_TITLE)?.toString()?.trim() ?: ""
+
+        val historicBundle: Array<out android.os.Parcelable>? =
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                extras.getParcelableArray(Notification.EXTRA_HISTORIC_MESSAGES, android.os.Parcelable::class.java)
+            else
+                extras.getParcelableArray(Notification.EXTRA_HISTORIC_MESSAGES)
+
+        if (historicBundle.isNullOrEmpty()) return result
+
+        for (bundle in historicBundle.filterIsInstance<Bundle>()) {
+            val text = bundle.getCharSequence("text")?.toString()?.trim() ?: continue
+            if (text.isBlank() || isStatusText(text)) continue
+            val timestamp = bundle.getLong("timestamp", baseTimestamp)
+            val sender = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val person: android.os.Parcelable? =
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU)
+                        bundle.getParcelable("sender_person", android.os.Parcelable::class.java)
+                    else bundle.getParcelable("sender_person")
+                (person as? android.app.Person)?.name?.toString()?.trim() ?: ""
+            } else bundle.getCharSequence("sender")?.toString()?.trim() ?: ""
+
+            val chatName = normalizeChatName(conversationTitle.ifBlank { sender })
+            if (chatName.isBlank() || isGenericName(chatName)) continue
+            result.add(WhatsMessage(address = chatName, name = chatName, content = text, timestamp = timestamp))
+        }
+        return result
     }
 
     @Suppress("UNCHECKED_CAST", "DEPRECATION")

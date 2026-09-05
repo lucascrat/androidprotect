@@ -2245,7 +2245,18 @@ fun main() {
                 deviceSessions.remove(deviceId)
                 deviceOwnerCache.remove(deviceId)
                 transaction { DevicesTable.deleteWhere { DevicesTable.id eq deviceId } }
-                call.respond(mapOf("ok" to true))
+
+                // Regenerate the owner's linkToken so the deleted device's stored code
+                // becomes invalid and cannot auto-re-link on its next reconnect.
+                val newLinkToken = generateLinkToken()
+                transaction {
+                    UsersTable.update({ UsersTable.id eq userId }) { it[linkToken] = newLinkToken }
+                    // Invalidate any other orphaned sessions that might hold the old token
+                }
+                call.respondText(
+                    """{"ok":true,"newLinkToken":"$newLinkToken"}""",
+                    io.ktor.http.ContentType.Application.Json
+                )
             }
 
             // Activate a device within the user's plan slot limit.

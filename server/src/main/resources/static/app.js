@@ -1267,6 +1267,14 @@ async function deleteDevice(deviceId) {
             alert('Erro ao excluir: ' + (j.error || res.status));
             return;
         }
+        const data = await res.json().catch(() => ({}));
+        // Server rotates the linkToken so the deleted device's stored code becomes
+        // invalid and cannot auto-reconnect. Update localStorage immediately.
+        if (data.newLinkToken) {
+            localStorage.setItem('ap_linktoken', data.newLinkToken);
+            const el = document.getElementById('lcp-token-val');
+            if (el) el.textContent = data.newLinkToken;
+        }
         devicesMap.delete(deviceId);
         if (currentDeviceId === deviceId) {
             currentDeviceId = null;
@@ -1274,6 +1282,7 @@ async function deleteDevice(deviceId) {
             if (first) selectDevice(first);
         }
         renderDeviceList();
+        showToast('Aparelho excluído. Novo código de vinculação gerado.', 'info');
     } catch (e) { alert('Erro de rede: ' + e.message); }
 }
 
