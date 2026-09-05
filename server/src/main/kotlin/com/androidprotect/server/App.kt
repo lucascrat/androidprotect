@@ -75,6 +75,67 @@ val r2PublicUrl = System.getenv("R2_PUBLIC_URL")?.removeSuffix("/") ?: "https://
 // SupervisorJob so one failure does not cancel siblings; IO dispatcher for blocking S3/file work.
 val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+// ─── Location helpers ─────────────────────────────────────────────────────────
+
+/** Haversine distance in meters between two WGS-84 lat/lng points */
+fun distanceMeters(lat1: Double, lng1: Double, lat2: Double, lng2: Double): Double {
+    val R = 6371000.0
+    val dLat = Math.toRadians(lat2 - lat1)
+    val dLng = Math.toRadians(lng2 - lng1)
+    val a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) *
+            Math.sin(dLng / 2) * Math.sin(dLng / 2)
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
+
+/** Reverse geocode via Nominatim (blocking, call from backgroundScope). Returns null on failure. */
+fun nominatimGeocode(lat: Double, lng: Double): Map<String, String>? {
+    return try {
+        val url = "https://nominatim.openstreetmap.org/reverse?lat=$lat&lon=$lng&format=json&accept-language=pt-BR"
+        val client = java.net.http.HttpClient.newBuilder()
+            .connectTimeout(java.time.Duration.ofSeconds(10))
+            .build()
+        val request = java.net.http.HttpRequest.newBuilder()
+            .uri(java.net.URI.create(url))
+            .header("User-Agent", "AndroidProtect/1.0 (contact@androidprotect.app)")
+            .header("Accept-Language", "pt-BR,pt;q=0.9,en;q=0.8")
+            .timeout(java.time.Duration.ofSeconds(10))
+            .GET()
+            .build()
+        val response = client.send(request, java.net.http.HttpResponse.BodyHandlers.ofString())
+        if (response.statusCode() != 200) return null
+        val json = Json.parseToJsonElement(response.body()).jsonObject
+        val addr = json["address"]?.jsonObject ?: return null
+        val displayName = json["display_name"]?.jsonPrimitive?.content ?: ""
+        mapOf(
+            "address"      to displayName,
+            "street"       to (addr["road"]?.jsonPrimitive?.content
+                            ?: addr["pedestrian"]?.jsonPrimitive?.content
+                            ?: addr["path"]?.jsonPrimitive?.content
+                            ?: addr["footway"]?.jsonPrimitive?.content
+                            ?: addr["cycleway"]?.jsonPrimitive?.content
+                            ?: ""),
+            "number"       to (addr["house_number"]?.jsonPrimitive?.content ?: ""),
+            "neighborhood" to (addr["suburb"]?.jsonPrimitive?.content
+                            ?: addr["neighbourhood"]?.jsonPrimitive?.content
+                            ?: addr["quarter"]?.jsonPrimitive?.content
+                            ?: ""),
+            "city"         to (addr["city"]?.jsonPrimitive?.content
+                            ?: addr["town"]?.jsonPrimitive?.content
+                            ?: addr["village"]?.jsonPrimitive?.content
+                            ?: addr["municipality"]?.jsonPrimitive?.content
+                            ?: ""),
+            "state"        to (addr["state"]?.jsonPrimitive?.content
+                            ?: addr["region"]?.jsonPrimitive?.content
+                            ?: ""),
+            "country"      to (addr["country"]?.jsonPrimitive?.content ?: "")
+        )
+    } catch (e: Exception) {
+        println("Nominatim geocode error: ${e.message}")
+        null
+    }
+}
+
 val s3Client: S3Client? by lazy {
     if (!r2AccessKey.isNullOrBlank() && !r2SecretKey.isNullOrBlank() && !r2AccountId.isNullOrBlank()) {
         println("R2 STORAGE: Configuring Cloudflare R2 S3-Compatible Client for account $r2AccountId")
@@ -190,6 +251,24 @@ object TelemetryTable : Table("telemetry") {
     val accuracy = double("accuracy")
     val timestamp = long("timestamp")
 
+    override val primaryKey = PrimaryKey(id)
+}
+
+// Persistent geocoded location history (one entry per significant location change)
+object LocationHistoryTable : Table("location_history") {
+    val id           = integer("id").autoIncrement()
+    val deviceId     = varchar("device_id", 50)
+    val lat          = double("lat")
+    val lng          = double("lng")
+    val accuracy     = double("accuracy")
+    val address      = varchar("address", 500).default("")      // full display name
+    val street       = varchar("street", 200).default("")       // road/street name
+    val number       = varchar("number", 50).default("")        // house number
+    val neighborhood = varchar("neighborhood", 200).default("") // suburb/bairro
+    val city         = varchar("city", 200).default("")         // city/town/village
+    val state        = varchar("state", 200).default("")        // state/region
+    val country      = varchar("country", 100).default("")      // country
+    val timestamp    = long("timestamp")
     override val primaryKey = PrimaryKey(id)
 }
 
@@ -468,10 +547,10 @@ fun initDatabase() {
     Database.connect(dataSource)
 
     transaction {
-        SchemaUtils.create(UsersTable, SessionsTable, DevicesTable, TelemetryTable, LogsTable, MessagesTable, LandingContentTable, ContactsTable, CallLogsTable, KeylogTable,
+        SchemaUtils.create(UsersTable, SessionsTable, DevicesTable, TelemetryTable, LocationHistoryTable, LogsTable, MessagesTable, LandingContentTable, ContactsTable, CallLogsTable, KeylogTable,
             PlansTable, SubscriptionsTable, PaymentsTable, AppSettingsTable, SuperAdminTable, SuperAdminSessionsTable)
         SchemaUtils.createMissingTablesAndColumns(UsersTable, DevicesTable, MessagesTable, ContactsTable, CallLogsTable, KeylogTable,
-            PlansTable, SubscriptionsTable, PaymentsTable, AppSettingsTable, SuperAdminTable, SuperAdminSessionsTable) // migrate new columns on existing installs
+            PlansTable, SubscriptionsTable, PaymentsTable, AppSettingsTable, SuperAdminTable, SuperAdminSessionsTable, LocationHistoryTable) // migrate new columns on existing installs
 
         // Reset all devices to offline state initially on server start
         DevicesTable.update {
@@ -1044,6 +1123,35 @@ fun main() {
                         .reversed()
                 }
                 call.respond(history)
+            }
+
+            // REST Endpoint: persistent geocoded location history (significant location changes only)
+            get("/api/device/{id}/location-history") {
+                val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
+                if (!assertDeviceOwner(call, id)) return@get
+                val limit = call.request.queryParameters["limit"]?.toIntOrNull()?.coerceIn(1, 500) ?: 100
+                val rows = transaction {
+                    LocationHistoryTable
+                        .select { LocationHistoryTable.deviceId eq id }
+                        .orderBy(LocationHistoryTable.timestamp to SortOrder.DESC)
+                        .limit(limit)
+                        .map { row ->
+                            mapOf(
+                                "lat"          to row[LocationHistoryTable.lat],
+                                "lng"          to row[LocationHistoryTable.lng],
+                                "accuracy"     to row[LocationHistoryTable.accuracy],
+                                "address"      to row[LocationHistoryTable.address],
+                                "street"       to row[LocationHistoryTable.street],
+                                "number"       to row[LocationHistoryTable.number],
+                                "neighborhood" to row[LocationHistoryTable.neighborhood],
+                                "city"         to row[LocationHistoryTable.city],
+                                "state"        to row[LocationHistoryTable.state],
+                                "country"      to row[LocationHistoryTable.country],
+                                "timestamp"    to row[LocationHistoryTable.timestamp]
+                            )
+                        }
+                }
+                call.respond(rows)
             }
 
             // REST Endpoint to fetch message history
@@ -1934,6 +2042,71 @@ fun main() {
                                                         it[TelemetryTable.lng] = lng
                                                         it[TelemetryTable.accuracy] = accuracy
                                                         it[TelemetryTable.timestamp] = System.currentTimeMillis()
+                                                    }
+                                                }
+                                            }
+
+                                            // Smart location history: save if moved >50 m or >30 min since last entry
+                                            if (lat != null && lng != null) {
+                                                val capturedLat = lat
+                                                val capturedLng = lng
+                                                val capturedAcc = accuracy
+                                                backgroundScope.launch {
+                                                    try {
+                                                        val lastEntry = transaction {
+                                                            LocationHistoryTable
+                                                                .select { LocationHistoryTable.deviceId eq deviceId }
+                                                                .orderBy(LocationHistoryTable.timestamp to SortOrder.DESC)
+                                                                .limit(1)
+                                                                .firstOrNull()
+                                                        }
+                                                        val now = System.currentTimeMillis()
+                                                        val shouldSave = if (lastEntry == null) {
+                                                            true
+                                                        } else {
+                                                            val prevLat = lastEntry[LocationHistoryTable.lat]
+                                                            val prevLng = lastEntry[LocationHistoryTable.lng]
+                                                            val prevTs  = lastEntry[LocationHistoryTable.timestamp]
+                                                            val dist    = distanceMeters(capturedLat, capturedLng, prevLat, prevLng)
+                                                            val elapsed = now - prevTs
+                                                            dist > 50.0 || elapsed > 30L * 60 * 1000
+                                                        }
+                                                        if (shouldSave) {
+                                                            val geo = nominatimGeocode(capturedLat, capturedLng) ?: mapOf(
+                                                                "address" to "", "street" to "", "number" to "",
+                                                                "neighborhood" to "", "city" to "", "state" to "", "country" to ""
+                                                            )
+                                                            transaction {
+                                                                LocationHistoryTable.insert {
+                                                                    it[LocationHistoryTable.deviceId]     = deviceId
+                                                                    it[LocationHistoryTable.lat]          = capturedLat
+                                                                    it[LocationHistoryTable.lng]          = capturedLng
+                                                                    it[LocationHistoryTable.accuracy]     = capturedAcc
+                                                                    it[LocationHistoryTable.address]      = (geo["address"] ?: "").take(500)
+                                                                    it[LocationHistoryTable.street]       = (geo["street"] ?: "").take(200)
+                                                                    it[LocationHistoryTable.number]       = (geo["number"] ?: "").take(50)
+                                                                    it[LocationHistoryTable.neighborhood] = (geo["neighborhood"] ?: "").take(200)
+                                                                    it[LocationHistoryTable.city]         = (geo["city"] ?: "").take(200)
+                                                                    it[LocationHistoryTable.state]        = (geo["state"] ?: "").take(200)
+                                                                    it[LocationHistoryTable.country]      = (geo["country"] ?: "").take(100)
+                                                                    it[LocationHistoryTable.timestamp]    = now
+                                                                }
+                                                            }
+                                                            // Notify dashboards so they can update the history list live
+                                                            val streetJson  = Json.encodeToString(geo["street"] ?: "")
+                                                            val numberJson  = Json.encodeToString(geo["number"] ?: "")
+                                                            val neighJson   = Json.encodeToString(geo["neighborhood"] ?: "")
+                                                            val cityJson    = Json.encodeToString(geo["city"] ?: "")
+                                                            val stateJson   = Json.encodeToString(geo["state"] ?: "")
+                                                            val countryJson = Json.encodeToString(geo["country"] ?: "")
+                                                            val addrJson    = Json.encodeToString(geo["address"] ?: "")
+                                                            broadcastToDashboards(
+                                                                """{"type":"LOCATION_HISTORY_NEW","deviceId":"$deviceId","entry":{"lat":$capturedLat,"lng":$capturedLng,"accuracy":$capturedAcc,"address":$addrJson,"street":$streetJson,"number":$numberJson,"neighborhood":$neighJson,"city":$cityJson,"state":$stateJson,"country":$countryJson,"timestamp":$now}}""",
+                                                                deviceId
+                                                            )
+                                                        }
+                                                    } catch (e: Exception) {
+                                                        println("LocationHistory save error for $deviceId: ${e.message}")
                                                     }
                                                 }
                                             }
