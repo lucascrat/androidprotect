@@ -184,7 +184,7 @@ async function doLogout() {
     window.location.href = '/login.html';
 }
 
-function showLinkCode() {
+async function showLinkCode() {
     let popup = document.getElementById('link-code-popup');
     if (!popup) return;
 
@@ -209,9 +209,23 @@ function showLinkCode() {
         popup.style.left  = 'auto';
     }
 
-    document.getElementById('lcp-token-val').textContent = getLinkToken() || '—';
+    // Sempre busca o token atual do servidor (não do localStorage, que pode estar desatualizado)
+    const tokenEl = document.getElementById('lcp-token-val');
+    tokenEl.textContent = getLinkToken() || '…'; // mostra o cached enquanto carrega
     popup.style.display = 'block';
     popup._portalOpen = true;
+
+    try {
+        const res = await fetch('/api/auth/me', { headers: authHeaders() });
+        if (res.ok) {
+            const data = await res.json();
+            const fresh = data.linkToken || data.link_token;
+            if (fresh) {
+                tokenEl.textContent = fresh;
+                localStorage.setItem('ap_linktoken', fresh); // mantém localStorage sincronizado
+            }
+        }
+    } catch (_) { /* mantém o valor cacheado se offline */ }
 
     // Close on click outside
     setTimeout(() => {
