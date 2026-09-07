@@ -2419,15 +2419,12 @@ fun main() {
                 deviceOwnerCache.remove(deviceId)
                 transaction { DevicesTable.deleteWhere { DevicesTable.id eq deviceId } }
 
-                // Regenerate the owner's linkToken so the deleted device's stored code
-                // becomes invalid and cannot auto-re-link on its next reconnect.
-                val newLinkToken = generateLinkToken()
-                transaction {
-                    UsersTable.update({ UsersTable.id eq userId }) { it[linkToken] = newLinkToken }
-                    // Invalidate any other orphaned sessions that might hold the old token
-                }
+                // O linkToken do usuário permanece o mesmo — o código do painel é
+                // um identificador estável da conta, não do aparelho. O dispositivo
+                // excluído fica desconectado; se o app reconectar com o mesmo token
+                // ele volta a aparecer no painel (comportamento desejado para rastreamento).
                 call.respondText(
-                    """{"ok":true,"newLinkToken":"$newLinkToken"}""",
+                    """{"ok":true}""",
                     io.ktor.http.ContentType.Application.Json
                 )
             }
