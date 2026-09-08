@@ -502,6 +502,10 @@ class MainActivity : ComponentActivity() {
 
                     } else {
                         // ── CÓDIGO DIRETO ──────────────────────────────────
+                        var codeLoading by remember { mutableStateOf(false) }
+                        var codeError   by remember { mutableStateOf("") }
+                        var codeValid   by remember { mutableStateOf(false) }
+
                         Text(
                             "Digite o código de 9 caracteres exibido no seu painel em androidprotect.appbr.pro",
                             color = Color(0xFF8E94A5), fontSize = 12.sp, lineHeight = 17.sp,
@@ -514,25 +518,19 @@ class MainActivity : ComponentActivity() {
                             onValueChange = { v ->
                                 val clean = v.uppercase().replace("[^A-Z0-9-]".toRegex(), "").take(9)
                                 codeInput = clean
-                                AntiTheftService.linkToken = clean
-                                prefs.edit()
-                                    .putString("link_token", clean)
-                                    .putString("server_ip", SERVER_HOST)
-                                    .putBoolean("auto_start", true)
-                                    .apply()
-                                if (clean.length == 9) {
-                                    AntiTheftService.serverIpAddress = SERVER_HOST
-                                    launchService()
-                                }
+                                codeError = ""
+                                codeValid = false
                             },
                             label = { Text("Código do painel") },
                             placeholder = { Text("XXXX-XXXX") },
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = true,
+                            enabled = !codeLoading,
                             colors = OutlinedTextFieldDefaults.colors(
                                 focusedBorderColor = Color(0xFF00D2FF),
                                 unfocusedBorderColor = when {
-                                    wsConnected && codeInput.length == 9 -> Color(0xFF39FF14)
+                                    codeValid -> Color(0xFF39FF14)
+                                    codeError.isNotEmpty() -> Color(0xFFFF3838)
                                     codeInput.length == 9 -> Color(0xFFFF9900)
                                     else -> Color(0xFF252630)
                                 },
@@ -545,12 +543,21 @@ class MainActivity : ComponentActivity() {
 
                         Spacer(Modifier.height(14.dp))
 
+                        // Mensagens de estado
                         when {
-                            codeInput.length == 9 && wsConnected -> {
+                            codeError.isNotEmpty() -> {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(Icons.Default.Warning, null, tint = Color(0xFFFF3838), modifier = Modifier.size(16.dp))
+                                    Spacer(Modifier.width(7.dp))
+                                    Text(codeError, color = Color(0xFFFF3838), fontSize = 12.sp)
+                                }
+                                Spacer(Modifier.height(10.dp))
+                            }
+                            codeValid -> {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF39FF14), modifier = Modifier.size(16.dp))
                                     Spacer(Modifier.width(7.dp))
-                                    Text("Aparelho vinculado!", color = Color(0xFF39FF14), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                    Text("Código válido! Conectando...", color = Color(0xFF39FF14), fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
                                 }
                                 Spacer(Modifier.height(14.dp))
                                 Button(
@@ -562,15 +569,69 @@ class MainActivity : ComponentActivity() {
                                     Text("Continuar →", color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 16.sp)
                                 }
                             }
-                            codeInput.length == 9 -> {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    CircularProgressIndicator(modifier = Modifier.size(14.dp), color = Color(0xFFFF9900), strokeWidth = 2.dp)
-                                    Spacer(Modifier.width(8.dp))
-                                    Text("Conectando ao painel...", color = Color(0xFFFF9900), fontSize = 12.sp)
-                                }
-                            }
-                            codeInput.isNotEmpty() -> {
+                            codeInput.isNotEmpty() && !codeLoading -> {
                                 Text("${codeInput.length}/9 caracteres", color = Color(0xFF8E94A5), fontSize = 11.sp)
+                            }
+                        }
+
+                        // Botão Confirmar: valida o token via API antes de conectar
+                        if (!codeValid && codeInput.length == 9) {
+                            Spacer(Modifier.height(10.dp))
+                            Button(
+                                onClick = {
+                                    codeError = ""
+                                    codeLoading = true
+                                    scope.launch(Dispatchers.IO) {
+                                        try {
+                                            val url = URL("https://$SERVER_HOST/api/auth/verify-link-token")
+                                            val conn = url.openConnection() as HttpURLConnection
+                                            conn.requestMethod = "POST"
+                                            conn.setRequestProperty("Content-Type", "application/json")
+                                            conn.doOutput = true
+                                            conn.connectTimeout = 10_000
+                                            conn.readTimeout   = 10_000
+                                            val body = """{"linkToken":"${codeInput.trim()}"}"""
+                                            OutputStreamWriter(conn.outputStream).use { it.write(body) }
+                                            val code = conn.responseCode
+                                            val resp = (if (code == 200) conn.inputStream else conn.errorStream)
+                                                ?.bufferedReader()?.readText() ?: ""
+                                            withContext(Dispatchers.Main) {
+                                                codeLoading = false
+                                                if (code == 200) {
+                                                    val json = JSONObject(resp)
+                                                    // Usa o token confirmado pelo servidor (idêntico, mas verificado)
+                                                    val confirmedToken = json.getJSONObject("user").getString("linkToken")
+                                                    prefs.edit()
+                                                        .putString("link_token", confirmedToken)
+                                                        .putString("server_ip", SERVER_HOST)
+                                                        .putBoolean("auto_start", true)
+                                                        .apply()
+                                                    AntiTheftService.linkToken = confirmedToken
+                                                    AntiTheftService.serverIpAddress = SERVER_HOST
+                                                    launchService()
+                                                    codeValid = true
+                                                } else {
+                                                    val json = runCatching { JSONObject(resp) }.getOrNull()
+                                                    codeError = json?.optString("error") ?: "Código inválido."
+                                                }
+                                            }
+                                        } catch (e: Exception) {
+                                            withContext(Dispatchers.Main) {
+                                                codeLoading = false
+                                                codeError = "Sem conexão com o servidor."
+                                            }
+                                        }
+                                    }
+                                },
+                                modifier = Modifier.fillMaxWidth().height(52.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                enabled = !codeLoading,
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00D2FF))
+                            ) {
+                                if (codeLoading)
+                                    CircularProgressIndicator(modifier = Modifier.size(22.dp), color = Color(0xFF0A0B10), strokeWidth = 2.5.dp)
+                                else
+                                    Text("Confirmar Código", color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 16.sp)
                             }
                         }
                     }

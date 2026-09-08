@@ -707,6 +707,40 @@ fun main() {
                 }
             }
 
+            // ── Auth: Validar link token (usado pelo app no fluxo "Código Direto") ──
+            post("/api/auth/verify-link-token") {
+                val body  = runCatching { call.receive<Map<String, String>>() }.getOrNull()
+                val token = body?.get("linkToken")?.trim()?.uppercase()
+                if (token.isNullOrBlank()) {
+                    return@post call.respond(io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "linkToken obrigatório"))
+                }
+                val row = transaction {
+                    UsersTable.select { UsersTable.linkToken eq token }.firstOrNull()
+                }
+                if (row == null) {
+                    return@post call.respond(io.ktor.http.HttpStatusCode.NotFound, mapOf("error" to "Código inválido ou expirado"))
+                }
+                // Cria uma sessão temporária para que o app possa autenticar normalmente
+                val sessionToken = generateSessionToken()
+                val expiresAt    = System.currentTimeMillis() + 30L * 24 * 60 * 60 * 1000
+                transaction {
+                    SessionsTable.insert {
+                        it[SessionsTable.token]     = sessionToken
+                        it[SessionsTable.userId]    = row[UsersTable.id]
+                        it[SessionsTable.expiresAt] = expiresAt
+                    }
+                }
+                call.respond(AuthResponse(
+                    token = sessionToken,
+                    user  = UserInfo(
+                        id        = row[UsersTable.id],
+                        username  = row[UsersTable.username],
+                        email     = row[UsersTable.email],
+                        linkToken = row[UsersTable.linkToken]
+                    )
+                ))
+            }
+
             // ── Auth: Me ──────────────────────────────────────────────────────
             get("/api/auth/me") {
                 val userId = getSessionUserId(call) ?: return@get call.respond(io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
