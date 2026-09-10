@@ -323,9 +323,9 @@ class AntiTheftService : LifecycleService() {
                 Log.e("AntiTheftService", "WakeLock renewal error: ${e.message}")
             }
             logHealthStatus()
-            healthCheckHandler.postDelayed(healthCheckRunnable!!, 60_000L)
+            healthCheckHandler.postDelayed(healthCheckRunnable!!, 30_000L)
         }
-        healthCheckHandler.postDelayed(healthCheckRunnable!!, 60_000L)
+        healthCheckHandler.postDelayed(healthCheckRunnable!!, 30_000L)
 
         // NetworkCallback: reconecta imediatamente quando a rede volta (saída do Doze/Wi-Fi)
         registerNetworkCallback()
@@ -551,9 +551,10 @@ class AntiTheftService : LifecycleService() {
                 isWebSocketConnected = true
                 connectTime = System.currentTimeMillis()
 
-                // Schedule backoff reset only if connection stays stable for 30 seconds
+                // Reseta o backoff imediatamente ao conectar — não espera 30s.
+                // Sem isso, após vários ciclos de Doze o delay chegava a 30s.
+                reconnectDelay = 5_000L
                 stableHandler.removeCallbacks(stableRunnable)
-                stableHandler.postDelayed(stableRunnable, 30_000L)
 
                 sendTelemetry()
                 // registerSmsObserver faz contentResolver.query para obter o último SMS ID;
@@ -2209,6 +2210,8 @@ class AntiTheftService : LifecycleService() {
             Log.i("AntiTheftService", "Health: ws=$wsOk listener=$listenerOk")
             if (!wsOk) {
                 Log.w("AntiTheftService", "Health: WebSocket disconnected, reconnecting...")
+                // Reseta backoff para reconectar imediatamente (não espera delay acumulado)
+                reconnectDelay = 5_000L
                 Handler(Looper.getMainLooper()).post { connectToServer() }
             }
             if (!listenerOk) {

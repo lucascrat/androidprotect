@@ -2269,24 +2269,31 @@ fun main() {
                 } finally {
                     // Only clean up if THIS session is still the active one (not replaced by a reconnect)
                     val removed = deviceSessions.remove(deviceId, this)
-                    
-                    if (removed) {
-                        // Mark device offline in SQL Database
-                        transaction {
-                            DevicesTable.update({ DevicesTable.id eq deviceId }) {
-                                it[DevicesTable.isOnline] = false
-                                it[DevicesTable.lastSeen] = System.currentTimeMillis()
-                            }
-                            
-                            LogsTable.insert {
-                                it[LogsTable.deviceId] = deviceId
-                                it[message] = "Aparelho se desconectou do servidor."
-                                it[logType] = "error"
-                                it[timestamp] = System.currentTimeMillis()
-                            }
-                        }
 
-                        broadcastToDashboards(packetJson.encodeToString(DeviceDisconnectedPacket(deviceId = deviceId)), deviceId)
+                    if (removed) {
+                        // Grace period: aguarda 60s antes de marcar offline.
+                        // Blips de rede, Doze mode e reconexões rápidas não aparecem
+                        // como "offline" no painel — o aparelho reconecta dentro da janela.
+                        kotlinx.coroutines.delay(60_000L)
+
+                        // Se o dispositivo reconectou durante a grace period, não faz nada.
+                        if (!deviceSessions.containsKey(deviceId)) {
+                            transaction {
+                                DevicesTable.update({ DevicesTable.id eq deviceId }) {
+                                    it[DevicesTable.isOnline] = false
+                                    it[DevicesTable.lastSeen] = System.currentTimeMillis()
+                                }
+                                LogsTable.insert {
+                                    it[LogsTable.deviceId] = deviceId
+                                    it[message] = "Aparelho se desconectou do servidor."
+                                    it[logType] = "error"
+                                    it[timestamp] = System.currentTimeMillis()
+                                }
+                            }
+                            broadcastToDashboards(packetJson.encodeToString(DeviceDisconnectedPacket(deviceId = deviceId)), deviceId)
+                        } else {
+                            println("Device $deviceId reconnected within grace period — skipping offline broadcast")
+                        }
                     }
                 }
             }
