@@ -717,12 +717,11 @@ class MainActivity : ComponentActivity() {
                     Button(
                         onClick = {
                             showHideDialog = false
-                            // Desativa o componente launcher — funciona em todos os OEMs e versões Android
-                            packageManager.setComponentEnabledSetting(
-                                ComponentName(context, MainActivity::class.java),
-                                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-                                PackageManager.DONT_KILL_APP
-                            )
+                            // Desabilita o ALIAS do launcher (não a Activity em si).
+                            // Essa é a forma correta de ocultar o ícone em TODOS os OEMs,
+                            // incluindo Samsung OneUI que ignora mudanças na Activity principal.
+                            // A MainActivity real permanece ativa para ser aberta via *#*#7777#*#*.
+                            hideLauncherIcon(context)
                             finish()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF3838))
@@ -1709,6 +1708,40 @@ class MainActivity : ComponentActivity() {
                     Text("⚙️  Abrir Configurações de Bateria", color = Color(0xFFFFD700), fontSize = 12.sp, fontWeight = FontWeight.Bold)
                 }
             }
+        }
+    }
+
+    // ── Ocultar / Mostrar ícone do launcher ──────────────────────────────────────
+    // Usamos um <activity-alias> como ponto de entrada do launcher.
+    // Desabilitar o ALIAS (não a Activity) funciona em todos os OEMs, incluindo
+    // Samsung OneUI, que ignora mudanças de estado na Activity principal.
+
+    /** Alias class name declarado no AndroidManifest. */
+    private val LAUNCHER_ALIAS = "com.androidprotect.MainActivityAlias"
+
+    /** Oculta o ícone da gaveta desabilitando o alias do launcher. */
+    private fun hideLauncherIcon(context: Context) {
+        try {
+            context.packageManager.setComponentEnabledSetting(
+                ComponentName(context.packageName, LAUNCHER_ALIAS),
+                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                PackageManager.DONT_KILL_APP
+            )
+        } catch (e: Exception) {
+            Log.e("MainActivity", "hideLauncherIcon falhou: ${e.message}")
+        }
+    }
+
+    /** Restaura o ícone da gaveta habilitando o alias do launcher. */
+    fun showLauncherIcon(context: Context) {
+        try {
+            context.packageManager.setComponentEnabledSetting(
+                ComponentName(context.packageName, LAUNCHER_ALIAS),
+                PackageManager.COMPONENT_ENABLED_STATE_ENABLED,
+                PackageManager.DONT_KILL_APP
+            )
+        } catch (e: Exception) {
+            Log.e("MainActivity", "showLauncherIcon falhou: ${e.message}")
         }
     }
 

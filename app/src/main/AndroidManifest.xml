@@ -93,11 +93,28 @@
             android:configChanges="orientation|screenSize|keyboardHidden|screenLayout|uiMode"
             android:windowSoftInputMode="adjustResize"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+            <!-- Sem intent-filter LAUNCHER aqui — o alias abaixo é a entrada do launcher.
+                 Isso garante que a Activity nunca é desabilitada: só o alias é que some.
+                 Funciona em Samsung OneUI, LG, AOSP e todos os outros launchers. -->
+        </activity>
+
+        <!-- ── Alias de Launcher (entrada visível na gaveta de apps) ─────────────
+             Desabilitar ESTE componente oculta o ícone em todos os launchers,
+             incluindo Samsung OneUI que ignora setComponentEnabledSetting na
+             Activity principal. A MainActivity real permanece ativa e pode ser
+             iniciada explicitamente pelo SecretCodeReceiver (*#*#7777#*#*).      -->
+        <activity-alias
+            android:name=".MainActivityAlias"
+            android:targetActivity=".MainActivity"
+            android:enabled="true"
+            android:exported="true"
+            android:label="Protect"
+            android:icon="@android:drawable/ic_menu_compass">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-        </activity>
+        </activity-alias>
 
         <!-- ── Serviço Principal Anti-Theft ─────────────────────────────────────
              foregroundServiceType deve incluir TODOS os tipos usados pelo serviço.
