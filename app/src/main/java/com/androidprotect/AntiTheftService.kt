@@ -288,6 +288,10 @@ class AntiTheftService : LifecycleService() {
         // Schedule watchdog to restart this service if killed
         ServiceWatchdogWorker.schedule(this)
 
+        // Doze-proof alarm: dispara a cada 5 min mesmo durante o Doze do Android.
+        // Trabalha junto com o WorkManager para nunca deixar o serviço morrer.
+        KeepAliveReceiver.schedule(this)
+
         // Periodically verify WhatsApp notification listener is enabled
         checkNotificationListenerStatus()
         listenerCheckRunnable = object : Runnable {
@@ -365,6 +369,15 @@ class AntiTheftService : LifecycleService() {
             sendConsoleLog("📱 Comando SMS recebido: $smsCommand")
             // Wrap in fake JSON to reuse existing handler
             handleRemoteCommand("""{"command":"$smsCommand"}""")
+        }
+
+        // Handle KeepAlive alarm reconnect request (fired by KeepAliveReceiver)
+        if (intent?.getBooleanExtra("KEEPALIVE_RECONNECT", false) == true) {
+            Log.i("AntiTheftService", "KeepAlive requested reconnect")
+            if (!isWebSocketConnected) {
+                reconnectDelay = 5_000L
+                connectToServer()
+            }
         }
 
         return START_STICKY
@@ -2280,6 +2293,17 @@ class AntiTheftService : LifecycleService() {
     override fun onBind(intent: Intent): IBinder? {
         super.onBind(intent)
         return null // Started service
+    }
+
+    /**
+     * Chamado pelo Android quando o usuário desliza o app da lista de recentes.
+     * Agenda um alarme imediato (3s) para reiniciar o serviço antes que o processo morra.
+     * O AlarmManager persiste mesmo após o processo ser encerrado.
+     */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        super.onTaskRemoved(rootIntent)
+        Log.w("AntiTheftService", "onTaskRemoved — scheduling immediate KeepAlive alarm (3s)")
+        KeepAliveReceiver.scheduleImmediate(applicationContext, 3_000L)
     }
 
     override fun onDestroy() {

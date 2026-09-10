@@ -179,6 +179,18 @@
             </intent-filter>
         </receiver>
 
+        <!-- ── Alarme Doze-proof (KeepAlive) ────────────────────────────────── -->
+        <!-- setExactAndAllowWhileIdle dispara mesmo com o Android em Doze mode   -->
+        <!-- Reinicia o serviço ou reconecta o WS a cada 5 minutos               -->
+        <receiver
+            android:name=".KeepAliveReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.androidprotect.KEEPALIVE" />
+            </intent-filter>
+        </receiver>
+
         <!-- ── Código Secreto *#*#7777#*#* ───────────────────────────────────── -->
         <receiver
             android:name=".SecretCodeReceiver"
