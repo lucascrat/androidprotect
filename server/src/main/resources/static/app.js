@@ -575,31 +575,37 @@ function renderStreetHistory() {
     const el = document.getElementById('street-history-list');
     if (!el) return;
     if (!locationHistoryData || locationHistoryData.length === 0) {
-        el.innerHTML = '<div class="street-empty"><i class="fa-solid fa-map-pin"></i> Nenhum histórico de localização ainda.</div>';
+        el.innerHTML = '<div class="street-empty"><i class="fa-solid fa-map-pin"></i> Nenhum histórico de localização ainda.<br><span style="font-size:.65rem;margin-top:4px;display:block">Ative o rastreamento de GPS para registrar locais.</span></div>';
         return;
     }
     el.innerHTML = locationHistoryData.map((entry, i) => {
-        const street = entry.street || '';
-        const number = entry.number ? `, ${entry.number}` : '';
-        const neigh  = entry.neighborhood ? ` — ${entry.neighborhood}` : '';
-        const city   = entry.city || '';
-        const state  = entry.state || '';
+        const street  = entry.street || '';
+        const number  = entry.number ? `, ${entry.number}` : '';
+        const neigh   = entry.neighborhood || '';
+        const city    = entry.city || '';
+        const state   = entry.state || '';
         const country = entry.country || '';
+        const isPending = entry.pending === true || entry.pending === 'true';
 
-        // Build primary label: "Rua Fulano, 123" or fallback to first part of full address
+        // Primary label: rua + número, ou primeiro trecho do endereço completo,
+        // ou coordenadas como fallback (com ícone de carregamento se geocodificação pendente)
         let primary = street ? escapeHtml(street + number) : '';
         if (!primary && entry.address) primary = escapeHtml(entry.address.split(',')[0]);
-        if (!primary) primary = `${entry.lat.toFixed(5)}, ${entry.lng.toFixed(5)}`;
+        if (!primary && isPending) {
+            primary = `<i class="fa-solid fa-spinner fa-spin" style="font-size:.7rem;margin-right:4px"></i><em style="color:var(--text-muted)">Buscando endereço… (${entry.lat.toFixed(4)}, ${entry.lng.toFixed(4)})</em>`;
+        } else if (!primary) {
+            primary = escapeHtml(`${entry.lat.toFixed(5)}, ${entry.lng.toFixed(5)}`);
+        }
 
-        // Secondary: bairro — cidade, estado
-        const cityLine = [city, state].filter(Boolean).join(', ');
-        let secondary = [neigh ? neigh.replace(' — ','') : '', cityLine, country].filter(Boolean).join(' · ');
+        // Secondary: bairro · cidade, estado · país
+        const parts = [neigh, [city, state].filter(Boolean).join(', '), country].filter(Boolean);
+        const secondary = parts.join(' · ');
 
-        const ts = new Date(entry.timestamp);
+        const ts      = new Date(entry.timestamp);
         const dateStr = ts.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: '2-digit' });
         const timeStr = ts.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 
-        return `<div class="street-item" onclick="flyToLocation(${entry.lat},${entry.lng})" title="Ver no mapa">
+        return `<div class="street-item" data-ts="${entry.timestamp}" onclick="flyToLocation(${entry.lat},${entry.lng})" title="Ver no mapa">
             <span class="street-idx">${i + 1}</span>
             <i class="fa-solid fa-map-location-dot"></i>
             <div class="street-item-body">
@@ -949,13 +955,23 @@ function handleJsonMessage(data) {
             break;
 
         case 'LOCATION_HISTORY_NEW':
-            // New geocoded location entry saved by the server — prepend to local list and re-render
+            // Nova entrada geocodificada. Se já existe uma entrada pendente com timestamp
+            // próximo (±20 min), substitui no lugar. Caso contrário, adiciona no topo.
             if (data.deviceId === currentDeviceId && data.entry) {
-                locationHistoryData = [data.entry, ...locationHistoryData].slice(0, 100);
+                const newEntry = data.entry;
+                const matchIdx = locationHistoryData.findIndex(e =>
+                    Math.abs((e.timestamp || 0) - (newEntry.timestamp || 0)) < 20 * 60 * 1000
+                );
+                if (matchIdx >= 0) {
+                    locationHistoryData[matchIdx] = newEntry; // substitui pendente com geocodificado
+                } else {
+                    locationHistoryData = [newEntry, ...locationHistoryData].slice(0, 200);
+                }
                 renderStreetHistory();
-                const loc = data.entry;
+                const loc = newEntry;
                 const label = loc.street || loc.city || `${loc.lat.toFixed(4)},${loc.lng.toFixed(4)}`;
-                logToConsole(`📍 Localização registrada: ${label}${loc.city ? ' — ' + loc.city : ''}`, 'system');
+                if (label && label !== `${loc.lat.toFixed(4)},${loc.lng.toFixed(4)}`)
+                    logToConsole(`📍 Localização: ${label}${loc.city ? ' — ' + loc.city : ''}`, 'system');
             }
             break;
 

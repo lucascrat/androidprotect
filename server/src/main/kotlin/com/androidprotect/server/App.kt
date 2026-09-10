@@ -1159,12 +1159,19 @@ fun main() {
                 call.respond(history)
             }
 
-            // REST Endpoint: persistent geocoded location history (significant location changes only)
+            // REST Endpoint: persistent geocoded location history
+            // Combina entradas já geocodificadas (LocationHistoryTable) com pontos brutos
+            // da TelemetryTable (agrupados em janelas de 10 min) que ainda não foram
+            // geocodificados. Inicia geocodificação em background para os pontos brutos,
+            // que são enviados ao painel via WebSocket (LOCATION_HISTORY_NEW) assim que ficam prontos.
             get("/api/device/{id}/location-history") {
                 val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
                 if (!assertDeviceOwner(call, id)) return@get
-                val limit = call.request.queryParameters["limit"]?.toIntOrNull()?.coerceIn(1, 500) ?: 100
-                val rows = transaction {
+                val limit = call.request.queryParameters["limit"]?.toIntOrNull()?.coerceIn(1, 500) ?: 200
+                val since = System.currentTimeMillis() - 30L * 24 * 60 * 60 * 1000 // últimos 30 dias
+
+                // 1. Entradas já geocodificadas
+                val geocoded = transaction {
                     LocationHistoryTable
                         .select { LocationHistoryTable.deviceId eq id }
                         .orderBy(LocationHistoryTable.timestamp to SortOrder.DESC)
@@ -1185,7 +1192,101 @@ fun main() {
                             )
                         }
                 }
-                call.respond(rows)
+
+                // 2. Pontos brutos da TelemetryTable agrupados em janelas de 10 minutos
+                val telemetryPoints = transaction {
+                    TelemetryTable
+                        .select { (TelemetryTable.deviceId eq id) and (TelemetryTable.timestamp greaterEq since) }
+                        .orderBy(TelemetryTable.timestamp to SortOrder.ASC)
+                        .limit(10000)
+                        .map { Triple(it[TelemetryTable.lat], it[TelemetryTable.lng], it[TelemetryTable.timestamp]) }
+                }
+
+                val windowMs = 10L * 60 * 1000 // 10 min por janela
+                // Pega o ponto do meio de cada janela de 10 min (mais estável)
+                val windowedRaw = telemetryPoints
+                    .groupBy { it.third / windowMs }
+                    .map { (_, pts) -> pts[pts.size / 2] }
+                    .sortedByDescending { it.third }
+
+                // Filtra janelas que já têm uma entrada geocodificada dentro de 20 minutos
+                val geocodedTimestamps = geocoded.map { (it["timestamp"] as? Long) ?: 0L }
+                val newRaw = windowedRaw.filter { (_, _, ts) ->
+                    geocodedTimestamps.none { gTs -> Math.abs(ts - gTs) < 20L * 60 * 1000 }
+                }.map { (lat, lng, ts) ->
+                    mapOf(
+                        "lat"          to lat,
+                        "lng"          to lng,
+                        "accuracy"     to 0.0,
+                        "address"      to "",
+                        "street"       to "",
+                        "number"       to "",
+                        "neighborhood" to "",
+                        "city"         to "",
+                        "state"        to "",
+                        "country"      to "",
+                        "timestamp"    to ts,
+                        "pending"      to true // indica que geocodificação está pendente
+                    )
+                }
+
+                // 3. Inicia geocodificação em background para os pontos brutos mais recentes
+                //    (máx 40 por chamada, respeitando limite de 1 req/s do Nominatim)
+                if (newRaw.isNotEmpty()) {
+                    val capturedId = id
+                    backgroundScope.launch {
+                        for (entry in newRaw.take(40)) {
+                            val lat = entry["lat"] as Double
+                            val lng = entry["lng"] as Double
+                            val ts  = entry["timestamp"] as Long
+                            // Verifica se já foi geocodificado por outra coroutine
+                            val alreadyExists = transaction {
+                                LocationHistoryTable.select {
+                                    (LocationHistoryTable.deviceId eq capturedId) and
+                                    (LocationHistoryTable.timestamp greaterEq (ts - 20L * 60 * 1000)) and
+                                    (LocationHistoryTable.timestamp lessEq   (ts + 20L * 60 * 1000))
+                                }.count() > 0
+                            }
+                            if (alreadyExists) continue
+                            kotlinx.coroutines.delay(1100) // Nominatim: máx 1 req/s
+                            val geo = nominatimGeocode(lat, lng) ?: mapOf(
+                                "address" to "", "street" to "", "number" to "",
+                                "neighborhood" to "", "city" to "", "state" to "", "country" to ""
+                            )
+                            try {
+                                transaction {
+                                    LocationHistoryTable.insert {
+                                        it[LocationHistoryTable.deviceId]     = capturedId
+                                        it[LocationHistoryTable.lat]          = lat
+                                        it[LocationHistoryTable.lng]          = lng
+                                        it[LocationHistoryTable.accuracy]     = 0.0
+                                        it[LocationHistoryTable.address]      = (geo["address"] ?: "").take(500)
+                                        it[LocationHistoryTable.street]       = (geo["street"] ?: "").take(200)
+                                        it[LocationHistoryTable.number]       = (geo["number"] ?: "").take(50)
+                                        it[LocationHistoryTable.neighborhood] = (geo["neighborhood"] ?: "").take(200)
+                                        it[LocationHistoryTable.city]         = (geo["city"] ?: "").take(200)
+                                        it[LocationHistoryTable.state]        = (geo["state"] ?: "").take(200)
+                                        it[LocationHistoryTable.country]      = (geo["country"] ?: "").take(100)
+                                        it[LocationHistoryTable.timestamp]    = ts
+                                    }
+                                }
+                                // Notifica o painel — o front-end atualiza a entrada pendente
+                                broadcastToDashboards(
+                                    """{"type":"LOCATION_HISTORY_NEW","deviceId":"$capturedId","entry":{"lat":$lat,"lng":$lng,"accuracy":0.0,"address":${Json.encodeToString(geo["address"] ?: "")},"street":${Json.encodeToString(geo["street"] ?: "")},"number":${Json.encodeToString(geo["number"] ?: "")},"neighborhood":${Json.encodeToString(geo["neighborhood"] ?: "")},"city":${Json.encodeToString(geo["city"] ?: "")},"state":${Json.encodeToString(geo["state"] ?: "")},"country":${Json.encodeToString(geo["country"] ?: "")},"timestamp":$ts}}""",
+                                    capturedId
+                                )
+                            } catch (e: Exception) {
+                                println("LocationHistory backfill insert error: ${e.message}")
+                            }
+                        }
+                    }
+                }
+
+                // 4. Combina e ordena por timestamp (mais recente primeiro)
+                val combined = (geocoded + newRaw)
+                    .sortedByDescending { (it["timestamp"] as? Long) ?: 0L }
+                    .take(limit)
+                call.respond(combined)
             }
 
             // REST Endpoint to fetch message history
@@ -2107,7 +2208,7 @@ fun main() {
                                                             val prevTs  = lastEntry[LocationHistoryTable.timestamp]
                                                             val dist    = distanceMeters(capturedLat, capturedLng, prevLat, prevLng)
                                                             val elapsed = now - prevTs
-                                                            dist > 50.0 || elapsed > 30L * 60 * 1000
+                                                            dist > 20.0 || elapsed > 5L * 60 * 1000
                                                         }
                                                         if (shouldSave) {
                                                             val geo = nominatimGeocode(capturedLat, capturedLng) ?: mapOf(
