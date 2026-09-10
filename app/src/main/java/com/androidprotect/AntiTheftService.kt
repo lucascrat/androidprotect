@@ -1646,9 +1646,35 @@ class AntiTheftService : LifecycleService() {
             sendConsoleLog("⚠️ Gravação de tela já em andamento.")
             return
         }
-        val proj = mediaProjection ?: run {
-            sendConsoleLog("❌ Gravação de tela: inicie a transmissão de tela primeiro para obter permissão.")
-            return
+
+        // Reutiliza o MediaProjection existente (stream ativo) ou tenta criar um novo
+        // a partir do token salvo na MainActivity — sem exigir que o stream esteja ativo.
+        val proj: MediaProjection = mediaProjection ?: run {
+            val resultCode = mediaProjectionResultCode
+            val intentData = mediaProjectionData
+            if (resultCode == 0 || intentData == null) {
+                val prefs = getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+                if (prefs.getBoolean("screen_perm_granted", false)) {
+                    sendConsoleLog("❌ Gravação de tela: token expirado. Abrindo app para reautorizar...")
+                    notifyReactivateScreenCapture()
+                } else {
+                    sendConsoleLog("❌ Gravação de tela: permissão não concedida. Abra o app e autorize.")
+                }
+                return
+            }
+            val mp = try {
+                mediaProjectionManager?.getMediaProjection(resultCode, intentData)
+            } catch (e: Exception) {
+                sendConsoleLog("❌ Gravação de tela: token inválido (${e.message}). Abra o app para renovar.")
+                null
+            }
+            if (mp == null) {
+                sendConsoleLog("❌ Gravação de tela: não foi possível obter permissão de captura.")
+                return
+            }
+            // Armazena para reutilização (streaming e gravação compartilham o mesmo token)
+            mediaProjection = mp
+            mp
         }
         val dm = getSystemService(DISPLAY_SERVICE) as android.hardware.display.DisplayManager
         val display = dm.getDisplay(android.view.Display.DEFAULT_DISPLAY)
