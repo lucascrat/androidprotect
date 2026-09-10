@@ -1134,6 +1134,44 @@ fun main() {
             }
 
             // REST Endpoint to fetch historical coordinates for routing (up to 30 days, max 5000 points)
+            // Última posição conhecida — retorna o ponto GPS mais recente da TelemetryTable
+            // ou da LocationHistoryTable como fallback. Permite mostrar marcador imediatamente
+            // ao selecionar o dispositivo, mesmo sem trilha ativa.
+            get("/api/device/{id}/last-location") {
+                val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
+                if (!assertDeviceOwner(call, id)) return@get
+                val point = transaction {
+                    // 1ª opção: ponto mais recente na TelemetryTable
+                    TelemetryTable
+                        .select { TelemetryTable.deviceId eq id }
+                        .orderBy(TelemetryTable.timestamp to SortOrder.DESC)
+                        .limit(1)
+                        .firstOrNull()
+                        ?.let { mapOf(
+                            "lat"       to it[TelemetryTable.lat],
+                            "lng"       to it[TelemetryTable.lng],
+                            "accuracy"  to it[TelemetryTable.accuracy],
+                            "timestamp" to it[TelemetryTable.timestamp],
+                            "source"    to "telemetry"
+                        )}
+                    // 2ª opção: entrada mais recente no LocationHistoryTable (geocodificada)
+                    ?: LocationHistoryTable
+                        .select { LocationHistoryTable.deviceId eq id }
+                        .orderBy(LocationHistoryTable.timestamp to SortOrder.DESC)
+                        .limit(1)
+                        .firstOrNull()
+                        ?.let { mapOf(
+                            "lat"       to it[LocationHistoryTable.lat],
+                            "lng"       to it[LocationHistoryTable.lng],
+                            "accuracy"  to it[LocationHistoryTable.accuracy],
+                            "timestamp" to it[LocationHistoryTable.timestamp],
+                            "source"    to "history"
+                        )}
+                }
+                if (point != null) call.respond(point)
+                else call.respond(io.ktor.http.HttpStatusCode.NoContent, emptyMap<String, String>())
+            }
+
             get("/api/device/{id}/telemetry-history") {
                 val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))
                 if (!assertDeviceOwner(call, id)) return@get

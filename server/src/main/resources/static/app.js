@@ -1456,6 +1456,32 @@ function selectDevice(deviceId) {
     renderStreetHistory();
     startStreetUpdateScheduler();
 
+    // Mostra imediatamente a última posição conhecida do dispositivo no mapa.
+    // Isso evita que o mapa fique vazio enquanto o GPS não envia um novo ponto.
+    // Se o fetchTrailHistory já colocou um marcador, essa chamada é ignorada.
+    fetch(`/api/device/${deviceId}/last-location`, { headers: authHeaders() })
+        .then(r => (r.status === 200) ? r.json() : null)
+        .then(loc => {
+            // Ignora se: sem dados, usuário já mudou de dispositivo, ou trilha já colocou marcador
+            if (!loc || deviceId !== currentDeviceId || deviceMarker) return;
+            const devIcon = L.divIcon({
+                className: '',
+                html: '<div class="device-marker-dot" style="opacity:0.55;background:rgba(0,210,255,0.7);box-shadow:0 0 8px rgba(0,210,255,0.5)"></div>',
+                iconSize: [20, 20],
+                iconAnchor: [10, 10]
+            });
+            deviceMarker = L.marker([loc.lat, loc.lng], { icon: devIcon, zIndexOffset: 1000 }).addTo(map);
+            deviceMarker.bindPopup('<b>Última posição conhecida</b>');
+            if (deviceAccuracyCircle) { map.removeLayer(deviceAccuracyCircle); deviceAccuracyCircle = null; }
+            deviceAccuracyCircle = L.circle([loc.lat, loc.lng], {
+                radius: loc.accuracy || 50,
+                color: '#00d2ff', opacity: 0.4, weight: 1.5,
+                fillColor: '#00d2ff', fillOpacity: 0.08
+            }).addTo(map);
+            if (mapFollowMode || true) map.setView([loc.lat, loc.lng], 15);
+        })
+        .catch(() => {});
+
     const device = devicesMap.get(deviceId);
     if (device) {
         updateActiveDeviceUI(device);
