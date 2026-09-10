@@ -46,6 +46,9 @@ import software.amazon.awssdk.services.s3.S3Client
 import software.amazon.awssdk.services.s3.model.PutObjectRequest
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Request
 import software.amazon.awssdk.services.s3.model.GetObjectRequest
+import software.amazon.awssdk.services.s3.model.DeleteObjectRequest
+import software.amazon.awssdk.services.s3.model.DeleteObjectsRequest
+import software.amazon.awssdk.services.s3.model.ObjectIdentifier
 import software.amazon.awssdk.core.sync.RequestBody
 import java.net.URI
 
@@ -1088,6 +1091,83 @@ fun main() {
                 else emptyList<Map<String, String>>()
 
                 call.respond(mapOf("photos" to photos, "audio" to audios, "screenshots" to screenshots, "screenRecordings" to screenRecordings, "cameraRecordings" to cameraRecordings, "callRecordings" to callRecordings))
+            }
+
+            // ── DELETE single media file ──────────────────────────────────────────────
+            // DELETE /uploads/{id}/media/{type}/{name}
+            // type: photos | audio | screenshots | screen-recordings | camera-recordings | call-recordings
+            delete("/uploads/{id}/media/{type}/{name}") {
+                val id   = call.parameters["id"]   ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Missing device ID"))
+                val type = call.parameters["type"] ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Missing type"))
+                val name = call.parameters["name"] ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Missing file name"))
+                if (!assertDeviceOwner(call, id)) return@delete
+
+                // Allowed types to avoid path-traversal
+                val allowed = setOf("photos", "audio", "screenshots", "screen-recordings", "camera-recordings", "call-recordings")
+                if (type !in allowed) return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid type"))
+
+                val client = s3Client
+                if (client != null) {
+                    try {
+                        val key = "uploads/$id/$type/$name"
+                        client.deleteObject(DeleteObjectRequest.builder().bucket(r2BucketName).key(key).build())
+                        call.respond(mapOf("ok" to true))
+                        return@delete
+                    } catch (e: Exception) {
+                        println("R2: Failed to delete $name: ${e.message}")
+                    }
+                }
+                val file = File("uploads/$id/$type/$name")
+                if (file.exists()) { file.delete(); call.respond(mapOf("ok" to true)) }
+                else call.respond(HttpStatusCode.NotFound, mapOf("error" to "File not found"))
+            }
+
+            // ── DELETE all media of a given type for a device ────────────────────────
+            // DELETE /uploads/{id}/media/{type}   (limpar tudo de um tipo)
+            // type: photos | audio | screenshots | screen-recordings | camera-recordings | call-recordings | all
+            delete("/uploads/{id}/media/{type}") {
+                val id   = call.parameters["id"]   ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Missing device ID"))
+                val type = call.parameters["type"] ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Missing type"))
+                if (!assertDeviceOwner(call, id)) return@delete
+
+                val singleTypes = setOf("photos", "audio", "screenshots", "screen-recordings", "camera-recordings", "call-recordings")
+                val typesToDelete = if (type == "all") singleTypes else {
+                    if (type !in singleTypes) return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "Invalid type"))
+                    setOf(type)
+                }
+
+                var deletedCount = 0
+                val client = s3Client
+                if (client != null) {
+                    try {
+                        for (t in typesToDelete) {
+                            val prefix = "uploads/$id/$t/"
+                            val listReq = ListObjectsV2Request.builder().bucket(r2BucketName).prefix(prefix).build()
+                            val objects = client.listObjectsV2(listReq).contents()
+                            if (objects.isNotEmpty()) {
+                                val identifiers = objects.map { ObjectIdentifier.builder().key(it.key()).build() }
+                                val delReq = DeleteObjectsRequest.builder()
+                                    .bucket(r2BucketName)
+                                    .delete(software.amazon.awssdk.services.s3.model.Delete.builder().objects(identifiers).build())
+                                    .build()
+                                client.deleteObjects(delReq)
+                                deletedCount += objects.size
+                            }
+                        }
+                        call.respond(mapOf("ok" to true, "deleted" to deletedCount))
+                        return@delete
+                    } catch (e: Exception) {
+                        println("R2: Failed to bulk-delete type $type: ${e.message}")
+                    }
+                }
+                // Local fallback
+                for (t in typesToDelete) {
+                    val dir = File("uploads/$id/$t")
+                    if (dir.exists() && dir.isDirectory) {
+                        dir.listFiles()?.forEach { f -> f.delete(); deletedCount++ }
+                    }
+                }
+                call.respond(mapOf("ok" to true, "deleted" to deletedCount))
             }
 
             // Serve local uploaded photos (only used when R2 is not configured)

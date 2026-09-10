@@ -642,13 +642,23 @@
 
                 <!-- Captured Photos Gallery -->
                 <div class="grid-card gallery-card" data-tab="media">
-                    <div class="card-header"><h3><i class="fa-solid fa-images neon-text-blue"></i> Galeria de Câmera</h3></div>
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-images neon-text-blue"></i> Galeria de Câmera</h3>
+                        <button class="btn btn-sm btn-clear-log" onclick="clearMediaType('photos')" title="Apagar todas as fotos"><i class="fa-solid fa-trash-can"></i> Limpar</button>
+                    </div>
                     <div class="card-body photo-gallery" id="photo-gallery"><div class="empty-gallery-msg">Nenhuma foto capturada ainda.</div></div>
                 </div>
 
                 <!-- Screen Captures Gallery -->
                 <div class="grid-card gallery-card" data-tab="media" id="screen-captures-card">
-                    <div class="card-header"><h3><i class="fa-solid fa-desktop neon-text-pink"></i> Capturas de Tela</h3></div>
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-desktop neon-text-pink"></i> Capturas de Tela</h3>
+                        <div style="display:flex;gap:6px;">
+                            <button class="btn btn-sm btn-clear-log" onclick="clearMediaType('screenshots')" title="Apagar prints"><i class="fa-solid fa-trash-can"></i> Prints</button>
+                            <button class="btn btn-sm btn-clear-log" onclick="clearMediaType('screen-recordings')" title="Apagar gravações de tela"><i class="fa-solid fa-trash-can"></i> Tela</button>
+                            <button class="btn btn-sm btn-clear-log" onclick="clearMediaType('camera-recordings')" title="Apagar gravações de câmera"><i class="fa-solid fa-trash-can"></i> Câmera</button>
+                        </div>
+                    </div>
                     <div class="card-body">
                         <div class="audio-section-label"><i class="fa-solid fa-camera-retro"></i> Prints</div>
                         <div class="photo-gallery" id="screenshots-gallery"><div class="empty-gallery-msg">Nenhum print capturado ainda.</div></div>
@@ -661,7 +671,10 @@
 
                 <!-- Ambient Audios Player -->
                 <div class="grid-card audio-card" data-tab="media">
-                    <div class="card-header"><h3><i class="fa-solid fa-volume-high neon-text-pink"></i> Gravações de Áudio</h3></div>
+                    <div class="card-header">
+                        <h3><i class="fa-solid fa-volume-high neon-text-pink"></i> Gravações de Áudio</h3>
+                        <button class="btn btn-sm btn-clear-log" onclick="clearMediaType('audio')" title="Apagar todas as gravações de áudio"><i class="fa-solid fa-trash-can"></i> Limpar</button>
+                    </div>
                     <div class="card-body audio-card-body">
                         <div class="audio-section-label"><i class="fa-solid fa-arrow-down"></i> Recebidos do aparelho</div>
                         <div class="audio-list" id="audio-list"><div class="empty-audio-msg">Nenhuma gravação recebida ainda.</div></div>
