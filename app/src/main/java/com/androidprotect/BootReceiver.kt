@@ -12,9 +12,12 @@ import android.util.Log
  * Compatível com:
  *  - Android padrão (BOOT_COMPLETED)
  *  - Android 7+ Direct Boot (LOCKED_BOOT_COMPLETED — dispara antes do unlock do usuário)
- *  - Xiaomi / MIUI (QUICKBOOT_POWERON)
- *  - Huawei / EMUI (HWBOOT_COMPLETED)
+ *  - Xiaomi / MIUI / HyperOS / Poco / Redmi (QUICKBOOT_POWERON)
+ *  - Huawei / EMUI / HarmonyOS (HWBOOT_COMPLETED)
  *  - HTC (QUICKBOOT_POWERON)
+ *  - LG (com.lge.lgps.QUICKBOOT_POWERON)
+ *  - Meizu / Flyme (com.meizu.intent.action.QUICK_BOOT)
+ *  - Sony / Xperia (com.sonyericsson.intent.action.BOOT_COMPLETED)
  *  - Samsung OneUI / outros (USER_PRESENT — fallback no primeiro unlock pós-boot)
  */
 class BootReceiver : BroadcastReceiver() {
@@ -25,11 +28,15 @@ class BootReceiver : BroadcastReceiver() {
 
         when (action) {
             Intent.ACTION_BOOT_COMPLETED,
-            "android.intent.action.LOCKED_BOOT_COMPLETED",   // Direct Boot (API 24+)
-            "android.intent.action.QUICKBOOT_POWERON",        // Xiaomi / HTC
-            "com.htc.intent.action.QUICKBOOT_POWERON",        // HTC legado
-            "com.huawei.intent.action.HWBOOT_COMPLETED",      // Huawei / EMUI
-            Intent.ACTION_USER_PRESENT -> {                   // Samsung / fallback: 1º unlock
+            "android.intent.action.LOCKED_BOOT_COMPLETED",        // Direct Boot (API 24+)
+            "android.intent.action.QUICKBOOT_POWERON",             // Xiaomi / HTC
+            "com.htc.intent.action.QUICKBOOT_POWERON",             // HTC legado
+            "com.huawei.intent.action.HWBOOT_COMPLETED",           // Huawei / EMUI
+            "com.lge.lgps.QUICKBOOT_POWERON",                      // LG
+            "com.meizu.intent.action.QUICK_BOOT",                  // Meizu / Flyme
+            "com.sonyericsson.intent.action.BOOT_COMPLETED",       // Sony / Xperia
+            "com.sony.msm.intent.action.BOOT_COMPLETED",           // Sony MSM
+            Intent.ACTION_USER_PRESENT -> {                        // Samsung / fallback: 1º unlock
                 startProtectService(context)
                 ServiceWatchdogWorker.schedule(context)
             }

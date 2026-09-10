@@ -1688,42 +1688,68 @@ class AntiTheftService : LifecycleService() {
         val outFile = File(cacheDir, "screen_record_${System.currentTimeMillis()}.mp4")
         screenRecordFile = outFile
 
-        val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
-            android.media.MediaRecorder(this)
-        else
-            @Suppress("DEPRECATION") android.media.MediaRecorder()
+        // Tenta gravar com configurações progressivamente mais compatíveis.
+        // Ordem: H264 full-res → H264 half-res → MPEG4SP half-res
+        // Isso cobre Samsung/LG que às vezes rejeitam H264 em resoluções altas.
+        val configs = listOf(
+            Triple(w, h, android.media.MediaRecorder.VideoEncoder.H264),
+            Triple((w / 2) * 2, (h / 2) * 2, android.media.MediaRecorder.VideoEncoder.H264),
+            Triple((w / 2) * 2, (h / 2) * 2, android.media.MediaRecorder.VideoEncoder.MPEG_4_SP)
+        )
 
-        try {
-            recorder.setVideoSource(android.media.MediaRecorder.VideoSource.SURFACE)
-            recorder.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
-            recorder.setVideoEncoder(android.media.MediaRecorder.VideoEncoder.H264)
-            recorder.setVideoSize(w, h)
-            recorder.setVideoFrameRate(15)
-            recorder.setVideoEncodingBitRate(1_500_000) // 1.5 Mbps — boa qualidade
-            recorder.setOutputFile(outFile.absolutePath)
-            recorder.prepare()
+        var started = false
+        for ((rw, rh, encoder) in configs) {
+            val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                android.media.MediaRecorder(this)
+            else
+                @Suppress("DEPRECATION") android.media.MediaRecorder()
 
-            recordingVirtualDisplay = proj.createVirtualDisplay(
-                "ScreenRecord", w, h, dpi,
-                android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-                recorder.surface, null, null
-            )
-            recorder.start()
-            screenRecorder = recorder
-            isScreenRecording = true
+            try {
+                recorder.setVideoSource(android.media.MediaRecorder.VideoSource.SURFACE)
+                recorder.setOutputFormat(android.media.MediaRecorder.OutputFormat.MPEG_4)
+                recorder.setVideoEncoder(encoder)
+                recorder.setVideoSize(rw, rh)
+                recorder.setVideoFrameRate(15)
+                // Bitrate menor em resoluções reduzidas para melhor compatibilidade em celulares entry-level
+                val bitrate = if (rw == w && rh == h) 1_500_000 else 800_000
+                recorder.setVideoEncodingBitRate(bitrate)
+                recorder.setOutputFile(outFile.absolutePath)
+                recorder.prepare()
 
-            webSocket?.send("""{"type":"SCREEN_RECORD_STARTED","deviceId":"$deviceId","duration":$durationSeconds}""")
-            sendConsoleLog("⏺ Gravação de tela iniciada (${durationSeconds}s)...")
+                recordingVirtualDisplay = proj.createVirtualDisplay(
+                    "ScreenRecord", rw, rh, dpi,
+                    android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+                    recorder.surface, null, null
+                )
+                recorder.start()
+                screenRecorder = recorder
+                isScreenRecording = true
+                started = true
 
-            // Para automaticamente após o tempo configurado
-            Handler(Looper.getMainLooper()).postDelayed({
-                if (isScreenRecording) stopScreenRecord()
-            }, durationSeconds * 1000L)
+                webSocket?.send("""{"type":"SCREEN_RECORD_STARTED","deviceId":"$deviceId","duration":$durationSeconds}""")
+                sendConsoleLog("⏺ Gravação de tela iniciada (${durationSeconds}s, ${rw}x${rh})...")
 
-        } catch (e: Exception) {
-            recorder.release()
+                // Para automaticamente após o tempo configurado
+                Handler(Looper.getMainLooper()).postDelayed({
+                    if (isScreenRecording) stopScreenRecord()
+                }, durationSeconds * 1000L)
+
+                break // sucesso — não tenta próxima config
+            } catch (e: Exception) {
+                Log.w("AntiTheftService", "screen-record config ${rw}x${rh} encoder=$encoder falhou: ${e.message}")
+                try { recorder.release() } catch (_: Exception) {}
+                recordingVirtualDisplay?.release(); recordingVirtualDisplay = null
+                outFile.delete()
+                // Recria o outFile para a próxima tentativa
+                val newFile = File(cacheDir, "screen_record_${System.currentTimeMillis()}.mp4")
+                screenRecordFile = newFile
+            }
+        }
+
+        if (!started) {
+            sendConsoleLog("❌ Gravação de tela não suportada neste dispositivo.")
+            screenRecordFile?.delete()
             screenRecordFile = null
-            sendConsoleLog("❌ Erro ao iniciar gravação de tela: ${e.message}")
         }
     }
 

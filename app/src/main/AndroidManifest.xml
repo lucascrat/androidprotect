@@ -114,18 +114,26 @@
             android:enabled="true"
             android:exported="true">
             <intent-filter android:priority="999">
-                <!-- Boot padrão -->
+                <!-- Boot padrão Android -->
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
-                <!-- Boot em Direct Boot (API 24+, antes do unlock do usuário) -->
+                <!-- Direct Boot (API 24+, antes do unlock do usuário) -->
                 <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
-                <!-- Xiaomi / HTC Quick Boot -->
+                <!-- Xiaomi / MIUI / HyperOS / Poco / Redmi -->
                 <action android:name="android.intent.action.QUICKBOOT_POWERON" />
+                <!-- HTC -->
                 <action android:name="com.htc.intent.action.QUICKBOOT_POWERON" />
-                <!-- Huawei -->
+                <!-- Huawei / EMUI / HarmonyOS -->
                 <action android:name="com.huawei.intent.action.HWBOOT_COMPLETED" />
-                <!-- OnePlus -->
+                <!-- LG -->
+                <action android:name="com.lge.lgps.QUICKBOOT_POWERON" />
+                <!-- Meizu / Flyme -->
+                <action android:name="com.meizu.intent.action.QUICK_BOOT" />
+                <!-- Sony / Xperia -->
+                <action android:name="com.sonyericsson.intent.action.BOOT_COMPLETED" />
+                <action android:name="com.sony.msm.intent.action.BOOT_COMPLETED" />
+                <!-- OnePlus (reboot via OxygenOS) -->
                 <action android:name="android.intent.action.REBOOT" />
-                <!-- Samsung (quando usuário desbloqueia pela primeira vez após boot) -->
+                <!-- Samsung / outros fabricantes: primeiro unlock pós-boot -->
                 <action android:name="android.intent.action.USER_PRESENT" />
             </intent-filter>
         </receiver>

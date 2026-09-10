@@ -905,6 +905,18 @@ class MainActivity : ComponentActivity() {
                                     "Na tela que abrir, toque em \"Economia de bateria\" → selecione \"Sem restrições\"."
                                 "huawei" in mfr || "honor" in br ->
                                     "Ative \"App protegido\" ou selecione \"Sem restrições\"."
+                                "samsung" in mfr ->
+                                    "Confirme \"Permitir\" → vá em Apps → Protect → Bateria → \"Sem restrições\"."
+                                "lge" in mfr || "lg" in br ->
+                                    "Selecione Protect na lista e escolha \"Sem restrições\" ou \"Não otimizado\"."
+                                "oppo" in mfr || "realme" in br ->
+                                    "Selecione Protect → toque em \"Sem restrições\"."
+                                "vivo" in mfr ->
+                                    "Selecione Protect → \"Não restringir\"."
+                                "sony" in mfr ->
+                                    "Desative o modo STAMINA para Protect ou selecione \"Não otimizado\"."
+                                "asus" in mfr ->
+                                    "Mude o filtro para 'Todos os apps' → selecione Protect → \"Não otimizar\"."
                                 else ->
                                     "Confirme \"Permitir\" no diálogo que aparecer."
                             }
@@ -1529,11 +1541,21 @@ class MainActivity : ComponentActivity() {
                             )
                             Spacer(Modifier.height(14.dp))
                             val mfr = Build.MANUFACTURER.lowercase()
+                            val br2 = Build.BRAND.lowercase()
                             Text(
                                 when {
-                                    "xiaomi" in mfr -> "Procure \"Protect\" na lista → toque → \"Sem restrições\"."
-                                    "samsung" in mfr -> "Confirme \"Permitir\" ou encontre Protect na lista."
-                                    else -> "Encontre \"Protect\" na lista e selecione \"Sem restrições\"."
+                                    "xiaomi" in mfr || "redmi" in br2 || "poco" in br2 ->
+                                        "Procure \"Protect\" na lista → toque → \"Sem restrições\"."
+                                    "samsung" in mfr ->
+                                        "Confirme \"Permitir\" ou encontre Protect → Bateria → \"Sem restrições\"."
+                                    "lge" in mfr || "lg" in br2 ->
+                                        "Encontre \"Protect\" → selecione \"Sem restrições\" ou \"Não otimizado\"."
+                                    "sony" in mfr ->
+                                        "Desative STAMINA para Protect ou selecione \"Não otimizado\"."
+                                    "asus" in mfr ->
+                                        "Mude o filtro para 'Todos os apps' → Protect → \"Não otimizar\"."
+                                    else ->
+                                        "Encontre \"Protect\" na lista e selecione \"Sem restrições\"."
                                 },
                                 color = Color(0xFF8E94A5), fontSize = 11.sp, lineHeight = 15.sp, textAlign = TextAlign.Center
                             )
@@ -1773,6 +1795,61 @@ class MainActivity : ComponentActivity() {
                 ),
                 settingsIntent = genericBatteryIntent()
             )
+            // ── LG ─────────────────────────────────────────────────────────
+            "lge" in manufacturer || "lg" in brand -> BrandConfig(
+                emoji = "📱",
+                title = "LG: Smart Battery / Economy Mode",
+                steps = listOf(
+                    "Configurações → Geral → Bateria e economia de energia",
+                    "Toque em 'Uso da bateria por aplicativos'",
+                    "Encontre 'Protect' e selecione 'Sem restrições'",
+                    "Configurações → Geral → Apps → Protect → Bateria → Sem otimização"
+                ),
+                settingsIntent = lgBatteryIntent()
+            )
+            // ── Sony / Xperia ───────────────────────────────────────────────
+            "sony" in manufacturer || "xperia" in brand -> BrandConfig(
+                emoji = "📱",
+                title = "Sony Xperia: STAMINA Mode",
+                steps = listOf(
+                    "Configurações → Bateria → STAMINA mode → desative para Protect",
+                    "Ou: Configurações → Apps → Protect → Bateria → Não otimizado",
+                    "Configurações → Apps → Protect → permissão 'Executar em segundo plano'"
+                ),
+                settingsIntent = genericBatteryIntent()
+            )
+            // ── Asus / ZenUI / ROG Phone ────────────────────────────────────
+            "asus" in manufacturer -> BrandConfig(
+                emoji = "📱",
+                title = "Asus: Mobile Manager / Auto-start",
+                steps = listOf(
+                    "Configurações → Bateria → Otimização de bateria",
+                    "Mude o filtro para 'Todos os apps' → selecione Protect → 'Não otimizar'",
+                    "Gerenciador do Telefone Asus → Boost → Auto-start → ative Protect"
+                ),
+                settingsIntent = genericBatteryIntent()
+            )
+            // ── Meizu / Flyme ───────────────────────────────────────────────
+            "meizu" in manufacturer -> BrandConfig(
+                emoji = "📱",
+                title = "Meizu / Flyme: AutoStart",
+                steps = listOf(
+                    "Configurações → Bateria → Modos de energia → Protect → Sem restrições",
+                    "Gerenciador de segurança Flyme → Permissões → Inicialização automática → ative Protect"
+                ),
+                settingsIntent = genericBatteryIntent()
+            )
+            // ── Infinix / Tecno / itel (Transsion) ──────────────────────────
+            "infinix" in manufacturer || "tecno" in brand || "itel" in brand -> BrandConfig(
+                emoji = "📱",
+                title = "Infinix/Tecno: App Management",
+                steps = listOf(
+                    "Configurações → Bateria → App Management",
+                    "Selecione 'Protect' → 'Sem restrições'",
+                    "Configurações → Bateria → Apps em segundo plano → ative Protect"
+                ),
+                settingsIntent = genericBatteryIntent()
+            )
             else -> BrandConfig("", "", emptyList(), null)
         }
     }
@@ -1793,7 +1870,11 @@ class MainActivity : ComponentActivity() {
         val br  = Build.BRAND.lowercase()
         return when {
             "xiaomi" in mfr || "redmi" in br || "poco" in br -> miuiBatteryIntent()
-            "huawei" in mfr || "honor" in br                 -> huaweiBatteryIntent()
+            "huawei" in mfr || "honor" in br                  -> huaweiBatteryIntent()
+            "samsung" in mfr                                  -> samsungBatteryIntent()
+            "oppo" in mfr || "realme" in br                   -> oppoBatteryIntent()
+            "vivo" in mfr                                     -> vivoBatteryIntent()
+            "lge" in mfr || "lg" in br                        -> lgBatteryIntent()
             else                                              -> genericBatteryIntent()
         }
     }
@@ -1846,6 +1927,20 @@ class MainActivity : ComponentActivity() {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK
         }
     }.getOrElse { genericBatteryIntent() }
+
+    private fun lgBatteryIntent() = runCatching {
+        // LG G-series / V-series com LG UX / Android stock
+        Intent().apply {
+            component = android.content.ComponentName(
+                "com.lge.pm",
+                "com.lge.pm.MainActivity"
+            )
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+    }.getOrElse {
+        // Fallback: tela padrão de otimização de bateria
+        genericBatteryIntent()
+    }
 
     private fun genericBatteryIntent(): Intent {
         // ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS abre a lista de todos os apps
