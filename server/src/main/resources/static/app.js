@@ -343,7 +343,7 @@ function toggleSidebarDevices() {
 }
 
 // Tabs that live inside the "Mais" drawer — their activation highlights the Mais button
-const MORE_TABS = new Set(['more', 'contacts', 'calllogs', 'keylog', 'call-recordings']);
+const MORE_TABS = new Set(['logs', 'files', 'contacts', 'calllogs', 'keylog', 'call-recordings']);
 
 function switchTab(tab) {
     if (window.innerWidth > 767) return; // desktop keeps the grid — sidebarNav handles scroll
@@ -388,7 +388,7 @@ function switchTab(tab) {
 
 // ── More drawer ──────────────────────────────────────────────────────────────
 function openMoreDrawer() {
-    if (window.innerWidth > 767) { switchTab('more'); return; }
+    if (window.innerWidth > 767) { switchTab('logs'); return; }
     const drawer  = document.getElementById('more-drawer');
     const overlay = document.getElementById('more-drawer-overlay');
     if (!drawer) return;

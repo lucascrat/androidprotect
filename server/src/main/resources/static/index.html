@@ -263,7 +263,11 @@
                         <i class="fa-solid fa-photo-film"></i>
                         <span>Mídia</span>
                     </button>
-                    <button class="snav-item" data-nav="more" onclick="sidebarNav('more')">
+                    <button class="snav-item" data-nav="logs" onclick="sidebarNav('logs')">
+                        <i class="fa-solid fa-code"></i>
+                        <span>Logs</span>
+                    </button>
+                    <button class="snav-item" data-nav="files" onclick="sidebarNav('files')">
                         <i class="fa-solid fa-folder-open"></i>
                         <span>Arquivos</span>
                     </button>
@@ -417,11 +421,11 @@
                 <div class="mdr-handle"></div>
                 <div class="mdr-title">Mais funções</div>
                 <div class="mdr-grid">
-                    <button class="mdr-item" onclick="mdrSelect('more')">
-                        <i class="fa-solid fa-terminal" style="color:#4f8ef7"></i>
-                        <span>Console</span>
+                    <button class="mdr-item" onclick="mdrSelect('logs')">
+                        <i class="fa-solid fa-code" style="color:#4f8ef7"></i>
+                        <span>Logs</span>
                     </button>
-                    <button class="mdr-item" onclick="mdrSelect('more')">
+                    <button class="mdr-item" onclick="mdrSelect('files')">
                         <i class="fa-solid fa-folder-open" style="color:#f7b731"></i>
                         <span>Arquivos</span>
                     </button>
@@ -714,7 +718,7 @@
                 </div>
 
                 <!-- Security Event Log -->
-                <div class="grid-card terminal-card" data-tab="more">
+                <div class="grid-card terminal-card" data-tab="logs">
                     <div class="card-header">
                         <h3><i class="fa-solid fa-code neon-text-blue"></i> Console de Segurança</h3>
                         <button class="btn btn-sm btn-clear-log" onclick="clearConsole()"><i class="fa-solid fa-trash-can"></i> Limpar</button>
@@ -762,7 +766,7 @@
                 </div>
 
                 <!-- Remote File Browser -->
-                <div class="grid-card filebrowser-card" data-tab="more">
+                <div class="grid-card filebrowser-card" data-tab="files">
                     <div class="card-header">
                         <div style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;"><h3><i class="fa-solid fa-folder-open neon-text-blue"></i> Explorador de Arquivos</h3><span class="fb-breadcrumb" id="fb-breadcrumb"></span></div>
                         <div style="display:flex;gap:6px;flex-shrink:0;"><button class="fb-nav-btn" id="fb-up-btn" onclick="fbNavigateUp()" title="Subir" disabled><i class="fa-solid fa-arrow-up"></i></button><button class="fb-nav-btn" onclick="fbRefresh()" title="Atualizar"><i class="fa-solid fa-rotate-right"></i></button></div>
