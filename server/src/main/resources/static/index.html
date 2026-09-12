@@ -15,7 +15,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <link rel="stylesheet" href="style.css?v=37">
+    <link rel="stylesheet" href="style.css?v=38">
     <style>
 /* ── Histórico de Passagens ──────────────────────────────────────────── */
 .historico-card{display:flex;flex-direction:column;overflow:hidden}
@@ -1021,7 +1021,7 @@
         </div>
     </div>
 
-    <script src="app.js?v=42"></script>
+    <script src="app.js?v=43"></script>
     <script>
 // ── Histórico de Passagens ───────────────────────────────────────────────────────────
 (function(){
@@ -1376,10 +1376,11 @@
       histLoad();
       return;
     }
-    // Restaura os overrides de display definidos pelos hooks de historico/meu-plano/storage
-    // antes de delegar para o sidebarNav original, para que o grid fique visível.
+    // Restaura overrides de display — o sidebarNav original vai aplicar foco/grid adequado.
+    // Limpa também a classe desktop-focused para que o modo foco seja re-aplicado limpo.
     document.querySelectorAll('.dashboard-grid .grid-card').forEach(c=>{
       const t=c.dataset.tab;
+      c.classList.remove('desktop-focused');
       c.style.display=(t==='historico'||t==='meu-plano'||t==='storage')?'none':'';
     });
     if(typeof _origNav2==='function') return _origNav2(key,...rest);
@@ -1554,6 +1555,7 @@
         const isMp = c.dataset.tab === 'meu-plano';
         c.style.display = isMp ? '' : 'none';
         c.classList.toggle('mp-active', isMp);
+        c.classList.remove('desktop-focused');
       });
       // update active nav state
       document.querySelectorAll('.snav-item').forEach(el => el.classList.remove('active'));
@@ -1705,6 +1707,7 @@
         const isStor = c.dataset.tab === 'storage';
         c.style.display = isStor ? '' : 'none';
         c.classList.toggle('stor-active', isStor);
+        c.classList.remove('desktop-focused');
       });
       document.querySelectorAll('.snav-item').forEach(el => el.classList.remove('active'));
       const navBtn = document.querySelector('.snav-item[data-nav="storage"]');

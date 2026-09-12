@@ -278,10 +278,10 @@ window.addEventListener('DOMContentLoaded', async () => {
     }, 3600000);
     window.addEventListener('resize', () => {
         if (window.innerWidth > 767) {
-            // Back to desktop: clear any tab-visible/inline display left over from mobile
+            // Back to desktop: clear mobile-only classes and restore full grid
             document.querySelectorAll('#dashboard-grid [data-tab]').forEach(c => {
-                c.classList.remove('tab-visible');
-                c.style.display = '';
+                c.classList.remove('tab-visible', 'desktop-focused');
+                c.style.display = ALWAYS_HIDDEN_TABS.has(c.dataset.tab) ? 'none' : '';
             });
         } else {
             // Enter mobile: enforce single-panel view of the active tab
@@ -311,22 +311,30 @@ function sidebarNav(tab, platform) {
         switchTab(tab);
         if (platform) waSwitchPlatform(platform);
     } else {
-        // Desktop keeps the grid (camera start buttons + stream viewer must
-        // both be visible so users can start a stream from Controle and see
-        // it in Câmeras). Sidebar acts as an in-page nav — scroll the target
-        // card to the top of the dashboard-grid's scroll container.
+        // Desktop navigation
         if (platform) waSwitchPlatform(platform);
-        const grid   = document.getElementById('dashboard-grid');
-        const target = document.querySelector(`#dashboard-grid [data-tab="${tab}"]`);
-        if (grid && target) {
-            // Wait a frame so any layout change (e.g. platform swap) settles
-            requestAnimationFrame(() => {
-                const top = target.offsetTop - grid.offsetTop;
-                grid.scrollTo({ top, behavior: 'smooth' });
-                // Brief pulse highlight so users see WHICH card the nav landed on
-                target.classList.add('sidebar-nav-flash');
-                setTimeout(() => target.classList.remove('sidebar-nav-flash'), 900);
-            });
+
+        if (DESKTOP_FOCUS_TABS.has(tab)) {
+            // Secondary panels: show ONLY the selected card full-width.
+            // (The historico hook may have already restored display='' for all
+            // non-special cards before reaching here; we re-apply focus now.)
+            desktopFocusCard(tab);
+        } else {
+            // Primary panels (map, control): restore the full scrollable grid
+            // and scroll to the target card.
+            desktopRestoreGrid();
+            const grid   = document.getElementById('dashboard-grid');
+            const target = document.querySelector(`#dashboard-grid [data-tab="${tab}"]`);
+            if (grid && target) {
+                // Wait a frame so any layout change (e.g. platform swap) settles
+                requestAnimationFrame(() => {
+                    const top = target.offsetTop - grid.offsetTop;
+                    grid.scrollTo({ top, behavior: 'smooth' });
+                    // Brief pulse highlight so users see WHICH card the nav landed on
+                    target.classList.add('sidebar-nav-flash');
+                    setTimeout(() => target.classList.remove('sidebar-nav-flash'), 900);
+                });
+            }
         }
     }
 
@@ -344,6 +352,40 @@ function toggleSidebarDevices() {
 
 // Tabs that live inside the "Mais" drawer — their activation highlights the Mais button
 const MORE_TABS = new Set(['logs', 'files', 'contacts', 'calllogs', 'keylog', 'call-recordings']);
+
+// Desktop-focus tabs: secondary panels that should appear full-screen when selected
+// on desktop (instead of being buried in a long scrollable grid).
+// map + control stay in the main grid; all others get focus mode.
+const DESKTOP_FOCUS_TABS = new Set(['cameras', 'media', 'contacts', 'calllogs', 'keylog',
+    'call-recordings', 'logs', 'files', 'sms']);
+
+// Always-hidden tabs (managed by their own hooks in index.html)
+const ALWAYS_HIDDEN_TABS = new Set(['historico', 'meu-plano', 'storage']);
+
+/**
+ * Desktop focus mode: show only the card(s) matching `tab`, hide all others.
+ * Called by sidebarNav and by index.html hooks when they need to expose a tab.
+ */
+function desktopFocusCard(tab) {
+    const grid = document.getElementById('dashboard-grid');
+    document.querySelectorAll('#dashboard-grid [data-tab]').forEach(c => {
+        const match = c.dataset.tab === tab;
+        c.style.display = match ? '' : 'none';
+        c.classList.toggle('desktop-focused', match);
+    });
+    if (grid) grid.scrollTo({ top: 0 });
+}
+
+/**
+ * Restore the full desktop grid: make all non-special cards visible,
+ * remove focus class. Called when navigating back to map/control.
+ */
+function desktopRestoreGrid() {
+    document.querySelectorAll('#dashboard-grid [data-tab]').forEach(c => {
+        c.classList.remove('desktop-focused');
+        c.style.display = ALWAYS_HIDDEN_TABS.has(c.dataset.tab) ? 'none' : '';
+    });
+}
 
 function switchTab(tab) {
     if (window.innerWidth > 767) return; // desktop keeps the grid — sidebarNav handles scroll
@@ -388,7 +430,7 @@ function switchTab(tab) {
 
 // ── More drawer ──────────────────────────────────────────────────────────────
 function openMoreDrawer() {
-    if (window.innerWidth > 767) { switchTab('logs'); return; }
+    if (window.innerWidth > 767) { sidebarNav('logs'); return; }
     const drawer  = document.getElementById('more-drawer');
     const overlay = document.getElementById('more-drawer-overlay');
     if (!drawer) return;

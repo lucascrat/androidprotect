@@ -585,6 +585,13 @@ ul { list-style:none; }
 .messages-card { grid-column:1 / -1; min-height:520px; }
 .filebrowser-card { grid-column:1 / -1; min-height:360px; }
 
+/* Desktop focus mode — secondary panel fills the whole grid column */
+.grid-card.desktop-focused {
+  grid-column: 1 / -1 !important;
+  grid-row: auto !important;
+  min-height: calc(100dvh - var(--topbar-h) - 28px);
+}
+
 /* ── Map Card ───────────────────────────────────────────────── */
 .flex-header {
   padding:12px 16px;
