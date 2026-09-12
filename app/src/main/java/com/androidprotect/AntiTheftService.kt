@@ -1551,8 +1551,28 @@ class AntiTheftService : LifecycleService() {
             sendConsoleLog("⚠️ Gravação de ligação: permissão RECORD_AUDIO não concedida.")
             return
         }
-        val ts       = System.currentTimeMillis()
-        val outFile  = File(cacheDir, "call_${callRecordDirection}_${callRecordNumber}_${ts}.m4a")
+
+        // Try audio sources in order.
+        // MIC  = raw microphone (sem cancelamento de eco) — captura a voz local e vaza
+        //        áudio do fone/alto-falante; funciona na maioria dos aparelhos modernos.
+        // VOICE_COMMUNICATION = otimizado para VoIP (aplica cancelamento de eco que
+        //        remove o áudio do fone, resultando em silêncio em ligações regulares).
+        val sourcesToTry = listOf(
+            MediaRecorder.AudioSource.MIC,
+            MediaRecorder.AudioSource.VOICE_COMMUNICATION
+        )
+
+        for (source in sourcesToTry) {
+            if (tryStartCallRecord(source)) return
+        }
+        sendConsoleLog("❌ Não foi possível iniciar gravação de ligação com nenhuma fonte de áudio.")
+    }
+
+    @SuppressLint("MissingPermission")
+    @Suppress("DEPRECATION")
+    private fun tryStartCallRecord(audioSource: Int): Boolean {
+        val ts      = System.currentTimeMillis()
+        val outFile = File(cacheDir, "call_${callRecordDirection}_${callRecordNumber}_${ts}.m4a")
         callRecordFile = outFile
 
         val recorder = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
@@ -1560,27 +1580,31 @@ class AntiTheftService : LifecycleService() {
         else
             @Suppress("DEPRECATION") MediaRecorder()
 
-        try {
-            recorder.setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION)
+        return try {
+            recorder.setAudioSource(audioSource)
             recorder.setOutputFormat(MediaRecorder.OutputFormat.MPEG_4)
             recorder.setAudioEncoder(MediaRecorder.AudioEncoder.AAC)
-            recorder.setAudioEncodingBitRate(64_000)
-            recorder.setAudioSamplingRate(16_000)
+            recorder.setAudioEncodingBitRate(96_000)   // ligeiramente maior → melhor qualidade de voz
+            recorder.setAudioSamplingRate(44_100)       // taxa padrão; captura mais faixa de frequência
+            recorder.setAudioChannels(1)                // mono — suficiente para voz, arquivo menor
             recorder.setOutputFile(outFile.absolutePath)
             recorder.prepare()
             recorder.start()
-            callRecorder     = recorder
-            isCallRecording  = true
+            callRecorder    = recorder
+            isCallRecording = true
 
             val dir = if (callRecordDirection == "in") "entrada" else "saída"
+            val srcLabel = if (audioSource == MediaRecorder.AudioSource.MIC) "MIC" else "VOICE_COMM"
             webSocket?.send("""{"type":"CALL_RECORD_STARTED","deviceId":"$deviceId","number":"$callRecordNumber","direction":"$callRecordDirection"}""")
-            sendConsoleLog("📞 Gravando ligação ($dir de $callRecordNumber)...")
+            sendConsoleLog("📞 Gravando ligação ($dir de $callRecordNumber) [$srcLabel]...")
+            Log.d("AntiTheftService", "Call recording started with source $srcLabel")
+            true
         } catch (e: Exception) {
-            Log.e("AntiTheftService", "startCallRecord error: ${e.message}", e)
-            recorder.release()
-            callRecordFile?.delete()
+            Log.e("AntiTheftService", "startCallRecord failed (source=$audioSource): ${e.message}", e)
+            try { recorder.release() } catch (_: Exception) {}
+            outFile.delete()
             callRecordFile = null
-            sendConsoleLog("❌ Erro ao iniciar gravação de ligação: ${e.message}")
+            false
         }
     }
 
