@@ -2935,20 +2935,23 @@ function waUpdatePlatformBadges() {
 function waNormalizeChatKey(nameOrAddr) {
     if (!nameOrAddr) return '';
     let key = nameOrAddr.trim();
-    // Remove suffixes like "(6 mensagens)", "(2 mensagens novas)", ": 3 mensagens"
+    // Remove suffixes like "(6 mensagens)", "(2 mensagens novas)"
     key = key.replace(/\s*[\(\[]\d+\s+mensagens?\s*(novas?)?[\)\]].*$/i, '');
+    // Remove ": 3 mensagens" style suffix (number required — preserves names that contain colons)
     key = key.replace(/\s*:\s*\d+\s+mensagens?.*$/i, '');
-    key = key.replace(/\s*:.*$/, '');
     return key.trim();
 }
 
 // Single source of truth for how a message maps to a conversation key — must be used
 // everywhere a conversation is looked up (ingestion, live updates, unread counting),
 // otherwise a raw (non-normalized) address can silently miss the conversation entirely.
+// Lowercase ensures "João" and "joão" land in the same conversation regardless of
+// capitalization differences across notification vs. screen-scan capture paths.
 function waAddrKey(m) {
     const rawAddr = (m.address && m.address.trim()) ? m.address.trim() : '';
     const rawName = (m.name && m.name.trim()) ? m.name.trim() : '';
-    return waNormalizeChatKey(rawAddr) || waNormalizeChatKey(rawName) || '(sistema)';
+    const key = waNormalizeChatKey(rawAddr) || waNormalizeChatKey(rawName) || '(sistema)';
+    return key.toLowerCase();
 }
 
 function waIngestMessage(m) {

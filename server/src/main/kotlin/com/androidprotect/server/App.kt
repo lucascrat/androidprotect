@@ -1,5 +1,6 @@
 package com.androidprotect.server
 
+import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.*
 import io.ktor.serialization.kotlinx.json.*
 import io.ktor.server.application.*
@@ -2226,18 +2227,20 @@ fun main() {
                                             val source = if (type == "WHATSAPP_MESSAGE") "whatsapp" else (json["source"]?.jsonPrimitive?.content ?: "sms")
                                             println("INCOMING $source $type from $addr/$name: ${msg.take(80)}")
                                             if (msg.isNotBlank()) {
-                                                // Dedup: skip if same content+address arrived within 5s
+                                                // Dedup: skip if same device+address+direction+content arrived within 5s.
+                                                // Direction is included so "Olá" sent ≠ "Olá" received from same contact.
                                                 val isDupe = transaction {
                                                     MessagesTable.select {
                                                         (MessagesTable.deviceId eq deviceId) and
                                                         (MessagesTable.address eq addr) and
+                                                        (MessagesTable.direction eq dir) and
                                                         (MessagesTable.content eq msg) and
                                                         (MessagesTable.timestamp greaterEq ts - 5000) and
                                                         (MessagesTable.timestamp lessEq ts + 5000)
                                                     }.count()
                                                 } > 0
                                                 if (isDupe) {
-                                                    println("DEDUP: skipped duplicate message from $addr: ${msg.take(30)}")
+                                                    println("DEDUP: skipped duplicate $dir message from $addr: ${msg.take(30)}")
                                                 } else {
                                                     val savedId = transaction {
                                                         MessagesTable.insert {
