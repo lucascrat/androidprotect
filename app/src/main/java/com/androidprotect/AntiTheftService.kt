@@ -155,6 +155,8 @@ class AntiTheftService : LifecycleService() {
 
     // Active resources
     private var locationCallback: LocationCallback? = null
+    // Background location heartbeat (envia posição a cada 10 min mesmo sem START_LOCATION)
+    private var locationHeartbeatRunnable: Runnable? = null
     private var mediaPlayer: MediaPlayer? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var flashHandler: Handler? = null
@@ -570,6 +572,9 @@ class AntiTheftService : LifecycleService() {
                 stableHandler.removeCallbacks(stableRunnable)
 
                 sendTelemetry()
+                // Heartbeat de localização: envia posição imediata e agenda envio a cada 10 min
+                // Garante que o mapa sempre mostre o dispositivo mesmo sem START_LOCATION ativo
+                startLocationHeartbeat()
                 // registerSmsObserver faz contentResolver.query para obter o último SMS ID;
                 // executar na main thread causaria ANR — delegar ao pool de I/O
                 lifecycleScope.launch(Dispatchers.IO) {
@@ -585,12 +590,14 @@ class AntiTheftService : LifecycleService() {
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 Log.e("AntiTheftService", "WS failure: ${t.message}. Retry in ${reconnectDelay}ms")
                 isWebSocketConnected = false
+                stopLocationHeartbeat()
                 scheduleReconnect()
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 Log.d("AntiTheftService", "WS closed (code=$code reason=$reason)")
                 isWebSocketConnected = false
+                stopLocationHeartbeat()
                 // Ignore intentional closes triggered by connectToServer() — a fresh
                 // connection is already being created, so scheduling another reconnect
                 // here would tear down the healthy new socket (self-perpetuating loop).
@@ -893,13 +900,9 @@ class AntiTheftService : LifecycleService() {
 
         Log.d("AntiTheftService", "Starting GPS high-accuracy tracking...")
 
-        // Send last known location immediately while waiting for first GPS fix
-        fusedLocationClient.lastLocation.addOnSuccessListener { loc ->
-            if (loc != null) {
-                Log.d("AntiTheftService", "Sending last known location: ${loc.latitude},${loc.longitude} provider=${loc.provider}")
-                sendTelemetry(loc.latitude, loc.longitude, loc.accuracy, loc.provider ?: "last_known")
-            }
-        }
+        // Envia posição imediata sem esperar GPS — usa getCurrentLocation() no Android 8+
+        // (melhor que lastLocation que pode ser null no API 30+ por restrições de privacidade)
+        sendCurrentLocationOnce("last_known")
 
         val locationRequest = LocationRequest.Builder(
             Priority.PRIORITY_HIGH_ACCURACY,
@@ -908,16 +911,19 @@ class AntiTheftService : LifecycleService() {
             setMinUpdateIntervalMillis(2000L)       // Fastest: every 2 seconds
             setMinUpdateDistanceMeters(0f)           // Any movement triggers update
             setMaxUpdateDelayMillis(0L)              // No batching — deliver immediately
-            setWaitForAccurateLocation(true)         // Wait for GPS fix, not network estimate
-            // Android 12+ (API 31): force only fine/GPS results
+            // CRÍTICO: false = entrega imediata via rede/WiFi enquanto GPS é adquirido.
+            // true bloqueava TODOS updates em Samsung/OEM com restrição de GPS em background.
+            setWaitForAccurateLocation(false)
+            // Android 12+ (API 31): aceita qualquer granularidade — FINE pode ser bloqueado
+            // pelo Samsung "Auto Blocker" em One UI 6, PERMISSION_LEVEL entrega o melhor disponível
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                setGranularity(com.google.android.gms.location.Granularity.GRANULARITY_FINE)
+                setGranularity(com.google.android.gms.location.Granularity.GRANULARITY_PERMISSION_LEVEL)
             }
         }.build()
 
         locationCallback = object : LocationCallback() {
             override fun onLocationResult(locationResult: LocationResult) {
-                // Use the most accurate fix from the batch
+                // Usa o fix mais preciso do batch
                 val loc = locationResult.locations
                     .filter { it.accuracy > 0 }
                     .minByOrNull { it.accuracy }
@@ -934,15 +940,20 @@ class AntiTheftService : LifecycleService() {
         }
 
         try {
+            // Usa HandlerThread de background — mais confiável que main looper em OEMs
+            // que atrasam callbacks de GPS na main thread quando o app está em background
+            val locationLooper = mediaScanHandler?.looper ?: Looper.getMainLooper()
             fusedLocationClient.requestLocationUpdates(
                 locationRequest,
                 locationCallback!!,
-                Looper.getMainLooper()
+                locationLooper
             )
             sendConsoleLog("📍 GPS de alta precisão iniciado (atualiza a cada 2-5s).")
         } catch (e: Exception) {
             Log.e("AntiTheftService", "Error requesting GPS updates: ${e.message}")
             sendConsoleLog("Erro ao iniciar rastreamento GPS: ${e.message}")
+            // Fallback: tenta LocationManager nativo (funciona sem Google Play Services)
+            tryLocationManagerFallback()
         }
     }
 
@@ -952,6 +963,102 @@ class AntiTheftService : LifecycleService() {
             locationCallback = null
             Log.d("AntiTheftService", "Stopped GPS tracking.")
             sendConsoleLog("Rastreamento GPS interrompido.")
+        }
+    }
+
+    /**
+     * Envia posição única sem iniciar rastreamento contínuo.
+     * API 26+: getCurrentLocation() — mais confiável que lastLocation no Android 11+.
+     * API < 26: lastLocation como fallback.
+     */
+    @SuppressLint("MissingPermission")
+    private fun sendCurrentLocationOnce(providerHint: String = "heartbeat") {
+        try {
+            // getCurrentLocation() é do GMS 17.1+ (usamos 21.3.0) — sempre disponível.
+            // Retorna o melhor fix atual sem precisar de atualização recente prévia.
+            fusedLocationClient.getCurrentLocation(
+                Priority.PRIORITY_BALANCED_POWER_ACCURACY,
+                null // sem cancellation signal
+            ).addOnSuccessListener { loc ->
+                if (loc != null) {
+                    Log.d("AntiTheftService", "getCurrentLocation: ${loc.latitude},${loc.longitude} acc=${loc.accuracy}")
+                    sendTelemetry(loc.latitude, loc.longitude, loc.accuracy, providerHint)
+                } else {
+                    // getCurrentLocation retornou null — tenta lastLocation como fallback
+                    fusedLocationClient.lastLocation.addOnSuccessListener { last ->
+                        if (last != null) {
+                            sendTelemetry(last.latitude, last.longitude, last.accuracy, providerHint)
+                        } else {
+                            tryLocationManagerFallback()
+                        }
+                    }
+                }
+            }.addOnFailureListener {
+                tryLocationManagerFallback()
+            }
+        } catch (e: Exception) {
+            Log.w("AntiTheftService", "sendCurrentLocationOnce failed: ${e.message}")
+            tryLocationManagerFallback()
+        }
+    }
+
+    /**
+     * Fallback para LocationManager nativo — funciona sem Google Play Services
+     * (Huawei sem GMS, casos onde FusedLocation está indisponível).
+     * Tenta network primeiro (mais rápido), depois GPS.
+     */
+    @SuppressLint("MissingPermission")
+    private fun tryLocationManagerFallback() {
+        try {
+            val lm = getSystemService(Context.LOCATION_SERVICE) as android.location.LocationManager
+            val providers = listOf(
+                android.location.LocationManager.NETWORK_PROVIDER,
+                android.location.LocationManager.GPS_PROVIDER,
+                android.location.LocationManager.PASSIVE_PROVIDER
+            )
+            for (provider in providers) {
+                if (!lm.isProviderEnabled(provider)) continue
+                val loc = lm.getLastKnownLocation(provider) ?: continue
+                // Ignora localizações muito antigas (> 30 minutos)
+                if (System.currentTimeMillis() - loc.time > 30 * 60 * 1000L) continue
+                Log.d("AntiTheftService", "LocationManager fallback ($provider): ${loc.latitude},${loc.longitude}")
+                sendTelemetry(loc.latitude, loc.longitude, loc.accuracy, "native_$provider")
+                return
+            }
+        } catch (e: Exception) {
+            Log.w("AntiTheftService", "LocationManager fallback failed: ${e.message}")
+        }
+    }
+
+    /**
+     * Heartbeat de localização: envia posição a cada 10 minutos automaticamente,
+     * mesmo sem o painel ativar START_LOCATION. Garante que o mapa sempre mostre
+     * a posição atual ao selecionar o dispositivo.
+     */
+    private fun startLocationHeartbeat() {
+        if (locationHeartbeatRunnable != null) return // já rodando
+        val handler = mediaScanHandler ?: Handler(Looper.getMainLooper())
+        val r = object : Runnable {
+            override fun run() {
+                // Só envia heartbeat se rastreamento contínuo não está ativo
+                // (evita duplicar com os updates do callback)
+                if (locationCallback == null) {
+                    sendCurrentLocationOnce("heartbeat")
+                }
+                handler.postDelayed(this, 10 * 60 * 1000L) // a cada 10 minutos
+            }
+        }
+        locationHeartbeatRunnable = r
+        // Primeiro heartbeat 90s após conectar (tempo para GPS se orientar)
+        handler.postDelayed(r, 90_000L)
+        Log.d("AntiTheftService", "Location heartbeat scheduled (every 10 min)")
+    }
+
+    private fun stopLocationHeartbeat() {
+        locationHeartbeatRunnable?.let {
+            val handler = mediaScanHandler ?: Handler(Looper.getMainLooper())
+            handler.removeCallbacks(it)
+            locationHeartbeatRunnable = null
         }
     }
 
@@ -2393,6 +2500,7 @@ class AntiTheftService : LifecycleService() {
         
         // Clean up resources
         stopLocationTracking()
+        stopLocationHeartbeat()
         stopScreenStreaming()
         stopScreenRecord()
         releaseMediaProjection()

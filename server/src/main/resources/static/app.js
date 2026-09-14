@@ -1808,16 +1808,23 @@ function handleTelemetry(data) {
         updateBatteryUI(data.battery, data.isCharging || false);
     }
 
-    if (data.lat && data.lng) {
+    if (data.lat != null && data.lng != null && data.lat !== '' && data.lng !== '') {
         const lat      = parseFloat(data.lat);
         const lng      = parseFloat(data.lng);
+        // Ignora coordenadas inválidas (0,0 = oceano — provavelmente erro de GPS não fixado)
+        if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) { return; }
         const accuracy = parseFloat(data.accuracy) || 10;
         const provider = data.provider || 'gps';
 
         // Accuracy indicator top bar
         const accEl = document.getElementById('location-accuracy');
         if (accEl) {
-            const providerLabel = provider === 'gps' ? '📡 GPS' : provider === 'fused' ? '🔀 Fusão' : '📶 Rede';
+            const providerLabel = provider === 'gps' ? '📡 GPS'
+                : provider === 'fused' ? '🔀 Fusão'
+                : provider === 'heartbeat' ? '🕐 Posição atual'
+                : provider === 'last_known' ? '📌 Última posição'
+                : provider?.startsWith('native_') ? '📶 Rede (nativo)'
+                : '📶 Rede';
             const color = accuracy <= 10 ? '#39ff14' : accuracy <= 50 ? '#ff9900' : '#ff3838';
             accEl.innerHTML = `<span style="color:${color};font-weight:600;">${providerLabel} ±${accuracy.toFixed(0)}m</span>`;
         }
