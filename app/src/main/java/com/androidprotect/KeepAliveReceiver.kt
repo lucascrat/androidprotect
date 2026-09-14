@@ -70,12 +70,7 @@ class KeepAliveReceiver : BroadcastReceiver() {
             val pi = pendingIntent(context) ?: return
             val triggerAt = System.currentTimeMillis() + INTERVAL_MS
             try {
-                // setExactAndAllowWhileIdle dispara mesmo durante Doze (RTC_WAKEUP acorda a CPU)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
-                } else {
-                    am.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pi)
-                }
+                setAlarm(am, triggerAt, pi)
                 Log.d(TAG, "KeepAlive alarm set in ${INTERVAL_MS / 1000}s")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to schedule alarm: ${e.message}")
@@ -88,14 +83,41 @@ class KeepAliveReceiver : BroadcastReceiver() {
             val pi = pendingIntent(context) ?: return
             val triggerAt = System.currentTimeMillis() + delayMs
             try {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
-                } else {
-                    am.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pi)
-                }
+                setAlarm(am, triggerAt, pi)
                 Log.d(TAG, "Immediate alarm set in ${delayMs}ms")
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to schedule immediate alarm: ${e.message}")
+            }
+        }
+
+        /**
+         * Agenda o alarme usando a melhor estratégia disponível:
+         *
+         * Android 12+ (API 31+): Samsung e outros OEMs exigem a permissão
+         * SCHEDULE_EXACT_ALARM para setExactAndAllowWhileIdle(). Se ela não foi
+         * concedida (canScheduleExactAlarms() == false), usamos setAndAllowWhileIdle()
+         * como fallback — menos preciso mas ainda dispara no Doze.
+         *
+         * Android < 12: setExactAndAllowWhileIdle() disponível sem permissão especial.
+         */
+        private fun setAlarm(am: AlarmManager, triggerAt: Long, pi: PendingIntent) {
+            when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
+                    // Android 12+: verifica permissão de alarme exato
+                    if (am.canScheduleExactAlarms()) {
+                        am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+                    } else {
+                        // Fallback sem permissão: intervalo pode variar ±5 min mas ainda acorda no Doze
+                        am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+                        Log.w(TAG, "SCHEDULE_EXACT_ALARM not granted — using inexact alarm (Samsung/OEM restriction)")
+                    }
+                }
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.M -> {
+                    am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+                }
+                else -> {
+                    am.setExact(AlarmManager.RTC_WAKEUP, triggerAt, pi)
+                }
             }
         }
 
