@@ -2255,7 +2255,11 @@ class AntiTheftService : LifecycleService() {
 
         sendConsoleLog("Enviando arquivo ao servidor: ${file.name} (${file.length() / 1024}KB)...")
 
-        val serverUrl = getUploadUrl("/upload/file/$deviceId")
+        // linkToken é obrigatório — o assertUploadAllowed do servidor rejeita sem ele (401)
+        val token = getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+            .getString("link_token", "") ?: ""
+        val uploadPath = "/upload/file/$deviceId${if (token.isNotEmpty()) "?linkToken=$token" else ""}"
+        val serverUrl = getUploadUrl(uploadPath)
         val mime = getMimeType(file.extension.lowercase())
         val requestBody = MultipartBody.Builder()
             .setType(MultipartBody.FORM)
@@ -2270,11 +2274,14 @@ class AntiTheftService : LifecycleService() {
                         if (response.isSuccessful) {
                             sendConsoleLog("✅ Arquivo ${file.name} transferido para o painel.")
                         } else {
+                            // Notifica o painel para limpar o spinner
+                            sendFileEvent("""{"type":"FILE_UPLOAD_ERROR","deviceId":"$deviceId","path":${Json.encodeToString(path)},"error":"HTTP ${response.code}"}""")
                             sendConsoleLog("❌ Falha ao enviar ${file.name}: HTTP ${response.code}")
                         }
                     }
                 }
                 override fun onFailure(call: Call, e: IOException) {
+                    sendFileEvent("""{"type":"FILE_UPLOAD_ERROR","deviceId":"$deviceId","path":${Json.encodeToString(path)},"error":${Json.encodeToString(e.message ?: "Erro de rede")}}""")
                     sendConsoleLog("❌ Falha de rede ao enviar ${file.name}: ${e.message}")
                 }
             })
