@@ -127,6 +127,16 @@ class MainActivity : ComponentActivity() {
         mediaProjectionManager = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         devicePolicyManager    = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         adminComponent         = ComponentName(this, AdminReceiver::class.java)
+
+        // Auto-oculta o ícone sempre que o app já estiver vinculado a uma conta.
+        // Isso corrige o caso de atualização de versão: o sistema Android mantém
+        // o estado anterior do componente (ENABLED) mesmo quando o manifesto diz
+        // enabled="false" — o estado só reseta em reinstalações limpas, não em updates.
+        // Assim, dispositivos que tinham a versão antiga com ícone visível passam a
+        // ocultar automaticamente na primeira abertura após o update.
+        val token = prefs.getString("link_token", "") ?: ""
+        if (token.length == 9) hideLauncherIcon(this)
+
         refreshPermStates()
         setContent { AndroidProtectTheme { AppRoot() } }
         if (savedInstanceState == null) startPermissionFlow()
