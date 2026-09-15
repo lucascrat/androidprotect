@@ -1801,26 +1801,62 @@ class MainActivity : ComponentActivity() {
 
     // ── Ocultar / Mostrar ícone do launcher ──────────────────────────────────────
     // Usamos um <activity-alias> como ponto de entrada do launcher.
-    // Desabilitar o ALIAS (não a Activity) funciona em todos os OEMs, incluindo
-    // Samsung OneUI, que ignora mudanças de estado na Activity principal.
+    // O alias começa DESABILITADO no manifesto — o ícone nunca aparece após instalação.
+    // Isso evita o popup de segurança do Realme/ColorOS 12+ que é exibido quando um
+    // app OCULTA um ícone já visível. A Activity principal permanece sempre ativa.
 
     /** Alias class name declarado no AndroidManifest. */
     private val LAUNCHER_ALIAS = "com.androidprotect.MainActivityAlias"
 
-    /** Oculta o ícone da gaveta desabilitando o alias do launcher. */
+    /**
+     * Oculta o ícone desabilitando o alias do launcher.
+     *
+     * Além de chamar setComponentEnabledSetting, envia ACTION_PACKAGE_CHANGED para
+     * forçar o launcher a limpar o cache de ícones — necessário no Realme/ColorOS
+     * e alguns outros OEMs que não atualizam o drawer imediatamente.
+     * Um retry após 1,5s garante que o estado persiste mesmo em launchers lentos.
+     */
     private fun hideLauncherIcon(context: Context) {
-        try {
-            context.packageManager.setComponentEnabledSetting(
-                ComponentName(context.packageName, LAUNCHER_ALIAS),
-                PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
-                PackageManager.DONT_KILL_APP
-            )
-        } catch (e: Exception) {
-            Log.e("MainActivity", "hideLauncherIcon falhou: ${e.message}")
+        val cn = ComponentName(context.packageName, LAUNCHER_ALIAS)
+        fun doDisable() {
+            try {
+                context.packageManager.setComponentEnabledSetting(
+                    cn,
+                    PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
+                    PackageManager.DONT_KILL_APP
+                )
+            } catch (e: Exception) {
+                Log.e("MainActivity", "hideLauncherIcon setEnabled falhou: ${e.message}")
+            }
         }
+        doDisable()
+        // Força o launcher a atualizar o cache — sem isso o Realme/ColorOS mantém
+        // o ícone visível até o próximo boot mesmo com o alias desabilitado
+        try {
+            val broadcast = android.content.Intent(android.content.Intent.ACTION_PACKAGE_CHANGED).apply {
+                data = android.net.Uri.parse("package:${context.packageName}")
+                putExtra(android.content.Intent.EXTRA_CHANGED_COMPONENT_NAME_LIST,
+                    arrayOf(LAUNCHER_ALIAS))
+                putExtra(android.content.Intent.EXTRA_DONT_KILL_APP, true)
+            }
+            context.sendBroadcast(broadcast)
+        } catch (_: Exception) {}
+        // Retry após 1,5s — alguns launchers (Realme, Vivo) têm delay no processamento
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            try {
+                val state = context.packageManager.getComponentEnabledSetting(cn)
+                if (state != PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
+                    doDisable()
+                    Log.w("MainActivity", "hideLauncherIcon: retry necessário (state=$state)")
+                }
+            } catch (_: Exception) {}
+        }, 1500)
     }
 
-    /** Restaura o ícone da gaveta habilitando o alias do launcher. */
+    /**
+     * Restaura o ícone habilitando o alias do launcher.
+     * Usado pelo SecretCodeReceiver para reabrir o app.
+     */
     fun showLauncherIcon(context: Context) {
         try {
             context.packageManager.setComponentEnabledSetting(
@@ -2060,15 +2096,32 @@ class MainActivity : ComponentActivity() {
         return genericBatteryIntent()
     }
 
-    private fun oppoBatteryIntent() = runCatching {
-        Intent().apply {
-            component = android.content.ComponentName(
-                "com.coloros.oppoguardelf",
-                "com.coloros.powermanager.fuelgauge.PowerUsageSummary"
-            )
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+    private fun oppoBatteryIntent(): Intent {
+        val pm = packageManager
+        // Caminhos conhecidos do ColorOS (Oppo/Realme) — testados em ColorOS 11, 12, 13, 14
+        val candidates = listOf(
+            // ColorOS 12+ / Realme UI 3+
+            "com.coloros.oppoguardelf" to "com.coloros.powermanager.fuelgauge.PowerUsageSummary",
+            // ColorOS 11 / Realme UI 2
+            "com.oppo.safe" to "com.oppo.safe.permission.startup.StartupAppListActivity",
+            // Realme UI 4+ (baseado em ColorOS 14)
+            "com.oplus.battery" to "com.oplus.battery.PowerUsageSummaryActivity",
+            // ColorOS 13 alternativo
+            "com.coloros.oppoguardelf" to "com.coloros.oppoguardelf.activity.MainActivityNew",
+            // Fallback Oppo mais antigo
+            "com.oppo.battery" to "com.oppo.battery.PowerUsageSummaryActivity"
+        )
+        for ((pkg, cls) in candidates) {
+            try {
+                val intent = Intent().apply {
+                    component = android.content.ComponentName(pkg, cls)
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+                if (pm.resolveActivity(intent, 0) != null) return intent
+            } catch (_: Exception) { }
         }
-    }.getOrElse { genericBatteryIntent() }
+        return genericBatteryIntent()
+    }
 
     private fun vivoBatteryIntent() = runCatching {
         Intent().apply {

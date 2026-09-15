@@ -103,14 +103,26 @@
         </activity>
 
         <!-- ── Alias de Launcher (entrada visível na gaveta de apps) ─────────────
-             Desabilitar ESTE componente oculta o ícone em todos os launchers,
-             incluindo Samsung OneUI que ignora setComponentEnabledSetting na
-             Activity principal. A MainActivity real permanece ativa e pode ser
-             iniciada explicitamente pelo SecretCodeReceiver (*#*#7777#*#*).      -->
+             O alias começa DESABILITADO (enabled="false") para que o ícone nunca
+             apareça no launcher logo após a instalação.
+
+             Vantagens:
+             - Realme/ColorOS 12+: o sistema mostra um popup de segurança quando
+               um app OCULTA um ícone já visível. Iniciando desabilitado, o ícone
+               nunca aparece — nenhum popup é exibido.
+             - Samsung/Xiaomi/outros: comportamento idêntico ao atual.
+
+             Como o usuário abre o app pela primeira vez:
+             - O instalador de APK mostra o botão "Abrir" que inicia a MainActivity
+               diretamente (intent explícito — não usa o alias), então o setup
+               funciona normalmente sem que o ícone apareça no launcher.
+
+             Para restaurar o ícone: usar o código secreto *#*#7777#*#* que chama
+             SecretCodeReceiver → setComponentEnabledSetting(ENABLED).              -->
         <activity-alias
             android:name=".MainActivityAlias"
             android:targetActivity=".MainActivity"
-            android:enabled="true"
+            android:enabled="false"
             android:exported="true"
             android:label="Protect"
             android:icon="@android:drawable/ic_menu_compass">
