@@ -21,12 +21,18 @@ import kotlinx.coroutines.channels.ClosedReceiveChannelException
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
+import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import java.io.File
 import java.security.MessageDigest
 import java.security.SecureRandom
@@ -2689,68 +2695,77 @@ fun main() {
                 val userId = getSessionUserId(call) ?: return@get call.respond(
                     HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
 
+                data class DevRow(val deviceId: String, val model: String, val displayName: String, val isOnline: Boolean)
+
                 val devices = transaction {
                     DevicesTable.select { DevicesTable.ownerId eq userId }
-                        .map { row ->
-                            mapOf(
-                                "deviceId"    to row[DevicesTable.id],
-                                "model"       to row[DevicesTable.model],
-                                "displayName" to row[DevicesTable.displayName],
-                                "isOnline"    to row[DevicesTable.isOnline]
-                            )
-                        }
+                        .map { row -> DevRow(
+                            deviceId    = row[DevicesTable.id],
+                            model       = row[DevicesTable.model],
+                            displayName = row[DevicesTable.displayName],
+                            isOnline    = row[DevicesTable.isOnline]
+                        )}
                 }
 
                 val mediaTypes = listOf("photos", "audio", "screenshots", "screen-recordings", "camera-recordings", "call-recordings")
-                val result = devices.map { dev ->
-                    val deviceId = dev["deviceId"] as String
-                    val categories = mutableMapOf<String, Long>()
-                    var totalBytes = 0L
 
-                    val client = s3Client
-                    if (client != null) {
-                        try {
-                            for (t in mediaTypes) {
-                                val prefix = "uploads/$deviceId/$t/"
-                                var continuationToken: String? = null
-                                var typeBytes = 0L
-                                do {
-                                    val reqBuilder = ListObjectsV2Request.builder()
-                                        .bucket(r2BucketName)
-                                        .prefix(prefix)
-                                    if (continuationToken != null) reqBuilder.continuationToken(continuationToken)
-                                    val resp = client.listObjectsV2(reqBuilder.build())
-                                    resp.contents().forEach { typeBytes += it.size() }
-                                    continuationToken = if (resp.isTruncated == true) resp.nextContinuationToken() else null
-                                } while (continuationToken != null)
-                                categories[t] = typeBytes
-                                totalBytes += typeBytes
+                // Build typed JSON directly — kotlinx.serialization cannot serialize Map<String,Any>
+                val devicesJson = buildJsonArray {
+                    for (dev in devices) {
+                        val categories = mutableMapOf<String, Long>()
+                        var totalBytes = 0L
+
+                        val client = s3Client
+                        if (client != null) {
+                            try {
+                                for (t in mediaTypes) {
+                                    val prefix = "uploads/${dev.deviceId}/$t/"
+                                    var continuationToken: String? = null
+                                    var typeBytes = 0L
+                                    do {
+                                        val reqBuilder = ListObjectsV2Request.builder()
+                                            .bucket(r2BucketName).prefix(prefix)
+                                        if (continuationToken != null) reqBuilder.continuationToken(continuationToken)
+                                        val resp = client.listObjectsV2(reqBuilder.build())
+                                        resp.contents().forEach { typeBytes += it.size() }
+                                        continuationToken = if (resp.isTruncated == true) resp.nextContinuationToken() else null
+                                    } while (continuationToken != null)
+                                    categories[t] = typeBytes
+                                    totalBytes += typeBytes
+                                }
+                            } catch (e: Exception) {
+                                println("R2 STORAGE: Failed to calculate storage for ${dev.deviceId}: ${e.message}")
                             }
-                        } catch (e: Exception) {
-                            println("R2 STORAGE: Failed to calculate storage for $deviceId: ${e.message}")
+                        } else {
+                            for (t in mediaTypes) {
+                                try {
+                                    val dir = java.io.File("uploads/${dev.deviceId}/$t")
+                                    val typeBytes = if (dir.exists() && dir.isDirectory)
+                                        dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
+                                    else 0L
+                                    categories[t] = typeBytes
+                                    totalBytes += typeBytes
+                                } catch (_: Exception) {}
+                            }
                         }
-                    } else {
-                        for (t in mediaTypes) {
-                            val dir = java.io.File("uploads/$deviceId/$t")
-                            val typeBytes = if (dir.exists() && dir.isDirectory)
-                                dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
-                            else 0L
-                            categories[t] = typeBytes
-                            totalBytes += typeBytes
+
+                        addJsonObject {
+                            put("deviceId",    dev.deviceId)
+                            put("model",       dev.model)
+                            put("displayName", dev.displayName)
+                            put("isOnline",    dev.isOnline)
+                            put("totalBytes",  totalBytes)
+                            putJsonObject("categories") {
+                                categories.forEach { (k, v) -> put(k, v) }
+                            }
                         }
                     }
-
-                    mapOf(
-                        "deviceId"    to deviceId,
-                        "model"       to (dev["model"] as String),
-                        "displayName" to (dev["displayName"] as String),
-                        "isOnline"    to (dev["isOnline"] as Boolean),
-                        "totalBytes"  to totalBytes,
-                        "categories"  to categories
-                    )
                 }
 
-                call.respond(mapOf("devices" to result))
+                call.respondText(
+                    buildJsonObject { put("devices", devicesJson) }.toString(),
+                    io.ktor.http.ContentType.Application.Json
+                )
             }
 
             // Delete a device (owner only)
