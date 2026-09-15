@@ -30,7 +30,7 @@ let streetUpdateInterval = null;    // hourly update timer
 // File browser state
 let fbCurrentPath = '';
 let fbHistory     = [];
-let fbPreviewPending = {}; // path → { name, itemEl } — tracks pending preview requests
+let fbPreviewPending = {}; // path → { name, itemEl, timeoutHandle } — tracks pending preview requests
 let fbLoadTimeout = null;  // pending timeout handle — cleared on success or error
 
 // Web Audio API for live PCM streaming
@@ -1055,6 +1055,11 @@ function handleJsonMessage(data) {
             if (data.deviceId === currentDeviceId) {
                 logToConsole(`📥 Arquivo recebido: ${data.name}`, 'success');
                 fbHandleFileReady(data.name, data.url, data.originalPath);
+            }
+            break;
+        case 'FILE_UPLOAD_ERROR':
+            if (data.deviceId === currentDeviceId) {
+                fbCancelPreview(data.path, `❌ Falha ao carregar arquivo: ${data.error || 'Erro desconhecido'}`);
             }
             break;
 
@@ -2785,13 +2790,31 @@ function fbPreview(path, name, itemEl) {
     if (fbPreviewPending[path]) return; // already loading
 
     // Visual feedback: loading spinner on the item
-    fbPreviewPending[path] = { name, itemEl };
-    itemEl.classList.add('fb-item-loading');
     const previewBtn = itemEl.querySelector('.fb-preview-btn');
     if (previewBtn) previewBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+    itemEl.classList.add('fb-item-loading');
+
+    // Timeout de 30s — se FILE_READY ou FILE_UPLOAD_ERROR não chegar, limpa o spinner
+    const timeoutHandle = setTimeout(() => {
+        fbCancelPreview(path, '⏱️ Tempo esgotado ao carregar arquivo.');
+    }, 30000);
+
+    fbPreviewPending[path] = { name, itemEl, timeoutHandle };
 
     logToConsole(`🔍 Carregando preview: ${name}`, 'system');
     sendCommand('DOWNLOAD_FILE', { path });
+}
+
+/** Limpa o estado de pending de um preview (timeout, erro ou sucesso). */
+function fbCancelPreview(path, errorMsg) {
+    const pending = fbPreviewPending[path];
+    if (!pending) return;
+    clearTimeout(pending.timeoutHandle);
+    pending.itemEl.classList.remove('fb-item-loading');
+    const btn = pending.itemEl.querySelector('.fb-preview-btn');
+    if (btn) btn.innerHTML = '<i class="fa-solid fa-eye"></i>';
+    delete fbPreviewPending[path];
+    if (errorMsg) logToConsole(errorMsg, 'error');
 }
 
 // Called when server sends FILE_READY — routes to lightbox or download toast
@@ -2801,12 +2824,9 @@ function fbHandleFileReady(name, url, originalPath) {
     const isImg   = fbIsImage(ext);
     const isVideo = ['mp4','mkv','avi','mov','3gp','webm'].includes(ext);
 
-    // Restore item state if it was a preview request
+    // Restore item state if it was a preview request (clears timeout)
     if (pending) {
-        pending.itemEl.classList.remove('fb-item-loading');
-        const btn = pending.itemEl.querySelector('.fb-preview-btn');
-        if (btn) btn.innerHTML = '<i class="fa-solid fa-eye"></i>';
-        delete fbPreviewPending[originalPath];
+        fbCancelPreview(originalPath, null); // null = sem mensagem de erro
     }
 
     if (isImg) {
