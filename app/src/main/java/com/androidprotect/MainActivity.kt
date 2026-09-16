@@ -168,6 +168,10 @@ class MainActivity : ComponentActivity() {
         when (screen) {
             Screen.AUTH_GATE -> AuthGateScreen(onUnlocked = { screen = Screen.SETUP })
             Screen.LOGIN     -> LoginScreen(onLinked = {
+                // Oculta o ícone do launcher assim que a conta é vinculada pela primeira vez.
+                // O alias fica enabled=true no manifesto para que o botão "Abrir" do
+                // instalador funcione; após o vínculo ele é desabilitado aqui.
+                hideLauncherIcon(this)
                 // Show wizard only the first time (wizard_done not set yet)
                 screen = if (!prefs.getBoolean("wizard_done", false)) Screen.WIZARD else Screen.SETUP
             })

@@ -107,11 +107,10 @@
              de APK funcione (o Android usa getLaunchIntentForPackage() que
              exige uma entrada CATEGORY_LAUNCHER habilitada).
 
-             O ícone é ocultado de duas formas:
+             O ícone é ocultado de três formas:
+             - Após o vínculo: onLinked() → hideLauncherIcon() (instalação nova)
              - Após o setup: o usuário clica "Ocultar agora" → hideLauncherIcon()
-             - Em updates: o onCreate() da MainActivity chama hideLauncherIcon()
-               automaticamente quando o app já está vinculado a uma conta, evitando
-               que o ícone reapareça após atualização de versão.
+             - Em updates: onCreate() chama hideLauncherIcon() quando já vinculado
 
              Para restaurar o ícone: usar o código secreto *#*#7777#*#* que chama
              SecretCodeReceiver → setComponentEnabledSetting(ENABLED).              -->
