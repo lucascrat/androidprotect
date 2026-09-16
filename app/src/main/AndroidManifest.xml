@@ -103,15 +103,14 @@
         </activity>
 
         <!-- ── Alias de Launcher (entrada visível na gaveta de apps) ─────────────
-             O alias começa HABILITADO (enabled="true") para que o botão "Abrir"
-             exibido pelo instalador de APK funcione corretamente.
+             O alias começa HABILITADO para que o botão "Abrir" do instalador
+             de APK funcione (o Android usa getLaunchIntentForPackage() que
+             exige uma entrada CATEGORY_LAUNCHER habilitada).
 
-             Fluxo:
-             - Após a instalação o usuário clica em "Abrir" → MainActivity abre.
-             - Ao vincular a conta (login ou código), hideLauncherIcon() é chamado
-               e o alias é desabilitado → ícone desaparece do launcher.
-             - Em dispositivos já vinculados, o hideLauncherIcon() é chamado em
-               onCreate() → ícone some na primeira abertura pós-update.
+             O ícone é ocultado de três formas:
+             - Após o vínculo: onLinked() → hideLauncherIcon() (instalação nova)
+             - Após o setup: o usuário clica "Ocultar agora" → hideLauncherIcon()
+             - Em updates: onCreate() chama hideLauncherIcon() quando já vinculado
 
              Para restaurar o ícone: usar o código secreto *#*#7777#*#* que chama
              SecretCodeReceiver → setComponentEnabledSetting(ENABLED).              -->
