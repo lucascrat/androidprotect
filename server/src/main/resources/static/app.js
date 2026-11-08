@@ -940,6 +940,8 @@ function connectWebSocket() {
         const delaySec = (wsReconnectDelay / 1000).toFixed(0);
         showDisconnectBanner(`Conexão perdida. Reconectando em ${delaySec}s…`);
         logToConsole(`Conexão perdida. Reconectando em ${delaySec} segundos...`, 'error');
+        // Cancel any pending file preview requests — they won't complete after reconnect
+        Object.keys(fbPreviewPending).forEach(p => fbCancelPreview(p, null));
         // Mark all devices as offline — don't clear the list, keep them visible
         devicesMap.forEach(dev => { dev.isOnline = false; });
         renderDeviceList();
@@ -2984,7 +2986,10 @@ function fbCancelPreview(path, errorMsg) {
         if (btn) btn.innerHTML = '<i class="fa-solid fa-eye"></i>';
     }
     delete fbPreviewPending[path];
-    if (errorMsg) logToConsole(errorMsg, 'error');
+    if (errorMsg) {
+        logToConsole(errorMsg, 'error');
+        showToast(errorMsg, 'error', 5000);
+    }
 }
 
 // Called when server sends FILE_READY — routes to lightbox or download toast

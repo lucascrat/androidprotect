@@ -2054,7 +2054,7 @@ fun main() {
                     }
                 } catch (e: Exception) {
                     println("UPLOAD/file: multipart error for $id: ${e.message}")
-                    return@post call.respond(mapOf("success" to false, "error" to "Upload error"))
+                    return@post call.respond(io.ktor.http.HttpStatusCode.InternalServerError, mapOf("success" to false, "error" to "Upload error: ${e.message}"))
                 }
 
                 if (savedFile != null) {
@@ -2082,10 +2082,12 @@ fun main() {
                     }
 
                     val event = """{"type":"FILE_READY","deviceId":${Json.encodeToString(id)},"name":${Json.encodeToString(savedFile!!.name)},"url":${Json.encodeToString(fileUrl)},"originalPath":${Json.encodeToString(originalPath)}}"""
+                    println("FILE_READY: device=$id file=${savedFile!!.name} url=$fileUrl owner=${deviceOwnerCache[id]} dashboards=${dashboardSessions.size}")
                     broadcastToDashboards(event, id)
                     call.respond(mapOf("success" to true))
                 } else {
-                    call.respond(mapOf("success" to false, "error" to "No file received"))
+                    println("FILE_READY error: no file received for device $id")
+                    call.respond(io.ktor.http.HttpStatusCode.BadRequest, mapOf("success" to false, "error" to "No file received"))
                 }
             }
 
