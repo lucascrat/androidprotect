@@ -128,32 +128,6 @@ class MainActivity : ComponentActivity() {
         devicePolicyManager    = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         adminComponent         = ComponentName(this, AdminReceiver::class.java)
 
-        // Auto-oculta o ícone sempre que o app já estiver vinculado a uma conta.
-        // Isso corrige o caso de atualização de versão: o sistema Android mantém
-        // o estado anterior do componente (ENABLED) mesmo quando o manifesto diz
-        // enabled="false" — o estado só reseta em reinstalações limpas, não em updates.
-        // Assim, dispositivos que tinham a versão antiga com ícone visível passam a
-        // ocultar automaticamente na primeira abertura após o update.
-        val token = prefs.getString("link_token", "") ?: ""
-        if (token.length == 9) {
-            if (android.os.Build.MANUFACTURER.lowercase() == "samsung") {
-                // Samsung: usar "Ocultar apps" nativo do One UI (persistente no banco do launcher).
-                // Não desabilitar o alias aqui — ele precisa ficar HABILITADO para aparecer na
-                // lista de ocultar do Samsung. Se estava desabilitado por versão anterior, reabilitar.
-                val cn = ComponentName(packageName, LAUNCHER_ALIAS)
-                val state = packageManager.getComponentEnabledSetting(cn)
-                if (state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
-                    try {
-                        packageManager.setComponentEnabledSetting(
-                            cn, PackageManager.COMPONENT_ENABLED_STATE_DEFAULT, PackageManager.DONT_KILL_APP
-                        )
-                    } catch (_: Exception) {}
-                }
-            } else {
-                hideLauncherIcon(this)
-            }
-        }
-
         refreshPermStates()
         setContent { AndroidProtectTheme { AppRoot() } }
         if (savedInstanceState == null) startPermissionFlow()
@@ -185,11 +159,6 @@ class MainActivity : ComponentActivity() {
         when (screen) {
             Screen.AUTH_GATE -> AuthGateScreen(onUnlocked = { screen = Screen.SETUP })
             Screen.LOGIN     -> LoginScreen(onLinked = {
-                // Oculta o ícone do launcher assim que a conta é vinculada pela primeira vez.
-                // O alias fica enabled=true no manifesto para que o botão "Abrir" do
-                // instalador funcione; após o vínculo ele é desabilitado aqui.
-                hideLauncherIcon(this)
-                // Show wizard only the first time (wizard_done not set yet)
                 screen = if (!prefs.getBoolean("wizard_done", false)) Screen.WIZARD else Screen.SETUP
             })
             Screen.WIZARD    -> WizardScreen(onDone = {
