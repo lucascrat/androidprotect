@@ -39,23 +39,15 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts') }}
           restore-keys: ${{ runner.os }}-gradle-
 
-      - name: Decode keystore
-        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > app/protect.keystore
-
-      - name: Build release APK
-        run: ./gradlew assembleRelease --no-daemon
-        env:
-          SIGNING_STORE_FILE: protect.keystore
-          SIGNING_STORE_PASSWORD: ${{ secrets.SIGNING_STORE_PASSWORD }}
-          SIGNING_KEY_ALIAS:    ${{ secrets.SIGNING_KEY_ALIAS }}
-          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+      - name: Build debug APK
+        run: ./gradlew assembleDebug --no-daemon
 
       - name: Get version info
         id: ver
         run: |
           VER=$(grep 'versionName' app/build.gradle.kts | head -1 | grep -oP '"\K[^"]+')
           CODE=$(grep 'versionCode' app/build.gradle.kts | head -1 | grep -oP '\d+')
-          SIZE=$(du -h app/build/outputs/apk/release/app-release.apk | cut -f1)
+          SIZE=$(du -h app/build/outputs/apk/debug/app-debug.apk | cut -f1)
           echo "version=$VER" >> $GITHUB_OUTPUT
           echo "code=$CODE"   >> $GITHUB_OUTPUT
           echo "size=$SIZE"   >> $GITHUB_OUTPUT
@@ -63,9 +55,9 @@ jobs:
       - name: Copy APK to static downloads
         run: |
           mkdir -p server/src/main/resources/static/downloads
-          cp app/build/outputs/apk/release/app-release.apk \
+          cp app/build/outputs/apk/debug/app-debug.apk \
              server/src/main/resources/static/downloads/protect.apk
-          echo "✅ APK v${{ steps.ver.outputs.version }} (build ${{ steps.ver.outputs.code }}) copiado — ${{ steps.ver.outputs.size }}"
+          echo "✅ APK debug v${{ steps.ver.outputs.version }} (build ${{ steps.ver.outputs.code }}) copiado — ${{ steps.ver.outputs.size }}"
 
       - name: Commit APK to repository
         run: |
