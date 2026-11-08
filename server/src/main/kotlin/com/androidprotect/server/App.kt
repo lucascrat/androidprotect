@@ -2096,7 +2096,10 @@ fun main() {
                 if (!isSafeId(id) || !isSafeFilename(name)) return@get call.respondText("""{"error":"Invalid path"}""", io.ktor.http.ContentType.Application.Json, io.ktor.http.HttpStatusCode.BadRequest)
                 val file = File("uploads/$id/files/$name")
                 if (file.exists()) {
-                    call.response.headers.append("Content-Disposition", "attachment; filename=\"$name\"")
+                    val ext = name.substringAfterLast('.').lowercase()
+                    val inlineTypes = setOf("jpg","jpeg","png","gif","webp","mp4","webm","mov","pdf")
+                    val disposition = if (ext in inlineTypes) "inline" else "attachment"
+                    call.response.headers.append("Content-Disposition", "$disposition; filename=\"$name\"")
                     call.respondFile(file)
                 } else {
                     call.respond(io.ktor.http.HttpStatusCode.NotFound)
