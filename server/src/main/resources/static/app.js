@@ -34,6 +34,7 @@ let streetUpdateInterval = null;    // hourly update timer
 let fbCurrentPath = '';
 let fbHistory     = [];
 let fbPreviewPending = {}; // path → { name, itemEl, timeoutHandle } — tracks pending preview requests
+let fbFileReadyHandled = {}; // path → timestamp — dedup FILE_READY within 10s (server + Android WS both fire it)
 let fbLoadTimeout = null;  // pending timeout handle — cleared on success or error
 
 // Web Audio API for live PCM streaming
@@ -1599,6 +1600,7 @@ function selectDevice(deviceId) {
     fbCurrentPath = '';
     fbHistory = [];
     fbPreviewPending = {};
+    fbFileReadyHandled = {};
     if (fbLoadTimeout) { clearTimeout(fbLoadTimeout); fbLoadTimeout = null; }
     const fbList = document.getElementById('fb-list');
     if (fbList) { fbList.innerHTML = ''; fbList.style.display = 'none'; }
@@ -2994,6 +2996,11 @@ function fbCancelPreview(path, errorMsg) {
 
 // Called when server sends FILE_READY — routes to lightbox or download toast
 function fbHandleFileReady(name, url, originalPath) {
+    // Deduplicate: server broadcasts + Android WS relay can both fire within milliseconds
+    const now = Date.now();
+    if (fbFileReadyHandled[originalPath] && now - fbFileReadyHandled[originalPath] < 10000) return;
+    fbFileReadyHandled[originalPath] = now;
+
     const pending = fbPreviewPending[originalPath];
     const ext     = (name.split('.').pop() || '').toLowerCase();
     const isImg   = fbIsImage(ext);

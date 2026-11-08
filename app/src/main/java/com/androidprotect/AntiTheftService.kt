@@ -2272,6 +2272,15 @@ class AntiTheftService : LifecycleService() {
                 override fun onResponse(call: Call, response: Response) {
                     response.use {
                         if (response.isSuccessful) {
+                            // Parse URL from response and send FILE_READY via WebSocket as reliable fallback
+                            val bodyStr = try { response.body?.string() ?: "" } catch (e: Exception) { "" }
+                            val respJson = try { Json.parseToJsonElement(bodyStr).jsonObject } catch (e: Exception) { null }
+                            val url = respJson?.get("url")?.jsonPrimitive?.content
+                            val name = respJson?.get("name")?.jsonPrimitive?.content ?: file.name
+                            val origPath = respJson?.get("originalPath")?.jsonPrimitive?.content ?: path
+                            if (url != null) {
+                                sendFileEvent("""{"type":"FILE_READY","deviceId":"$deviceId","url":${Json.encodeToString(url)},"name":${Json.encodeToString(name)},"originalPath":${Json.encodeToString(origPath)}}""")
+                            }
                             sendConsoleLog("✅ Arquivo ${file.name} transferido para o painel.")
                         } else {
                             // Notifica o painel para limpar o spinner
