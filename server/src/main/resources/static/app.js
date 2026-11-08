@@ -2967,20 +2967,22 @@ function fbPreview(path, name, itemEl) {
         fbCancelPreview(path, '⏱️ Tempo esgotado ao carregar arquivo.');
     }, 30000);
 
-    fbPreviewPending[path] = { name, itemEl, timeoutHandle };
+    fbPreviewPending[path] = { name, itemEl, timeoutHandle, intent: 'preview' };
 
     logToConsole(`🔍 Carregando preview: ${name}`, 'system');
     sendCommand('DOWNLOAD_FILE', { path });
 }
 
-/** Limpa o estado de pending de um preview (timeout, erro ou sucesso). */
+/** Limpa o estado de pending de um preview/download (timeout, erro ou sucesso). */
 function fbCancelPreview(path, errorMsg) {
     const pending = fbPreviewPending[path];
     if (!pending) return;
-    clearTimeout(pending.timeoutHandle);
-    pending.itemEl.classList.remove('fb-item-loading');
-    const btn = pending.itemEl.querySelector('.fb-preview-btn');
-    if (btn) btn.innerHTML = '<i class="fa-solid fa-eye"></i>';
+    if (pending.timeoutHandle) clearTimeout(pending.timeoutHandle);
+    if (pending.itemEl) {
+        pending.itemEl.classList.remove('fb-item-loading');
+        const btn = pending.itemEl.querySelector('.fb-preview-btn');
+        if (btn) btn.innerHTML = '<i class="fa-solid fa-eye"></i>';
+    }
     delete fbPreviewPending[path];
     if (errorMsg) logToConsole(errorMsg, 'error');
 }
@@ -2991,21 +2993,26 @@ function fbHandleFileReady(name, url, originalPath) {
     const ext     = (name.split('.').pop() || '').toLowerCase();
     const isImg   = fbIsImage(ext);
     const isVideo = ['mp4','mkv','avi','mov','3gp','webm'].includes(ext);
+    const intent  = pending?.intent || 'preview';
 
-    // Restore item state if it was a preview request (clears timeout)
     if (pending) {
-        fbCancelPreview(originalPath, null); // null = sem mensagem de erro
+        fbCancelPreview(originalPath, null);
     }
 
+    // Download button clicked → always offer file download link
+    if (intent === 'download') {
+        fbShowDownloadToast(name, url, originalPath);
+        return;
+    }
+
+    // Preview intent
     if (isImg) {
-        // Open image directly in the photo lightbox modal
         pmPhotos = [{ url, caption: name }];
         openPhotoModal(0);
         return;
     }
 
     if (isVideo) {
-        // Open video in a simple video player overlay
         fbOpenVideoPlayer(url, name);
         return;
     }
@@ -3043,7 +3050,12 @@ function fbOpenVideoPlayer(url, name) {
 
 function fbDownload(path, name) {
     if (!currentDeviceId) return;
+    if (fbPreviewPending[path]) return;
     logToConsole(`⬇️ Solicitando download: ${name}`, 'system');
+    const timeoutHandle = setTimeout(() => {
+        fbCancelPreview(path, `⏱️ Tempo esgotado ao baixar arquivo.`);
+    }, 30000);
+    fbPreviewPending[path] = { name, itemEl: null, timeoutHandle, intent: 'download' };
     sendCommand('DOWNLOAD_FILE', { path });
 }
 
