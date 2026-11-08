@@ -2084,7 +2084,8 @@ fun main() {
                     val event = """{"type":"FILE_READY","deviceId":${Json.encodeToString(id)},"name":${Json.encodeToString(savedFile!!.name)},"url":${Json.encodeToString(fileUrl)},"originalPath":${Json.encodeToString(originalPath)}}"""
                     println("FILE_READY: device=$id file=${savedFile!!.name} url=$fileUrl owner=${deviceOwnerCache[id]} dashboards=${dashboardSessions.size}")
                     broadcastToDashboards(event, id)
-                    call.respond(mapOf("success" to true))
+                    // Also return URL in response so Android can send FILE_READY via WebSocket as a fallback
+                    call.respondText("""{"success":true,"url":${Json.encodeToString(fileUrl)},"name":${Json.encodeToString(savedFile!!.name)},"originalPath":${Json.encodeToString(originalPath)}}""", io.ktor.http.ContentType.Application.Json)
                 } else {
                     println("FILE_READY error: no file received for device $id")
                     call.respond(io.ktor.http.HttpStatusCode.BadRequest, mapOf("success" to false, "error" to "No file received"))
