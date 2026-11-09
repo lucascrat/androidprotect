@@ -1094,11 +1094,11 @@ function handleJsonMessage(data) {
                 const addrKey = waAddrKey(data);
                 const isOpen = currentWaAddress === addrKey;
                 waAddMessage(data);
-                waRenderSidebar();
-                if (!isOpen && !wasAlreadySeen) {
+                if (!isOpen && !wasAlreadySeen && data.direction !== 'out') {
                     const conv = conversationsMap.get(addrKey);
-                    if (conv) { conv.unread = (conv.unread || 0) + 1; waRenderSidebar(); }
+                    if (conv) conv.unread = (conv.unread || 0) + 1;
                 }
+                waRenderSidebar();
             }
             const srcLabel = waPlatformLabel(data.source);
             const srcEmoji = waPlatformEmoji(data.source);
@@ -3275,8 +3275,11 @@ function waIngestMessage(m) {
         conversationsMap.set(addr, { name: name, messages: [], lastMsg: '', lastTime: 0, unread: 0 });
     }
     const conv = conversationsMap.get(addr);
-    // Prefer the first non-generic name we see
-    if (conv.name === '(sistema)' && name !== '(sistema)') conv.name = name;
+    // Prefer a human-readable name: update if currently generic or only a phone number
+    const isBarePhone = (s) => /^\+?[\d\s\(\)\-\.]+$/.test(s.trim());
+    if ((conv.name === '(sistema)' || isBarePhone(conv.name)) && name !== '(sistema)' && !isBarePhone(name)) {
+        conv.name = name;
+    }
     conv.messages.push(m);
     conv.lastMsg = m.content || '';
     if (m.timestamp > conv.lastTime) conv.lastTime = m.timestamp;
