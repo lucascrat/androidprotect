@@ -2636,7 +2636,7 @@ function openPhotoModal(index) {
     pmScale  = 1; pmPanX = 0; pmPanY = 0;
 
     const modal = document.getElementById('photo-modal');
-    modal.classList.add('open');
+    modal.classList.add('active');
     document.body.style.overflow = 'hidden';
 
     pmRender();
@@ -2646,7 +2646,7 @@ function openPhotoModal(index) {
 }
 
 function closePhotoModal() {
-    document.getElementById('photo-modal').classList.remove('open');
+    document.getElementById('photo-modal').classList.remove('active');
     document.body.style.overflow = '';
     pmDetachKeyboard();
     pmResetZoom();
