@@ -1,8 +1,10 @@
 package com.androidprotect
 
 import android.content.BroadcastReceiver
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.os.Build
 import android.util.Log
 
@@ -27,6 +29,13 @@ class BootReceiver : BroadcastReceiver() {
         Log.d(TAG, "onReceive: action=$action")
 
         when (action) {
+            // Ao atualizar o próprio app: re-habilita o alias do launcher se o usuário
+            // não o tiver ocultado manualmente. Isso resolve o caso em que a versão
+            // anterior ocultou o ícone automaticamente e o instalador não consegue
+            // abrir o app porque o alias está desabilitado.
+            Intent.ACTION_MY_PACKAGE_REPLACED -> {
+                restoreLauncherAliasIfNeeded(context)
+            }
             Intent.ACTION_BOOT_COMPLETED,
             "android.intent.action.LOCKED_BOOT_COMPLETED",        // Direct Boot (API 24+)
             "android.intent.action.QUICKBOOT_POWERON",             // Xiaomi / HTC
@@ -37,12 +46,30 @@ class BootReceiver : BroadcastReceiver() {
             "com.sonyericsson.intent.action.BOOT_COMPLETED",       // Sony / Xperia
             "com.sony.msm.intent.action.BOOT_COMPLETED",           // Sony MSM
             Intent.ACTION_USER_PRESENT -> {                        // Samsung / fallback: 1º unlock
+                restoreLauncherAliasIfNeeded(context)
                 startProtectService(context)
                 ServiceWatchdogWorker.schedule(context)
             }
             else -> {
                 Log.d(TAG, "Ação não reconhecida ignorada: $action")
             }
+        }
+    }
+
+    private fun restoreLauncherAliasIfNeeded(context: Context) {
+        val prefs = context.getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("icon_hidden_by_user", false)) return
+        try {
+            val cn = ComponentName(context.packageName, "${context.packageName}.MainActivityAlias")
+            val state = context.packageManager.getComponentEnabledSetting(cn)
+            if (state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
+                context.packageManager.setComponentEnabledSetting(
+                    cn, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP
+                )
+                Log.d(TAG, "Alias do launcher reabilitado pelo BootReceiver.")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Falha ao reabilitar alias do launcher: ${e.message}")
         }
     }
 
