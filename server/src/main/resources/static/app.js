@@ -2297,13 +2297,13 @@ function sendCommandTo(deviceId, command, params = {}) {
 function sendCommand(command, params = {}) {
     if (!currentDeviceId) {
         logToConsole('Nenhum dispositivo selecionado!', 'error');
-        return;
+        return false;
     }
 
     const device = devicesMap.get(currentDeviceId);
     if (device && !device.isOnline) {
         logToConsole(`Comando '${command}' falhou: Dispositivo está OFFLINE!`, 'error');
-        return;
+        return false;
     }
 
     const payload = { command, deviceId: currentDeviceId, ...params };
@@ -2318,8 +2318,10 @@ function sendCommand(command, params = {}) {
             sentAudioLog.push(entry);
             if (currentDeviceId === entry.deviceId) appendSentAudio(entry);
         }
+        return true;
     } else {
         logToConsole('Erro: Sem conexão com o servidor!', 'error');
+        return false;
     }
 }
 
@@ -2974,7 +2976,9 @@ function fbPreview(path, name, itemEl) {
     fbPreviewPending[path] = { name, itemEl, timeoutHandle, intent: 'preview' };
 
     logToConsole(`🔍 Carregando preview: ${name}`, 'system');
-    sendCommand('DOWNLOAD_FILE', { path });
+    if (!sendCommand('DOWNLOAD_FILE', { path })) {
+        fbCancelPreview(path, '❌ Dispositivo offline ou sem conexão com o servidor.');
+    }
 }
 
 /** Limpa o estado de pending de um preview/download (timeout, erro ou sucesso). */
