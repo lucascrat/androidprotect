@@ -2658,7 +2658,14 @@ fun main() {
                                                 }
                                             }
                                         } else {
-                                            send(packetJson.encodeToString(ErrorPacket(message = "Device $destDeviceId is offline")))
+                                            // For file-related commands, send a typed error so the
+                                            // dashboard can clear the preview spinner immediately.
+                                            if (command == "DOWNLOAD_FILE") {
+                                                val filePath = json["path"]?.jsonPrimitive?.content ?: ""
+                                                send(Frame.Text("""{"type":"FILE_UPLOAD_ERROR","deviceId":${Json.encodeToString(destDeviceId)},"path":${Json.encodeToString(filePath)},"error":"Dispositivo offline"}"""))
+                                            } else {
+                                                send(packetJson.encodeToString(ErrorPacket(message = "Device $destDeviceId is offline")))
+                                            }
                                         }
                                     }
                                 }
@@ -2969,7 +2976,11 @@ fun main() {
 
 // Broadcast only to the dashboard(s) that own the given device
 suspend fun broadcastToDashboards(event: String, deviceId: String? = null) {
-    val ownerId = if (deviceId != null) deviceOwnerCache[deviceId] else null
+    val ownerId = if (deviceId != null) {
+        deviceOwnerCache[deviceId] ?: transaction {
+            DevicesTable.select { DevicesTable.id eq deviceId }.firstOrNull()?.get(DevicesTable.ownerId)
+        }?.also { id -> if (deviceId != null) deviceOwnerCache[deviceId] = id }
+    } else null
     for ((dash, userId) in dashboardSessions) {
         val canReceive = when {
             userId == 0 -> ownerId == null        // unauthenticated: only see unlinked devices
