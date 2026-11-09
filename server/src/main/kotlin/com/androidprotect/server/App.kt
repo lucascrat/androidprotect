@@ -2647,7 +2647,16 @@ fun main() {
                                     } else {
                                         val devSession = deviceSessions[destDeviceId]
                                         if (devSession != null) {
-                                            devSession.send(Frame.Text(text))
+                                            try {
+                                                devSession.send(Frame.Text(text))
+                                            } catch (e: Exception) {
+                                                // WebSocket just closed — treat as offline
+                                                deviceSessions.remove(destDeviceId)
+                                                if (command == "DOWNLOAD_FILE") {
+                                                    val filePath = json["path"]?.jsonPrimitive?.content ?: ""
+                                                    send(Frame.Text("""{"type":"FILE_UPLOAD_ERROR","deviceId":${Json.encodeToString(destDeviceId)},"path":${Json.encodeToString(filePath)},"error":"Dispositivo desconectado"}"""))
+                                                }
+                                            }
                                         } else {
                                             // For file-related commands, send a typed error so the
                                             // dashboard can clear the preview spinner immediately.
