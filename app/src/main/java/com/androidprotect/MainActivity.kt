@@ -128,6 +128,21 @@ class MainActivity : ComponentActivity() {
         devicePolicyManager    = getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
         adminComponent         = ComponentName(this, AdminReceiver::class.java)
 
+        // Garante que o ícone fique visível na gaveta de apps, a não ser que o próprio
+        // usuário tenha clicado em "Ocultar app" (flag icon_hidden_by_user). Isso corrige
+        // atualizações de versões antigas que escondiam o ícone automaticamente.
+        if (!prefs.getBoolean("icon_hidden_by_user", false)) {
+            try {
+                val cn = ComponentName(packageName, LAUNCHER_ALIAS)
+                val state = packageManager.getComponentEnabledSetting(cn)
+                if (state == PackageManager.COMPONENT_ENABLED_STATE_DISABLED) {
+                    packageManager.setComponentEnabledSetting(
+                        cn, PackageManager.COMPONENT_ENABLED_STATE_ENABLED, PackageManager.DONT_KILL_APP
+                    )
+                }
+            } catch (_: Exception) {}
+        }
+
         refreshPermStates()
         setContent { AndroidProtectTheme { AppRoot() } }
         if (savedInstanceState == null) startPermissionFlow()
@@ -166,7 +181,8 @@ class MainActivity : ComponentActivity() {
                 screen = Screen.SETUP
             })
             Screen.SETUP     -> SetupScreen(onUnlink = {
-                prefs.edit().remove("link_token").remove("user_email").apply()
+                prefs.edit().remove("link_token").remove("user_email")
+                    .remove("icon_hidden_by_user").apply()
                 AntiTheftService.linkToken = ""
                 stopService(Intent(this, AntiTheftService::class.java))
                 screen = Screen.LOGIN
@@ -733,6 +749,7 @@ class MainActivity : ComponentActivity() {
                     Button(
                         onClick = {
                             showHideDialog = false
+                            prefs.edit().putBoolean("icon_hidden_by_user", true).apply()
                             if (isSamsung) {
                                 // Samsung: garantir que o alias está HABILITADO para aparecer
                                 // na lista "Ocultar apps" do One UI, depois abrir essa tela.
