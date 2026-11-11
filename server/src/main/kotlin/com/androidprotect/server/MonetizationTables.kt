@@ -140,6 +140,10 @@ fun createTrialSubscription(userId: Int) {
             it[SubscriptionsTable.endDate]   = now + trialMs
             it[SubscriptionsTable.createdAt] = now
         }
+        // Grant 5 device slots for the full trial period
+        UsersTable.update({ UsersTable.id eq userId }) {
+            it[UsersTable.maxDevices] = 5
+        }
     }
 }
 
@@ -209,7 +213,7 @@ fun initMonetizationData() {
             AppSettingsTable.insert { it[key] = k; it[value] = v }
         }
     }
-    seedSetting("trial_days", "7")
+    seedSetting("trial_days", "30")
 
     // Default plans (match landing page content)
     if (transaction { PlansTable.selectAll().count() } == 0L) {

@@ -110,6 +110,25 @@ h1,h2,h3,h4 { line-height: 1.15; letter-spacing: -.02em; font-weight: 800; }
 .btn-lg { padding: 16px 30px; font-size: 1rem; }
 .btn-xl { padding: 20px 40px; font-size: 1.1rem; }
 .btn-nav-cta { padding: 10px 20px; font-size: .85rem; }
+.btn-painel {
+  padding: 9px 18px; font-size: .85rem;
+  background: rgba(0,180,255,.12); color: #00b4ff;
+  border: 1px solid rgba(0,180,255,.35);
+  backdrop-filter: blur(10px);
+}
+.btn-painel:hover { background: rgba(0,180,255,.22); transform: translateY(-2px); }
+
+/* Trial badges row below hero CTAs */
+.hero-trial-badges {
+  display: flex; flex-wrap: wrap; gap: 10px 20px;
+  margin-top: 18px;
+}
+.hero-trial-badges span {
+  display: flex; align-items: center; gap: 6px;
+  font-size: .82rem; font-weight: 500;
+  color: rgba(255,255,255,.65);
+}
+.hero-trial-badges span i { color: #00e676; font-size: .8rem; }
 
 /* ── Navbar ────────────────────────────────────────────────────── */
 .navbar {

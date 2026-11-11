@@ -216,6 +216,20 @@ body {
 }
 .success-hint i { color: var(--blue); flex-shrink: 0; margin-top: 2px; }
 
+.trial-banner {
+    display: flex; align-items: flex-start; gap: 10px;
+    background: rgba(0, 230, 118, .08);
+    border: 1px solid rgba(0, 230, 118, .22);
+    border-radius: 10px;
+    padding: 11px 14px;
+    margin-bottom: 18px;
+    font-size: .82rem;
+    color: #d0f5e3;
+    line-height: 1.5;
+}
+.trial-banner i { color: #00e676; font-size: 1rem; flex-shrink: 0; margin-top: 1px; }
+.trial-banner strong { color: #00e676; }
+
 /* ── Mobile ── */
 @media (max-width: 480px) {
     .login-card { padding: 28px 20px; border-radius: 20px; }

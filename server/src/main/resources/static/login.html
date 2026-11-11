@@ -43,6 +43,10 @@
 
             <!-- Register Form -->
             <form id="form-register" style="display:none" onsubmit="doRegister(event)">
+                <div class="trial-banner">
+                    <i class="fa-solid fa-gift"></i>
+                    <span><strong>30 dias grátis</strong> · 5 aparelhos · Acesso completo · Sem cartão</span>
+                </div>
                 <div class="field">
                     <i class="fa-solid fa-user"></i>
                     <input type="text" id="reg-name" placeholder="Seu nome" required autocomplete="name">
@@ -70,16 +74,22 @@
             <div id="success-panel" style="display:none">
                 <div class="success-icon"><i class="fa-solid fa-circle-check"></i></div>
                 <h3 class="success-title">Conta criada com sucesso!</h3>
+                <p class="success-desc" style="color:#00e676;font-weight:600;margin-bottom:4px">
+                    <i class="fa-solid fa-gift"></i> 30 dias grátis · 5 aparelhos liberados!
+                </p>
                 <p class="success-desc">Seu código de vinculação do aparelho é:</p>
                 <div class="link-token-box" id="link-token-display"></div>
                 <p class="success-hint">
                     <i class="fa-solid fa-info-circle"></i>
                     Digite este código no app AndroidProtect no seu celular para vincular o aparelho à sua conta.
                 </p>
-                <button class="btn-submit" onclick="window.location.href='/'">
-                    <span>Ir para o Painel</span>
+                <button class="btn-submit" id="go-panel-btn" onclick="window.location.href='/'">
+                    <span>Acessar o Painel</span>
                     <i class="fa-solid fa-arrow-right"></i>
                 </button>
+                <p style="text-align:center;font-size:.78rem;color:var(--sub);margin-top:10px" id="redirect-hint">
+                    Redirecionando automaticamente em <span id="redirect-countdown">5</span>s…
+                </p>
             </div>
         </div>
     </div>
