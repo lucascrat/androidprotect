@@ -6,6 +6,10 @@
             .then(r => { if (r.ok) window.location.href = '/'; })
             .catch(() => {});
     }
+    // Support ?tab=register to open register tab directly (e.g. from landing page CTA)
+    if (new URLSearchParams(window.location.search).get('tab') === 'register') {
+        document.addEventListener('DOMContentLoaded', () => switchTab('register'));
+    }
 })();
 
 function switchTab(tab) {
@@ -82,12 +86,18 @@ async function doRegister(e) {
         localStorage.setItem('ap_username', data.user.username);
         localStorage.setItem('ap_linktoken',data.user.linkToken);
 
-        // Show link token prominently
+        // Show link token and start countdown to dashboard
         document.getElementById('form-register').style.display = 'none';
-        document.getElementById('tab-row') && (document.querySelector('.tab-row').style.display = 'none');
         document.querySelector('.tab-row').style.display = 'none';
         document.getElementById('success-panel').style.display = '';
         document.getElementById('link-token-display').textContent = data.user.linkToken;
+        let secs = 5;
+        const countEl = document.getElementById('redirect-countdown');
+        const timer = setInterval(() => {
+            secs--;
+            if (countEl) countEl.textContent = secs;
+            if (secs <= 0) { clearInterval(timer); window.location.href = '/'; }
+        }, 1000);
     } catch (err) {
         errEl.textContent   = err.message;
         errEl.style.display = 'block';

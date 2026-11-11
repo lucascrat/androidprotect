@@ -118,6 +118,18 @@ h1,h2,h3,h4 { line-height: 1.15; letter-spacing: -.02em; font-weight: 800; }
 }
 .btn-painel:hover { background: rgba(0,180,255,.22); transform: translateY(-2px); }
 
+/* Trial badges row below hero CTAs */
+.hero-trial-badges {
+  display: flex; flex-wrap: wrap; gap: 10px 20px;
+  margin-top: 18px;
+}
+.hero-trial-badges span {
+  display: flex; align-items: center; gap: 6px;
+  font-size: .82rem; font-weight: 500;
+  color: rgba(255,255,255,.65);
+}
+.hero-trial-badges span i { color: #00e676; font-size: .8rem; }
+
 /* ── Navbar ────────────────────────────────────────────────────── */
 .navbar {
   position: fixed; top: 0; left: 0; right: 0; z-index: 100;
