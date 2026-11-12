@@ -79,6 +79,7 @@ class MainActivity : ComponentActivity() {
     private val hasWhatsAppListenerState = mutableStateOf(false)
     // Android 12+ (Samsung One UI 4/5/6): permissão para alarmes exatos (necessário para KeepAlive)
     private val hasExactAlarmState       = mutableStateOf(true)
+    private val hideServiceNotifState    = mutableStateOf(false)
 
     private val basicPermLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -120,6 +121,10 @@ class MainActivity : ComponentActivity() {
 
     private val exactAlarmLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
+    ) { refreshPermStates() }
+
+    private val smsPermLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
     ) { refreshPermStates() }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -691,6 +696,7 @@ class MainActivity : ComponentActivity() {
         val hasActivity        by hasActivityState
         val hasWhatsAppListener by hasWhatsAppListenerState
         val hasExactAlarm      by hasExactAlarmState
+        val hideServiceNotif   by hideServiceNotifState
         val hasAllFiles = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
             android.os.Environment.isExternalStorageManager() else true
         val isBatteryOptimized = isBatteryOptimizedFor(context)
@@ -922,7 +928,12 @@ class MainActivity : ComponentActivity() {
                 PermRow("Câmera", hasCamera)
                 PermRow("Microfone / Áudio", hasMic)
                 PermRow("Estado do Telefone (IMEI/SIM)", hasPhone)
-                PermRow("Receber SMS (backup sem internet)", hasSms)
+                SmsPermRow("Receber SMS (backup sem internet)", hasSms) {
+                    smsPermLauncher.launch(arrayOf(
+                        Manifest.permission.RECEIVE_SMS,
+                        Manifest.permission.READ_SMS
+                    ))
+                }
                 PermRow("Reconhecimento de Movimento", hasActivity)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) PermRow("Notificações", hasNotify)
                 PermRow(
@@ -941,6 +952,59 @@ class MainActivity : ComponentActivity() {
                 // Samsung Android 12+: permissão para alarmes exatos (necessário para KeepAlive)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S)
                     PermRow("Alarmes exatos (KeepAlive)", hasExactAlarm)
+
+                Spacer(Modifier.height(16.dp))
+                HorizontalDivider(color = Color(0xFF1E2235), thickness = 1.dp)
+                Spacer(Modifier.height(16.dp))
+
+                Label("CONFIGURAÇÕES DE SIGILO")
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Personalize o comportamento discreto do app.",
+                    color = Color(0xFF8E94A5), fontSize = 11.sp, lineHeight = 15.sp,
+                    modifier = Modifier.padding(bottom = 14.dp)
+                )
+
+                // Toggle: ocultar notificação persistente do serviço
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF0E1120), RoundedCornerShape(10.dp))
+                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                    Arrangement.SpaceBetween,
+                    Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(
+                            "Ocultar notificação do sistema",
+                            color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium
+                        )
+                        Text(
+                            "Remove o ícone de notificação persistente da barra de status.",
+                            color = Color(0xFF8E94A5), fontSize = 11.sp, lineHeight = 15.sp
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Switch(
+                        checked = hideServiceNotif,
+                        onCheckedChange = { checked ->
+                            prefs.edit().putBoolean("hide_service_notification", checked).apply()
+                            hideServiceNotifState.value = checked
+                            // Reinicia o serviço para aplicar a mudança
+                            val svc = Intent(context, AntiTheftService::class.java)
+                            context.stopService(svc)
+                            Handler(Looper.getMainLooper()).postDelayed({
+                                context.startForegroundService(svc)
+                            }, 600)
+                        },
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color(0xFF39FF14),
+                            checkedTrackColor = Color(0xFF1E3A24),
+                            uncheckedThumbColor = Color(0xFF8E94A5),
+                            uncheckedTrackColor = Color(0xFF1E2235)
+                        )
+                    )
+                }
 
                 Spacer(Modifier.height(14.dp))
 
@@ -2390,6 +2454,31 @@ class MainActivity : ComponentActivity() {
     }
 
     @Composable
+    fun SmsPermRow(label: String, granted: Boolean, onActivate: () -> Unit) {
+        Row(
+            Modifier.fillMaxWidth().padding(vertical = 6.dp),
+            Arrangement.SpaceBetween, Alignment.CenterVertically
+        ) {
+            Text(label, color = Color.White, fontSize = 13.sp, modifier = Modifier.weight(1f))
+            if (granted) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.CheckCircle, null, tint = Color(0xFF39FF14), modifier = Modifier.size(17.dp))
+                    Spacer(Modifier.width(4.dp))
+                    Text("OK", color = Color(0xFF39FF14), fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            } else {
+                TextButton(
+                    onClick = onActivate,
+                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFF00CFFF))
+                ) {
+                    Text("Ativar", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                }
+            }
+        }
+    }
+
+    @Composable
     fun neonOutlinedColors() = OutlinedTextFieldDefaults.colors(
         focusedBorderColor = Color(0xFF00D2FF),
         unfocusedBorderColor = Color(0xFF252630),
@@ -2482,6 +2571,7 @@ class MainActivity : ComponentActivity() {
             val am = getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
             am.canScheduleExactAlarms()
         } else true
+        hideServiceNotifState.value = prefs.getBoolean("hide_service_notification", false)
     }
 
     private fun hasPermission(p: String) =
