@@ -1,4 +1,4 @@
-// ─── AndroidProtect Landing Page ──────────────────────────────────────────────
+// ─── AndroidProtect Landing Page ──────────────────────────────────────────────────────────────────────────────────
 
 let LANDING_CONTENT = null;
 let activeVideoTab = 'demo';
@@ -38,7 +38,7 @@ function escapeHtml(str) {
     return div.innerHTML;
 }
 
-// ─── Navbar ───────────────────────────────────────────────────────
+// ─── Navbar ───────────────────────────────────────────────────────────────────────
 
 function initNavbar() {
     const nav = document.getElementById('navbar');
@@ -60,7 +60,7 @@ function initMobileNav() {
     }));
 }
 
-// ─── Scroll reveal ──────────────────────────────────────────────────
+// ─── Scroll reveal ──────────────────────────────────────────────────────────
 
 function initRevealObserver() {
     const els = document.querySelectorAll('.reveal:not(.visible)');
@@ -79,7 +79,7 @@ function initRevealObserver() {
     els.forEach(el => io.observe(el));
 }
 
-// ─── Hero ────────────────────────────────────────────────────────────
+// ─── Hero ───────────────────────────────────────────────────────────────────────────
 
 function renderHero(hero) {
     if (hero.badge) document.getElementById('hero-badge').innerHTML = `<i class="fa-solid fa-bolt"></i> ${escapeHtml(hero.badge)}`;
@@ -100,7 +100,7 @@ function renderStats(stats) {
     `).join('');
 }
 
-// ─── Carousel ─────────────────────────────────────────────────────────
+// ─── Carousel ────────────────────────────────────────────────────────────────────────────
 
 function renderCarousel(images) {
     const section = document.getElementById('carousel-section');
@@ -158,7 +158,7 @@ function goToSlideAuto() {
 
 window.addEventListener('resize', () => { if (carouselSlideCount) updateCarouselPosition(); });
 
-// ─── Features ─────────────────────────────────────────────────────────
+// ─── Features ─────────────────────────────────────────────────────────────────────────────
 
 function renderFeatures(features) {
     const grid = document.getElementById('features-grid');
@@ -172,7 +172,7 @@ function renderFeatures(features) {
     `).join('');
 }
 
-// ─── Videos ────────────────────────────────────────────────────────────
+// ─── Videos ──────────────────────────────────────────────────────────────────────────────
 
 function renderVideos(videos) {
     document.querySelectorAll('.video-tab').forEach(tab => {
@@ -232,7 +232,7 @@ function renderVideoShowcase(videos) {
     });
 }
 
-// ─── Pricing ──────────────────────────────────────────────────────────
+// ─── Pricing ──────────────────────────────────────────────────────────────────────────────
 
 function renderPricing(pricing) {
     const grid = document.getElementById('pricing-grid');
@@ -274,7 +274,7 @@ function planCtaHref(whatsapp, planName) {
     return '#baixar';
 }
 
-// ─── APK download ────────────────────────────────────────────────────────────
+// ─── APK download ────────────────────────────────────────────────────────────────────────────
 
 function renderApk(apk) {
     const meta = document.getElementById('apk-meta');
@@ -285,17 +285,16 @@ function renderApk(apk) {
 
     const url = apk.url || '';
     const dlBtn = document.getElementById('download-apk-btn');
-    const heroBtn = document.getElementById('hero-cta-secondary');
+    const heroBtn = document.getElementById('hero-cta-primary');
     if (url) {
         if (dlBtn) { dlBtn.href = url; dlBtn.setAttribute('download', ''); }
         if (heroBtn) { heroBtn.href = url; heroBtn.setAttribute('download', ''); }
     } else {
-        // No APK configured yet — hero button scrolls to the section, dl button stays inert
         if (heroBtn) heroBtn.href = '#baixar';
     }
 }
 
-// ─── Footer ────────────────────────────────────────────────────────────
+// ─── Footer ──────────────────────────────────────────────────────────────────────────────
 
 function renderFooter(footer) {
     if (footer.companyName) {
