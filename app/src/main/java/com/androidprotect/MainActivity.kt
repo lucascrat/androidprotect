@@ -682,6 +682,7 @@ class MainActivity : ComponentActivity() {
         var deviceName     by remember { mutableStateOf(prefs.getString("device_custom_name", "") ?: "") }
         var showHideDialog  by remember { mutableStateOf(false) }
         var showUnlinkDialog by remember { mutableStateOf(false) }
+        var showLauncherHideHintDialog by remember { mutableStateOf(false) }
 
         val hasLocation        by hasLocationState
         val hasBgLocation      by hasBgLocationState
@@ -825,6 +826,92 @@ class MainActivity : ComponentActivity() {
                 },
                 dismissButton = {
                     OutlinedButton(onClick = { showUnlinkDialog = false },
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF8E94A5))
+                    ) { Text("Cancelar") }
+                }
+            )
+        }
+
+        if (showLauncherHideHintDialog) {
+            val mfr = Build.MANUFACTURER.lowercase()
+            val br  = Build.BRAND.lowercase()
+            val (hintBrand, hintSteps) = when {
+                "samsung" in mfr -> "Samsung One UI" to listOf(
+                    "Vai abrir \"Configurações da Tela Inicial\"",
+                    "Toque em \"Ocultar apps\"",
+                    "Marque \"Protect\" na lista e confirme"
+                )
+                "xiaomi" in mfr || "redmi" in br || "poco" in br -> "Xiaomi / MIUI / HyperOS" to listOf(
+                    "Vai abrir as configurações do launcher MIUI",
+                    "Procure \"Ocultar apps\" ou \"Ocultar aplicativos\"",
+                    "Adicione \"Protect\" à lista e salve"
+                )
+                "huawei" in mfr || "honor" in br -> "Huawei / Honor EMUI" to listOf(
+                    "Vai abrir as configurações do launcher",
+                    "Procure \"Ocultar apps\" ou \"App oculto\"",
+                    "Selecione \"Protect\" e confirme"
+                )
+                "oppo" in mfr || "realme" in br || "coloros" in mfr -> "Oppo / Realme ColorOS" to listOf(
+                    "Vai abrir as configurações do launcher",
+                    "Procure \"Ocultar aplicativos\" ou \"Privacidade\"",
+                    "Selecione \"Protect\" e defina uma senha se pedida"
+                )
+                "vivo" in mfr -> "Vivo OriginOS" to listOf(
+                    "Vai abrir as configurações do launcher Vivo",
+                    "Procure \"Ocultar apps\" ou \"Espaço privado\"",
+                    "Selecione \"Protect\" e confirme"
+                )
+                "motorola" in mfr || "moto" in br -> "Motorola" to listOf(
+                    "O Moto launcher não tem ocultar apps nativo",
+                    "Vai abrir as configurações gerais do launcher",
+                    "Use o botão \"Ocultar App Agora\" acima para ocultar via sistema"
+                )
+                else -> "Launcher Padrão" to listOf(
+                    "Vai abrir as configurações do seu launcher",
+                    "Procure uma opção como \"Ocultar apps\" ou \"Apps ocultos\"",
+                    "Selecione \"Protect\" e confirme"
+                )
+            }
+            AlertDialog(
+                onDismissRequest = { showLauncherHideHintDialog = false },
+                containerColor = Color(0xFF12141D),
+                title = {
+                    Text(
+                        "Ocultar na Gaveta ($hintBrand)",
+                        color = Color.White, fontWeight = FontWeight.Bold, fontSize = 15.sp
+                    )
+                },
+                text = {
+                    Column {
+                        Text(
+                            "Passos para ocultar o app no seu aparelho:",
+                            color = Color(0xFF8E94A5), fontSize = 12.sp,
+                            modifier = Modifier.padding(bottom = 10.dp)
+                        )
+                        hintSteps.forEachIndexed { i, s ->
+                            Row(Modifier.padding(bottom = 6.dp), verticalAlignment = Alignment.Top) {
+                                Box(
+                                    Modifier.size(20.dp)
+                                        .background(Color(0xFF00D2FF).copy(alpha = 0.15f), CircleShape),
+                                    Alignment.Center
+                                ) {
+                                    Text("${i+1}", color = Color(0xFF00D2FF), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                }
+                                Spacer(Modifier.width(8.dp))
+                                Text(s, color = Color(0xFFCDD5E0), fontSize = 12.sp, lineHeight = 17.sp, modifier = Modifier.weight(1f))
+                            }
+                        }
+                    }
+                },
+                confirmButton = {
+                    Button(
+                        onClick = { showLauncherHideHintDialog = false; openLauncherHideSettings() },
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF00D2FF))
+                    ) { Text("Abrir Configurações", color = Color(0xFF0A0B10), fontWeight = FontWeight.Bold) }
+                },
+                dismissButton = {
+                    OutlinedButton(
+                        onClick = { showLauncherHideHintDialog = false },
                         colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF8E94A5))
                     ) { Text("Cancelar") }
                 }
@@ -1323,17 +1410,29 @@ class MainActivity : ComponentActivity() {
                 }
                 Spacer(Modifier.height(8.dp))
                 // Botão para ir direto às configurações nativas do launcher (Samsung One UI e outros)
+                val launcherBrandLabel = run {
+                    val mfr = Build.MANUFACTURER.lowercase()
+                    val br  = Build.BRAND.lowercase()
+                    when {
+                        "samsung" in mfr              -> "Samsung One UI"
+                        "xiaomi" in mfr || "redmi" in br || "poco" in br -> "Xiaomi MIUI"
+                        "huawei" in mfr || "honor" in br -> "Huawei/Honor"
+                        "oppo" in mfr || "realme" in br  -> "Oppo/Realme"
+                        "vivo" in mfr                 -> "Vivo"
+                        else                          -> "Launcher"
+                    }
+                }
                 Button(
-                    onClick = { openLauncherHideSettings() },
+                    onClick = { showLauncherHideHintDialog = true },
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0D1826))
                 ) {
-                    Text("📱  Ocultar na Gaveta de Apps (Launcher)", color = Color(0xFF00D2FF), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                    Text("📱  Ocultar na Gaveta ($launcherBrandLabel)", color = Color(0xFF00D2FF), fontWeight = FontWeight.Bold, fontSize = 13.sp)
                 }
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "Use este botão se o app ainda aparecer na gaveta após ocultar. Abre as configurações do seu launcher para ocultar apps.",
+                    "Detecta o seu aparelho e abre a tela certa para ocultar o app da gaveta.",
                     color = Color(0xFF8E94A5), fontSize = 10.sp, lineHeight = 14.sp,
                     modifier = Modifier.padding(bottom = 8.dp)
                 )
@@ -2024,55 +2123,57 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
-     * Abre as configurações nativas do launcher para ocultar apps na gaveta.
-     * Tenta Samsung One UI primeiro, depois Xiaomi MIUI, depois outros OEMs,
-     * com fallback para as configurações gerais do app do launcher padrão.
+     * Tenta abrir diretamente a tela "Ocultar apps" do launcher do fabricante.
+     * Percorre uma lista ordenada de ComponentNames conhecidas, da mais específica
+     * para a mais genérica, e usa fallback se nenhuma funcionar.
      */
     private fun openLauncherHideSettings() {
-        val mfr = Build.MANUFACTURER.lowercase()
+        val mfr   = Build.MANUFACTURER.lowercase()
         val brand = Build.BRAND.lowercase()
 
-        // Samsung One UI: tela "Ocultar apps" nas configurações da Tela Inicial
-        if ("samsung" in mfr) {
-            val samsungIntents = listOf(
-                android.content.ComponentName(
-                    "com.sec.android.app.launcher",
-                    "com.android.homescreen.settings.HomeScreenSettingsActivity"
-                ),
-                android.content.ComponentName(
-                    "com.sec.android.app.launcher",
-                    "com.sec.android.app.launcher.settings.LauncherSettingsActivity"
-                ),
-                android.content.ComponentName(
-                    "com.samsung.android.launcher",
-                    "com.samsung.android.launcher.settings.LauncherSettingsActivity"
-                )
-            )
-            for (cn in samsungIntents) {
+        fun tryComponents(vararg pairs: Pair<String, String>): Boolean {
+            for ((pkg, cls) in pairs) {
                 if (runCatching {
                     startActivity(Intent().apply {
-                        component = cn
+                        component = ComponentName(pkg, cls)
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK
                     })
-                }.isSuccess) return
+                }.isSuccess) return true
             }
+            return false
         }
 
-        // Xiaomi / MIUI / HyperOS: configurações do launcher MIUI
-        if ("xiaomi" in mfr || "redmi" in brand || "poco" in brand) {
-            if (runCatching {
-                startActivity(Intent().apply {
-                    component = android.content.ComponentName(
-                        "com.miui.home",
-                        "com.miui.home.settings.SettingsMainActivity"
-                    )
-                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                })
-            }.isSuccess) return
+        val opened = when {
+            "samsung" in mfr -> tryComponents(
+                "com.sec.android.app.launcher" to "com.android.homescreen.settings.HideAppsActivity",
+                "com.sec.android.app.launcher" to "com.android.homescreen.settings.HomeScreenSettingsActivity",
+                "com.sec.android.app.launcher" to "com.sec.android.app.launcher.settings.LauncherSettingsActivity",
+                "com.samsung.android.launcher" to "com.samsung.android.launcher.settings.LauncherSettingsActivity"
+            )
+            "xiaomi" in mfr || "redmi" in brand || "poco" in brand -> tryComponents(
+                "com.miui.home" to "com.miui.home.launcher.settings.HideAppsActivity",
+                "com.miui.home" to "com.miui.home.settings.SettingsMainActivity"
+            )
+            "huawei" in mfr || "honor" in brand -> tryComponents(
+                "com.huawei.android.launcher" to "com.huawei.android.launcher.apphide.AppHideActivity",
+                "com.huawei.android.launcher" to "com.huawei.android.launcher.settings.LauncherSettingsActivity",
+                "com.honor.android.launcher"  to "com.honor.android.launcher.settings.LauncherSettingsActivity"
+            )
+            "oppo" in mfr || "realme" in brand || "coloros" in mfr -> tryComponents(
+                "com.coloros.launcher" to "com.coloros.launcher.settings.LauncherSettingsActivity",
+                "com.oppo.launcher"   to "com.oppo.launcher.settings.LauncherSettingsActivity",
+                "com.realme.launcher" to "com.realme.launcher.settings.LauncherSettingsActivity"
+            )
+            "vivo" in mfr -> tryComponents(
+                "com.vivo.launcher" to "com.vivo.launcher.settings.LauncherSettingsActivity",
+                "com.bbk.launcher2" to "com.bbk.launcher2.settings.LauncherSettingsActivity"
+            )
+            else -> false
         }
 
-        // Fallback: abre o app do launcher padrão nas configurações de app do sistema
-        // Assim o usuário pode encontrar a opção nativa de ocultar se existir
+        if (opened) return
+
+        // Fallback 1: abre detalhes do app do launcher padrão
         val launcherPkg = runCatching {
             val homeIntent = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)
             packageManager.resolveActivity(homeIntent, 0)?.activityInfo?.packageName
@@ -2087,7 +2188,7 @@ class MainActivity : ComponentActivity() {
             }.isSuccess) return
         }
 
-        // Último recurso: configurações de apps em geral
+        // Fallback 2: lista geral de apps
         runCatching {
             startActivity(Intent(Settings.ACTION_MANAGE_APPLICATIONS_SETTINGS).apply {
                 flags = Intent.FLAG_ACTIVITY_NEW_TASK

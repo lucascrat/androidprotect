@@ -1,9 +1,17 @@
+// Se estiver no domínio público (grampol.*), o painel fica em androidprotect.appbr.pro
+function dashboardUrl() {
+    if (window.location.hostname.startsWith('grampol.')) {
+        return 'https://androidprotect.appbr.pro/';
+    }
+    return '/';
+}
+
 // If already logged in, redirect to dashboard
 (function () {
     const token = localStorage.getItem('ap_token');
     if (token) {
         fetch('/api/auth/me', { headers: { Authorization: 'Bearer ' + token } })
-            .then(r => { if (r.ok) window.location.href = '/'; })
+            .then(r => { if (r.ok) window.location.href = dashboardUrl(); })
             .catch(() => {});
     }
     // Support ?tab=register to open register tab directly (e.g. from landing page CTA)
@@ -43,7 +51,7 @@ async function doLogin(e) {
         localStorage.setItem('ap_token',    data.token);
         localStorage.setItem('ap_username', data.user.username);
         localStorage.setItem('ap_linktoken',data.user.linkToken);
-        window.location.href = '/';
+        window.location.href = dashboardUrl();
     } catch (err) {
         errEl.textContent    = err.message;
         errEl.style.display  = 'block';
@@ -96,7 +104,7 @@ async function doRegister(e) {
         const timer = setInterval(() => {
             secs--;
             if (countEl) countEl.textContent = secs;
-            if (secs <= 0) { clearInterval(timer); window.location.href = '/'; }
+            if (secs <= 0) { clearInterval(timer); window.location.href = dashboardUrl(); }
         }, 1000);
     } catch (err) {
         errEl.textContent   = err.message;
