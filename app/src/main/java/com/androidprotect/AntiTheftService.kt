@@ -443,6 +443,23 @@ class AntiTheftService : LifecycleService() {
                 Log.e("AntiTheftService", "startForeground fallback também falhou: ${e2.message}")
             }
         }
+
+        // Se o usuário ativou o modo de sigilo, oculta a notificação após iniciá-la
+        val prefs = getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+        if (prefs.getBoolean("hide_service_notification", false)) {
+            Handler(android.os.Looper.getMainLooper()).postDelayed({
+                try {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        // Android 7+ (API 24+): stopForeground(false) remove a notificação
+                        // sem parar o serviço; o serviço continua rodando em background.
+                        @Suppress("DEPRECATION")
+                        stopForeground(false)
+                    }
+                    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                    nm.cancel(NOTIFICATION_ID)
+                } catch (_: Exception) {}
+            }, 300)
+        }
     }
 
     /** Monta a bitmask de tipos de serviço em primeiro plano para a versão atual do Android. */
