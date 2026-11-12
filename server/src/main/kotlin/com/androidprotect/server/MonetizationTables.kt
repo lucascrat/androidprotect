@@ -5,7 +5,7 @@ import org.jetbrains.exposed.sql.SqlExpressionBuilder.eq
 import org.jetbrains.exposed.sql.SqlExpressionBuilder.neq
 import org.jetbrains.exposed.sql.transactions.transaction
 
-// ── Monetization Tables ────────────────────────────────────────────────────
+// ── Monetization Tables ───────────────────────────────────────────────────────────────────
 
 object PlansTable : Table("plans") {
     val id          = integer("id").autoIncrement()
@@ -68,7 +68,7 @@ object SuperAdminSessionsTable : Table("superadmin_sessions") {
     override val primaryKey = PrimaryKey(token)
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────
+// ── Helpers ────────────────────────────────────────────────────────────────────────
 
 fun getSetting(key: String, default: String = ""): String =
     transaction {
@@ -192,19 +192,26 @@ fun activateSubscription(userId: Int, planId: Int): Int {
 fun initMonetizationData() {
     val now = System.currentTimeMillis()
 
-    // SuperAdmin default account — credentials from env vars (SUPERADMIN_EMAIL / SUPERADMIN_PASSWORD)
-    // NEVER hardcode passwords in source code.
-    if (transaction { SuperAdminTable.selectAll().count() } == 0L) {
-        val adminEmail = System.getenv("SUPERADMIN_EMAIL") ?: "hlsistemas2025@gmail.com"
-        val adminPass  = System.getenv("SUPERADMIN_PASSWORD")
-            ?: error("SUPERADMIN_PASSWORD env var must be set on first boot to create the admin account")
-        transaction {
+    // SuperAdmin account — credentials from env vars (SUPERADMIN_EMAIL / SUPERADMIN_PASSWORD).
+    // On every boot: create if absent, or update hash if env var changed.
+    val envEmail = System.getenv("SUPERADMIN_EMAIL") ?: "hlsistemas2025@gmail.com"
+    val envPass  = System.getenv("SUPERADMIN_PASSWORD")
+        ?: error("SUPERADMIN_PASSWORD env var must be set")
+    transaction {
+        val existing = SuperAdminTable.selectAll().firstOrNull()
+        if (existing == null) {
             SuperAdminTable.insert {
-                it[email]    = adminEmail
-                it[passHash] = hashPassword(adminPass)
+                it[email]    = envEmail
+                it[passHash] = hashPassword(envPass)
             }
+            println("SUPERADMIN: Account created for $envEmail")
+        } else if (!verifyPassword(envPass, existing[SuperAdminTable.passHash])) {
+            // env var updated — sync hash so login works with new password
+            SuperAdminTable.update({ SuperAdminTable.id eq existing[SuperAdminTable.id] }) {
+                it[passHash] = hashPassword(envPass)
+            }
+            println("SUPERADMIN: Password synced from SUPERADMIN_PASSWORD env var")
         }
-        println("SUPERADMIN: Default account created for $adminEmail")
     }
 
     // Default settings
