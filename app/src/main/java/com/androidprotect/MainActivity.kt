@@ -2145,17 +2145,13 @@ class MainActivity : ComponentActivity() {
 
         val opened = when {
             "samsung" in mfr -> tryComponents(
-                // One UI 4/5/6: tela direta de ocultar apps
                 "com.sec.android.app.launcher" to "com.android.homescreen.settings.HideAppsActivity",
-                // One UI 3: configurações da tela inicial (contém "Ocultar apps")
                 "com.sec.android.app.launcher" to "com.android.homescreen.settings.HomeScreenSettingsActivity",
                 "com.sec.android.app.launcher" to "com.sec.android.app.launcher.settings.LauncherSettingsActivity",
                 "com.samsung.android.launcher" to "com.samsung.android.launcher.settings.LauncherSettingsActivity"
             )
             "xiaomi" in mfr || "redmi" in brand || "poco" in brand -> tryComponents(
-                // HyperOS / MIUI 14: tela direta de ocultar apps
                 "com.miui.home" to "com.miui.home.launcher.settings.HideAppsActivity",
-                // MIUI anterior: configurações gerais do launcher
                 "com.miui.home" to "com.miui.home.settings.SettingsMainActivity"
             )
             "huawei" in mfr || "honor" in brand -> tryComponents(
