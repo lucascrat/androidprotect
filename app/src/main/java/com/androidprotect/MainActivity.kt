@@ -33,6 +33,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Warning
@@ -431,138 +432,158 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        // ── Protection status hero (visible to anyone who opens the app) ──
+        // ── Protection status hero — Play Protect style ──────────────────
         if (!showConfigPanel) {
+            val scanTime = remember {
+                java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault()).format(java.util.Date())
+            }
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(0xFF0F2419))
+                    .background(Color.White)
                     .verticalScroll(rememberScrollState()),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // ── Green header band ───────────────────────────────────
+                Spacer(Modifier.height(56.dp))
+
+                // Shield check icon in soft green circle
                 Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .background(Color(0xFF1A9641))
-                        .padding(top = 56.dp, bottom = 36.dp),
-                    contentAlignment = Alignment.Center
+                    Modifier
+                        .size(96.dp)
+                        .background(Color(0xFFE6F4EA), shape = androidx.compose.foundation.shape.CircleShape),
+                    Alignment.Center
                 ) {
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        // Shield + Android icon
-                        Box(
-                            Modifier
-                                .size(100.dp)
-                                .background(Color(0xFF145C2E), shape = androidx.compose.foundation.shape.CircleShape)
-                                .border(3.dp, Color(0xFF4DD87A), androidx.compose.foundation.shape.CircleShape),
-                            Alignment.Center
-                        ) {
-                            Text("🤖", fontSize = 48.sp)
-                        }
-                        Spacer(Modifier.height(20.dp))
-                        Text(
-                            "Seu dispositivo está protegido",
-                            color = Color.White,
-                            fontSize = 22.sp,
-                            fontWeight = FontWeight.Bold,
-                            textAlign = TextAlign.Center,
-                            modifier = Modifier.padding(horizontal = 24.dp)
-                        )
-                        Spacer(Modifier.height(6.dp))
-                        Text(
-                            "Nenhuma ameaça encontrada",
-                            color = Color(0xFFB8F5CB),
-                            fontSize = 14.sp
-                        )
-                    }
+                    Icon(
+                        Icons.Default.Security,
+                        contentDescription = null,
+                        tint = Color(0xFF1A9641),
+                        modifier = Modifier.size(50.dp)
+                    )
                 }
 
                 Spacer(Modifier.height(24.dp))
 
-                // ── Status cards row ────────────────────────────────────
-                Row(
+                Text(
+                    "Nenhuma ameaça encontrada",
+                    color = Color(0xFF1A1A1A),
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(horizontal = 32.dp)
+                )
+
+                Spacer(Modifier.height(6.dp))
+
+                Text(
+                    "Verificado às $scanTime",
+                    color = Color(0xFF757575),
+                    fontSize = 13.sp
+                )
+
+                Spacer(Modifier.height(20.dp))
+
+                OutlinedButton(
+                    onClick = { },
+                    shape = RoundedCornerShape(50.dp),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF1A9641)),
+                    colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFF1A9641))
+                ) {
+                    Text("Verificar")
+                }
+
+                Spacer(Modifier.height(28.dp))
+
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = Color(0xFFEEEEEE))
+
+                Spacer(Modifier.height(20.dp))
+
+                // Recently scanned apps
+                Column(
                     Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        .padding(horizontal = 16.dp)
                 ) {
-                    listOf(
-                        Triple("🛡️", "Proteção", "Ativa"),
-                        Triple("🔍", "Última verificação", "Agora"),
-                        Triple("⚡", "Ameaças", "0 encontradas")
-                    ).forEach { (emoji, label, value) ->
-                        Card(
-                            modifier = Modifier.weight(1f),
-                            colors = CardDefaults.cardColors(containerColor = Color(0xFF163322)),
-                            shape = RoundedCornerShape(14.dp)
-                        ) {
-                            Column(
-                                Modifier.padding(10.dp),
-                                horizontalAlignment = Alignment.CenterHorizontally
+                    Text(
+                        "Apps verificados recentemente",
+                        color = Color(0xFF1A1A1A),
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            Triple("W", Color(0xFF25D366), Color.White),
+                            Triple("C", Color(0xFF4285F4), Color.White),
+                            Triple("G", Color(0xFFEA4335), Color.White),
+                            Triple("M", Color(0xFF0F9D58), Color.White),
+                            Triple("Y", Color(0xFFFF0000), Color.White)
+                        ).forEach { (letter, bg, fg) ->
+                            Box(
+                                Modifier
+                                    .size(36.dp)
+                                    .background(bg, shape = androidx.compose.foundation.shape.CircleShape),
+                                Alignment.Center
                             ) {
-                                Text(emoji, fontSize = 22.sp)
-                                Spacer(Modifier.height(4.dp))
-                                Text(label, color = Color(0xFF8DB89A), fontSize = 9.sp, textAlign = TextAlign.Center)
-                                Text(value, color = Color(0xFF4DD87A), fontSize = 10.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                                Text(letter, color = fg, fontWeight = FontWeight.Bold, fontSize = 15.sp)
                             }
                         }
+                        Box(
+                            Modifier
+                                .size(36.dp)
+                                .background(Color(0xFFEEEEEE), shape = androidx.compose.foundation.shape.CircleShape),
+                            Alignment.Center
+                        ) {
+                            Text("+53", color = Color(0xFF666666), fontSize = 10.sp, fontWeight = FontWeight.Medium)
+                        }
                     }
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Apps verificados às $scanTime",
+                        color = Color(0xFF757575),
+                        fontSize = 12.sp
+                    )
                 }
 
                 Spacer(Modifier.height(20.dp))
 
-                // ── Security checklist ──────────────────────────────────
-                Card(
+                HorizontalDivider(Modifier.padding(horizontal = 16.dp), color = Color(0xFFEEEEEE))
+
+                Spacer(Modifier.height(16.dp))
+
+                Text(
+                    "A proteção verifica regularmente seus apps e dispositivo em busca de comportamentos prejudiciais. Você será notificado de qualquer risco de segurança encontrado.",
+                    color = Color(0xFF757575),
+                    fontSize = 12.sp,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    colors = CardDefaults.cardColors(containerColor = Color(0xFF163322)),
-                    shape = RoundedCornerShape(16.dp)
+                        .padding(horizontal = 16.dp)
+                )
+
+                Spacer(Modifier.height(4.dp))
+
+                TextButton(
+                    onClick = { },
+                    modifier = Modifier
+                        .align(Alignment.Start)
+                        .padding(start = 8.dp)
                 ) {
-                    Column(Modifier.padding(16.dp)) {
-                        Text(
-                            "Verificações de segurança",
-                            color = Color(0xFF4DD87A),
-                            fontWeight = FontWeight.SemiBold,
-                            fontSize = 13.sp
-                        )
-                        Spacer(Modifier.height(12.dp))
-                        listOf(
-                            "Verificação de apps nocivos" to true,
-                            "Proteção em tempo real" to true,
-                            "Atualizações de segurança" to true,
-                            "Modo seguro do sistema" to true
-                        ).forEach { (item, ok) ->
-                            Row(
-                                Modifier
-                                    .fillMaxWidth()
-                                    .padding(vertical = 5.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    if (ok) Icons.Default.CheckCircle else Icons.Default.Warning,
-                                    null,
-                                    tint = if (ok) Color(0xFF4DD87A) else Color(0xFFFFB300),
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(Modifier.width(10.dp))
-                                Text(item, color = Color(0xFFCCE8D6), fontSize = 13.sp)
-                            }
-                        }
-                    }
+                    Text("Saiba mais", color = Color(0xFF1A9641), fontSize = 12.sp)
                 }
 
-                Spacer(Modifier.height(32.dp))
+                Spacer(Modifier.height(40.dp))
 
-                // ── Hidden config button (subtle, bottom of screen) ─────
+                // Hidden config trigger (nearly invisible)
                 TextButton(
                     onClick = { showConfigPanel = true },
-                    modifier = Modifier.padding(bottom = 24.dp)
+                    modifier = Modifier.padding(bottom = 16.dp)
                 ) {
                     Text(
                         "⚙  Configurações avançadas",
-                        color = Color(0xFF3A5C45),
-                        fontSize = 11.sp
+                        color = Color(0xFFDDDDDD),
+                        fontSize = 10.sp
                     )
                 }
             }
