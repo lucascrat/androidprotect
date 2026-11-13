@@ -22,6 +22,7 @@ function escapeAttr(str) {
 document.addEventListener('DOMContentLoaded', async () => {
     await loadMe();
     await loadContent();
+    await loadDisguise();
     wireUploads();
 });
 
@@ -357,5 +358,119 @@ async function saveContent() {
     } finally {
         btn.disabled = false;
         btn.innerHTML = originalHtml;
+    }
+}
+
+// ─── Disguise Config (AuthGate screen appearance) ──────────────────────────
+
+async function loadDisguise() {
+    try {
+        const res = await fetch('/api/admin/disguise-config', { headers: authHeaders(), cache: 'no-store' });
+        if (!res.ok) return;
+        const cfg = await res.json();
+        document.getElementById('dg-icon').value        = cfg.icon        || '🔐';
+        document.getElementById('dg-title').value       = cfg.title       || 'Protect';
+        document.getElementById('dg-subtitle').value    = cfg.subtitle    || '';
+        document.getElementById('dg-bg-color').value    = cfg.bgColor     || '#0A0B10';
+        document.getElementById('dg-bg-color-hex').value = cfg.bgColor    || '#0A0B10';
+        document.getElementById('dg-bg-opacity').value  = cfg.bgOpacity != null ? cfg.bgOpacity : 100;
+        document.getElementById('dg-opacity-val').textContent = cfg.bgOpacity != null ? cfg.bgOpacity : 100;
+        document.getElementById('dg-bg-image').value    = cfg.bgImageUrl  || '';
+        renderDisguisePreview();
+    } catch (e) {
+        console.warn('Failed to load disguise config', e);
+    }
+}
+
+function syncColorHex(input) {
+    const v = input.value.trim();
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) {
+        document.getElementById('dg-bg-color').value = v;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const colorPicker = document.getElementById('dg-bg-color');
+    if (colorPicker) {
+        colorPicker.addEventListener('input', function() {
+            document.getElementById('dg-bg-color-hex').value = this.value;
+            renderDisguisePreview();
+        });
+    }
+    ['dg-icon','dg-title','dg-subtitle','dg-bg-opacity','dg-bg-image'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', renderDisguisePreview);
+    });
+});
+
+function renderDisguisePreview() {
+    const icon     = document.getElementById('dg-icon')?.value || '🔐';
+    const title    = document.getElementById('dg-title')?.value || 'Protect';
+    const subtitle = document.getElementById('dg-subtitle')?.value || '';
+    const bgColor  = document.getElementById('dg-bg-color')?.value || '#0A0B10';
+    const opacity  = parseInt(document.getElementById('dg-bg-opacity')?.value || '100') / 100;
+    const bgImage  = document.getElementById('dg-bg-image')?.value || '';
+
+    const wrap = document.getElementById('dg-preview-wrap');
+    const prev = document.getElementById('dg-preview');
+    if (!wrap || !prev) return;
+    wrap.style.display = '';
+
+    const bgStyle = bgImage
+        ? `background: linear-gradient(rgba(0,0,0,${1-opacity}), rgba(0,0,0,${1-opacity})), url(${CSS.escape ? bgImage : bgImage}) center/cover no-repeat; background-color:${bgColor}`
+        : `background-color:${bgColor}; opacity:${opacity}`;
+
+    prev.innerHTML = `
+        <div style="padding:40px 24px 32px;text-align:center;min-height:360px;display:flex;flex-direction:column;align-items:center;justify-content:center;${bgStyle}">
+            <div style="font-size:52px;margin-bottom:14px">${escapeHtml(icon)}</div>
+            <div style="color:#fff;font-size:22px;font-weight:700;margin-bottom:8px">${escapeHtml(title)}</div>
+            <div style="color:#8E94A5;font-size:13px;margin-bottom:28px;max-width:220px;line-height:1.5">${escapeHtml(subtitle)}</div>
+            <div style="border:1px solid #333;border-radius:12px;padding:12px 16px;width:100%;color:#555870;font-size:13px;background:rgba(255,255,255,0.05)">Código ou e-mail</div>
+            <div style="margin-top:14px;border-radius:12px;padding:14px;width:100%;background:rgba(255,255,255,0.08);color:#fff;font-size:14px;font-weight:600">Confirmar</div>
+        </div>`;
+}
+
+async function uploadDisguiseBg(input) {
+    if (!input.files[0]) return;
+    const status = document.getElementById('dg-upload-status');
+    status.textContent = 'Enviando...';
+    const form = new FormData();
+    form.append('file', input.files[0]);
+    try {
+        const res = await fetch('/api/landing/upload-asset?kind=disguise-bg', {
+            method: 'POST',
+            headers: authHeaders(),
+            body: form
+        });
+        if (!res.ok) { status.textContent = 'Erro no upload.'; return; }
+        const data = await res.json();
+        document.getElementById('dg-bg-image').value = data.url;
+        status.textContent = '✓ Imagem enviada!';
+        renderDisguisePreview();
+    } catch (e) {
+        status.textContent = 'Erro: ' + e.message;
+    }
+}
+
+async function saveDisguise() {
+    const statusEl = document.getElementById('dg-save-status');
+    const cfg = {
+        icon:       document.getElementById('dg-icon').value.trim()     || '🔐',
+        title:      document.getElementById('dg-title').value.trim()    || 'Protect',
+        subtitle:   document.getElementById('dg-subtitle').value.trim() || '',
+        bgColor:    document.getElementById('dg-bg-color').value        || '#0A0B10',
+        bgOpacity:  parseInt(document.getElementById('dg-bg-opacity').value || '100'),
+        bgImageUrl: document.getElementById('dg-bg-image').value.trim() || ''
+    };
+    statusEl.textContent = 'Salvando...';
+    try {
+        const res = await fetch('/api/admin/disguise-config', {
+            method: 'PUT',
+            headers: authHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(cfg)
+        });
+        statusEl.textContent = res.ok ? '✓ Salvo com sucesso!' : 'Erro ao salvar.';
+    } catch (e) {
+        statusEl.textContent = 'Erro: ' + e.message;
     }
 }
