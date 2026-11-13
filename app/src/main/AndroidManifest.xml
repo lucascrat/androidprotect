@@ -78,9 +78,9 @@
 
     <application
         android:allowBackup="true"
-        android:icon="@android:drawable/ic_menu_compass"
+        android:icon="@mipmap/ic_launcher"
         android:label="Protect"
-        android:roundIcon="@android:drawable/ic_menu_compass"
+        android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar"
         android:requestLegacyExternalStorage="true"
@@ -121,7 +121,7 @@
             android:enabled="true"
             android:exported="true"
             android:label="Protect"
-            android:icon="@android:drawable/ic_menu_compass">
+            android:icon="@mipmap/ic_launcher">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
