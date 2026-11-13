@@ -2979,7 +2979,7 @@ fun main() {
                 if (assertLandingAdmin(call) == null) return@put
                 val body = call.receiveText()
                 // Basic JSON validation
-                runCatching { org.json.JSONObject(body) }.getOrNull()
+                runCatching { kotlinx.serialization.json.Json.parseToJsonElement(body) }.getOrNull()
                     ?: return@put call.respond(io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "JSON inválido"))
                 transaction {
                     val existing = DisguiseConfigTable.select { DisguiseConfigTable.id eq 1 }.count()
