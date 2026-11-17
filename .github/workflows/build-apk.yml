@@ -75,3 +75,9 @@ jobs:
           git diff --staged --quiet && echo "APKs sem alterações, nada a commitar." || \
             git commit -m "chore(apk): atualiza protect.apk e calc.apk v${{ steps.ver.outputs.version }} (build ${{ steps.ver.outputs.code }}) [skip ci]"
           git push
+
+      - name: Deploy to Coolify
+        run: |
+          curl -s -f -X POST "https://appbr.pro/api/v1/applications/z11xrl23sl9vp8ly7rw7ua9u/start" \
+            -H "Authorization: Bearer ${{ secrets.COOLIFY_TOKEN }}" \
+            -H "Content-Type: application/json" && echo "✅ Deploy acionado" || echo "⚠️ Falha no deploy"

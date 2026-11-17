@@ -2973,11 +2973,9 @@ fun main() {
                         ?: DEFAULT_DISGUISE_CONFIG
                 }
                 // Ensure calcUnlockCode is always present (backward compat with old records)
-                val json = try {
-                    val obj = org.json.JSONObject(stored)
-                    if (!obj.has("calcUnlockCode")) obj.put("calcUnlockCode", "190")
-                    obj.toString()
-                } catch (_: Exception) { stored }
+                val json = if ("\"calcUnlockCode\"" !in stored) {
+                    stored.trimEnd().trimEnd('}').trimEnd() + ""","calcUnlockCode":"190"}"""
+                } else { stored }
                 call.respondText(json, io.ktor.http.ContentType.Application.Json)
             }
 
