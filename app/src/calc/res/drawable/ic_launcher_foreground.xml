@@ -4,11 +4,11 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- = sign: two horizontal white bars, centered in safe zone -->
+    <!-- = sign: two white bars, centered in adaptive icon safe zone (18–90dp) -->
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M24,42 L84,42 L84,52 L24,52 Z"/>
+        android:pathData="M34,43 L74,43 L74,50 L34,50 Z"/>
     <path
         android:fillColor="#FFFFFF"
-        android:pathData="M24,56 L84,56 L84,66 L24,66 Z"/>
+        android:pathData="M34,58 L74,58 L74,65 L34,65 Z"/>
 </vector>
