@@ -264,6 +264,7 @@ input:checked+.slider:before{transform:translateX(17px)}
       <div class="nav-item" onclick="nav('users')"><span class="icon">👥</span> Usuários</div>
       <div class="nav-item" onclick="nav('payments')"><span class="icon">💰</span> Pagamentos</div>
       <div class="nav-item" onclick="nav('settings')"><span class="icon">⚙️</span> Configurações</div>
+      <div class="nav-item" onclick="nav('terms')"><span class="icon">📜</span> Termos Aceitos</div>
     </nav>
     <div class="sidebar-footer">
       <div class="sidebar-user">
@@ -374,6 +375,24 @@ input:checked+.slider:before{transform:translateX(17px)}
             <table>
               <thead><tr><th>ID</th><th>Usuário</th><th>Plano</th><th>Valor</th><th>Método</th><th>Status</th><th>Data</th><th>Ações</th></tr></thead>
               <tbody id="paymentsBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── TERMS ACCEPTANCES ────────────────────────────── -->
+      <div class="section" id="sec-terms">
+        <div class="table-box">
+          <div class="table-header">
+            <h3>📜 Aceites de Termos de Uso</h3>
+            <span id="termsCount" style="color:var(--sub);font-size:.82rem"></span>
+          </div>
+          <div class="table-scroll">
+            <table>
+              <thead><tr>
+                <th>#</th><th>Device ID</th><th>User ID</th><th>IP</th><th>Versão</th><th>Data/Hora</th>
+              </tr></thead>
+              <tbody id="termsTbody"></tbody>
             </table>
           </div>
         </div>
@@ -646,8 +665,8 @@ async function logout() {
 }
 
 // ── Navigation ──────────────────────────────────────────────────
-const pageTitles = { dashboard:'Dashboard', plans:'Planos', users:'Usuários', payments:'Pagamentos', settings:'Configurações' };
-const navKeys = ['dashboard','plans','users','payments','settings'];
+const pageTitles = { dashboard:'Dashboard', plans:'Planos', users:'Usuários', payments:'Pagamentos', settings:'Configurações', terms:'Termos Aceitos' };
+const navKeys = ['dashboard','plans','users','payments','settings','terms'];
 function nav(sec) {
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
@@ -660,6 +679,7 @@ function nav(sec) {
   else if (sec === 'users') { currentPage = 1; loadUsers(); }
   else if (sec === 'payments') loadPayments();
   else if (sec === 'settings') loadSettings();
+  else if (sec === 'terms') loadTerms();
 }
 
 // ── Dashboard ──────────────────────────────────────────────────
@@ -1006,6 +1026,30 @@ async function approvePayment(id, email, amount) {
   const r = await sa('POST', `/api/superadmin/payments/${id}/approve`);
   if (r.ok) { alert('✅ ' + (r.message || 'Pagamento confirmado')); loadPayments(); }
   else alert(r.error || 'Erro ao confirmar pagamento');
+}
+
+// ── Terms Acceptances ────────────────────────────────────────
+async function loadTerms() {
+  const r = await sa('GET', '/api/superadmin/terms-acceptances');
+  if (r.error) return;
+  const tbody = document.getElementById('termsTbody');
+  document.getElementById('termsCount').textContent = `Total: ${r.total ?? 0}`;
+  if (!r.acceptances || r.acceptances.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;padding:24px;color:var(--sub)">Nenhum aceite registrado ainda</td></tr>';
+    return;
+  }
+  tbody.innerHTML = r.acceptances.map(a => {
+    const dt = new Date(a.acceptedAt);
+    const dateStr = dt.toLocaleDateString('pt-BR') + ' ' + dt.toLocaleTimeString('pt-BR');
+    return `<tr>
+      <td>${a.id}</td>
+      <td style="font-family:monospace;font-size:.8rem">${a.deviceId || '—'}</td>
+      <td style="font-family:monospace;font-size:.8rem">${a.userId || '—'}</td>
+      <td>${a.ip || '—'}</td>
+      <td>${a.appVersion || '—'}</td>
+      <td>${dateStr}</td>
+    </tr>`;
+  }).join('');
 }
 
 // ── Settings ──────────────────────────────────────────────────

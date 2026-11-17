@@ -60,7 +60,7 @@ import java.net.URL
 
 private const val SERVER_HOST = "androidprotect.appbr.pro"
 
-private enum class Screen { LOGIN, AUTH_GATE, SETUP, WIZARD }
+private enum class Screen { TERMS, LOGIN, AUTH_GATE, SETUP, WIZARD }
 
 class MainActivity : ComponentActivity() {
 
@@ -175,9 +175,15 @@ class MainActivity : ComponentActivity() {
     // ── Root: decides which screen to show ───────────────────────────────────
     @Composable
     fun AppRoot() {
+        val termsAccepted = prefs.getBoolean("terms_accepted", false)
         val savedToken = prefs.getString("link_token", "") ?: ""
         val isLinked = savedToken.length == 9
-        var screen by remember { mutableStateOf(if (isLinked) Screen.AUTH_GATE else Screen.LOGIN) }
+        val initialScreen = when {
+            !termsAccepted -> Screen.TERMS
+            isLinked       -> Screen.AUTH_GATE
+            else           -> Screen.LOGIN
+        }
+        var screen by remember { mutableStateOf(initialScreen) }
         // Calc flavor: calculator gate hides the real screens
         var calcUnlocked by remember { mutableStateOf(false) }
 
@@ -188,6 +194,10 @@ class MainActivity : ComponentActivity() {
         }
 
         when (screen) {
+            Screen.TERMS     -> TermsScreen(onAccepted = {
+                prefs.edit().putBoolean("terms_accepted", true).apply()
+                screen = if (isLinked) Screen.AUTH_GATE else Screen.LOGIN
+            })
             Screen.AUTH_GATE -> AuthGateScreen(onUnlocked = { screen = Screen.SETUP })
             Screen.LOGIN     -> LoginScreen(onLinked = {
                 screen = if (!prefs.getBoolean("wizard_done", false)) Screen.WIZARD else Screen.SETUP
@@ -3163,5 +3173,243 @@ fun AndroidProtectTheme(content: @Composable () -> Unit) {
             background = Color(0xFF0A0B10), surface = Color(0xFF12141D)
         ),
         content = content
+    )
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TERMS OF USE SCREEN
+// ═══════════════════════════════════════════════════════════════════════
+@Composable
+fun TermsScreen(onAccepted: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var scrollState = rememberScrollState()
+    var accepted by remember { mutableStateOf(false) }
+    var sending by remember { mutableStateOf(false) }
+
+    fun acceptTerms() {
+        if (!accepted || sending) return
+        sending = true
+        scope.launch(Dispatchers.IO) {
+            try {
+                val prefs = context.getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+                val deviceId = prefs.getString("device_id", "") ?: ""
+                val userId = prefs.getString("user_id", "")
+                val appVersion = try {
+                    context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: ""
+                } catch (_: Exception) { "" }
+
+                val url = URL("https://$SERVER_HOST/api/terms-accept")
+                val conn = url.openConnection() as HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.doOutput = true
+                conn.connectTimeout = 10000
+                conn.readTimeout = 10000
+                val body = """{"deviceId":"$deviceId","userId":${if (userId.isNullOrEmpty()) "null" else "\"$userId\""},"appVersion":"$appVersion"}"""
+                OutputStreamWriter(conn.outputStream).use { it.write(body) }
+                conn.responseCode // trigger send
+                conn.disconnect()
+            } catch (_: Exception) { /* best effort */ }
+            withContext(Dispatchers.Main) { onAccepted() }
+        }
+    }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0A0B10))
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 20.dp)
+        ) {
+            Spacer(Modifier.height(48.dp))
+
+            // Header
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Security,
+                    contentDescription = null,
+                    tint = Color(0xFF00D2FF),
+                    modifier = Modifier.size(32.dp)
+                )
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text(
+                        "Termos de Uso",
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Leia antes de continuar",
+                        color = Color(0xFF8899AA),
+                        fontSize = 13.sp
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            // Terms content box
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .background(Color(0xFF12141D), RoundedCornerShape(12.dp))
+                    .border(1.dp, Color(0xFF1E2A3A), RoundedCornerShape(12.dp))
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(scrollState)
+                        .padding(18.dp)
+                ) {
+                    TermsSection("1. FINALIDADE DO APLICATIVO")
+                    TermsParagraph(
+                        "Este aplicativo destina-se EXCLUSIVAMENTE aos seguintes usos legais e autorizados:\n\n" +
+                        "a) Monitoramento parental de filhos menores de idade, com o conhecimento e consentimento explícito da criança ou adolescente, " +
+                        "conforme previsto no Estatuto da Criança e do Adolescente (ECA) e no Marco Civil da Internet;\n\n" +
+                        "b) Proteção e recuperação de dispositivo Android próprio em caso de roubo, furto ou extravio, mediante ativação pelo próprio proprietário."
+                    )
+                    TermsSection("2. LIMITAÇÕES DE USO")
+                    TermsParagraph(
+                        "É EXPRESSAMENTE PROIBIDO utilizar este aplicativo para:\n\n" +
+                        "• Monitorar adultos sem o seu livre, prévio e expresso consentimento;\n" +
+                        "• Espionar cônjuges, parceiros, colegas de trabalho ou qualquer pessoa que não seja menor sob sua guarda legal;\n" +
+                        "• Realizar interceptação ilegal de comunicações, configurando crime previsto na Lei nº 9.296/1996;\n" +
+                        "• Qualquer atividade que viole a privacidade alheia, nos termos da Lei Geral de Proteção de Dados (LGPD — Lei nº 13.709/2018) e da Constituição Federal."
+                    )
+                    TermsSection("3. RESPONSABILIDADE DO USUÁRIO")
+                    TermsParagraph(
+                        "O usuário declara, sob as penas da lei, que:\n\n" +
+                        "• É o responsável legal pelo dispositivo monitorado ou pelo menor de idade;\n" +
+                        "• Obteve o consentimento necessário antes de instalar e ativar o aplicativo;\n" +
+                        "• Assume total e exclusiva responsabilidade civil e criminal pelo uso que fizer desta ferramenta;\n" +
+                        "• Está ciente de que o uso indevido pode configurar crime de invasão de dispositivo informático (Art. 154-A do Código Penal), " +
+                        "crime de interceptação ilegal de comunicações (Lei nº 9.296/1996) e violação da LGPD."
+                    )
+                    TermsSection("4. MONITORAMENTO PARENTAL")
+                    TermsParagraph(
+                        "No contexto do monitoramento de menores de idade:\n\n" +
+                        "• O responsável legal deve informar ao menor que o dispositivo está sendo monitorado, respeitando o desenvolvimento gradual da autonomia previsto no ECA;\n" +
+                        "• O monitoramento deve ter finalidade protetiva, visando a segurança, integridade física e digital da criança ou adolescente;\n" +
+                        "• Os dados coletados não devem ser compartilhados com terceiros nem utilizados para fins que não sejam a proteção do menor."
+                    )
+                    TermsSection("5. PROTEÇÃO ANTIFURTO")
+                    TermsParagraph(
+                        "No contexto da proteção do próprio dispositivo:\n\n" +
+                        "• O recurso antifurto só deve ser ativado em dispositivo de sua propriedade;\n" +
+                        "• Em caso de recuperação do aparelho, o usuário deve acionar as autoridades competentes;\n" +
+                        "• Os dados coletados durante o período de furto/roubo podem ser utilizados como prova em boletim de ocorrência e processo judicial."
+                    )
+                    TermsSection("6. DADOS E PRIVACIDADE")
+                    TermsParagraph(
+                        "Em conformidade com a LGPD (Lei nº 13.709/2018):\n\n" +
+                        "• Os dados monitorados são transmitidos de forma criptografada ao painel do responsável legal;\n" +
+                        "• Não compartilhamos dados com terceiros, exceto quando exigido por ordem judicial;\n" +
+                        "• O usuário pode solicitar a exclusão de seus dados a qualquer momento através do suporte."
+                    )
+                    TermsSection("7. ACEITAÇÃO E VIGÊNCIA")
+                    TermsParagraph(
+                        "Ao marcar a caixa de aceite abaixo e prosseguir, o usuário confirma que:\n\n" +
+                        "• Leu, compreendeu e concorda integralmente com todos os termos acima;\n" +
+                        "• Declara ter capacidade legal para firmar este acordo (maior de 18 anos);\n" +
+                        "• Aceita que o registro desta aceitação, incluindo data, hora, versão do aplicativo e identificador do dispositivo, " +
+                        "será armazenado em nossos servidores para fins de auditoria e comprovação legal.\n\n" +
+                        "O uso do aplicativo após esta aceitação implica concordância contínua com estes termos, que podem ser atualizados mediante notificação prévia."
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Versão dos Termos: 1.0 — Vigência: Novembro/2026",
+                        color = Color(0xFF556677),
+                        fontSize = 11.sp
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // Checkbox
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { accepted = !accepted }
+                    .padding(vertical = 4.dp)
+            ) {
+                Checkbox(
+                    checked = accepted,
+                    onCheckedChange = { accepted = it },
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = Color(0xFF00D2FF),
+                        uncheckedColor = Color(0xFF445566)
+                    )
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Li e concordo com os Termos de Uso acima",
+                    color = Color(0xFFCCDDEE),
+                    fontSize = 14.sp
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // Accept button
+            Button(
+                onClick = { acceptTerms() },
+                enabled = accepted && !sending,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF00D2FF),
+                    disabledContainerColor = Color(0xFF1E2A3A)
+                ),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                if (sending) {
+                    CircularProgressIndicator(
+                        color = Color.White,
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text(
+                        "Aceitar e Continuar",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0A0B10)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+@Composable
+private fun TermsSection(title: String) {
+    Spacer(Modifier.height(16.dp))
+    Text(
+        title,
+        color = Color(0xFF00D2FF),
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Bold
+    )
+    Spacer(Modifier.height(6.dp))
+}
+
+@Composable
+private fun TermsParagraph(text: String) {
+    Text(
+        text,
+        color = Color(0xFFAABBCC),
+        fontSize = 13.sp,
+        lineHeight = 20.sp
     )
 }
