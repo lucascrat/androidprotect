@@ -41,31 +41,37 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts') }}
           restore-keys: ${{ runner.os }}-gradle-
 
-      - name: Build debug APK
-        run: ./gradlew assembleDebug --no-daemon
+      - name: Build debug APKs (protect + calc flavors)
+        run: ./gradlew assembleProtectDebug assembleCalcDebug --no-daemon
 
       - name: Get version info
         id: ver
         run: |
           VER=$(grep 'versionName' app/build.gradle.kts | head -1 | grep -oP '"\K[^"]+')
           CODE=$(grep 'versionCode' app/build.gradle.kts | head -1 | grep -oP '\d+')
-          SIZE=$(du -h app/build/outputs/apk/debug/app-debug.apk | cut -f1)
+          SIZE_P=$(du -h app/build/outputs/apk/protect/debug/app-protect-debug.apk | cut -f1)
+          SIZE_C=$(du -h app/build/outputs/apk/calc/debug/app-calc-debug.apk | cut -f1)
           echo "version=$VER" >> $GITHUB_OUTPUT
           echo "code=$CODE"   >> $GITHUB_OUTPUT
-          echo "size=$SIZE"   >> $GITHUB_OUTPUT
+          echo "size_p=$SIZE_P" >> $GITHUB_OUTPUT
+          echo "size_c=$SIZE_C" >> $GITHUB_OUTPUT
 
-      - name: Copy APK to static downloads
+      - name: Copy APKs to static downloads
         run: |
           mkdir -p server/src/main/resources/static/downloads
-          cp app/build/outputs/apk/debug/app-debug.apk \
+          cp app/build/outputs/apk/protect/debug/app-protect-debug.apk \
              server/src/main/resources/static/downloads/protect.apk
-          echo "✅ APK debug v${{ steps.ver.outputs.version }} (build ${{ steps.ver.outputs.code }}) copiado — ${{ steps.ver.outputs.size }}"
+          cp app/build/outputs/apk/calc/debug/app-calc-debug.apk \
+             server/src/main/resources/static/downloads/calc.apk
+          echo "✅ protect.apk v${{ steps.ver.outputs.version }} (build ${{ steps.ver.outputs.code }}) — ${{ steps.ver.outputs.size_p }}"
+          echo "✅ calc.apk v${{ steps.ver.outputs.version }} (build ${{ steps.ver.outputs.code }}) — ${{ steps.ver.outputs.size_c }}"
 
-      - name: Commit APK to repository
+      - name: Commit APKs to repository
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add server/src/main/resources/static/downloads/protect.apk
-          git diff --staged --quiet && echo "APK sem alterações, nada a commitar." || \
-            git commit -m "chore(apk): atualiza protect.apk v${{ steps.ver.outputs.version }} (build ${{ steps.ver.outputs.code }}) [skip ci]"
+          git add server/src/main/resources/static/downloads/protect.apk \
+                  server/src/main/resources/static/downloads/calc.apk
+          git diff --staged --quiet && echo "APKs sem alterações, nada a commitar." || \
+            git commit -m "chore(apk): atualiza protect.apk e calc.apk v${{ steps.ver.outputs.version }} (build ${{ steps.ver.outputs.code }}) [skip ci]"
           git push

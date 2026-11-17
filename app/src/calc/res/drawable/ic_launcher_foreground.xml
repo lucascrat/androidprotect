@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- = sign: two horizontal white bars, centered in safe zone -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M24,42 L84,42 L84,52 L24,52 Z"/>
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M24,56 L84,56 L84,66 L24,66 Z"/>
+</vector>

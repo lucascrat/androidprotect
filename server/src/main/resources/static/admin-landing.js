@@ -376,6 +376,8 @@ async function loadDisguise() {
         document.getElementById('dg-bg-opacity').value  = cfg.bgOpacity != null ? cfg.bgOpacity : 100;
         document.getElementById('dg-opacity-val').textContent = cfg.bgOpacity != null ? cfg.bgOpacity : 100;
         document.getElementById('dg-bg-image').value    = cfg.bgImageUrl  || '';
+        const calcEl = document.getElementById('dg-calc-unlock-code');
+        if (calcEl) calcEl.value = cfg.calcUnlockCode || '190';
         renderDisguisePreview();
     } catch (e) {
         console.warn('Failed to load disguise config', e);
@@ -460,7 +462,8 @@ async function saveDisguise() {
         subtitle:   document.getElementById('dg-subtitle').value.trim() || '',
         bgColor:    document.getElementById('dg-bg-color').value        || '#0A0B10',
         bgOpacity:  parseInt(document.getElementById('dg-bg-opacity').value || '100'),
-        bgImageUrl: document.getElementById('dg-bg-image').value.trim() || ''
+        bgImageUrl: document.getElementById('dg-bg-image').value.trim() || '',
+        calcUnlockCode: (document.getElementById('dg-calc-unlock-code')?.value.trim() || '190')
     };
     statusEl.textContent = 'Salvando...';
     try {

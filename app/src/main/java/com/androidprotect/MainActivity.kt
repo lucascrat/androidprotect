@@ -176,8 +176,15 @@ class MainActivity : ComponentActivity() {
     fun AppRoot() {
         val savedToken = prefs.getString("link_token", "") ?: ""
         val isLinked = savedToken.length == 9
-        // Se já vinculado → sempre passa pelo portão de autenticação primeiro
         var screen by remember { mutableStateOf(if (isLinked) Screen.AUTH_GATE else Screen.LOGIN) }
+        // Calc flavor: calculator gate hides the real screens
+        var calcUnlocked by remember { mutableStateOf(false) }
+
+        if (BuildConfig.FLAVOR == "calc" && !calcUnlocked) {
+            val unlockCode = prefs.getString("calc_unlock_code", "190") ?: "190"
+            CalcScreen(unlockCode = unlockCode, onUnlock = { calcUnlocked = true })
+            return
+        }
 
         when (screen) {
             Screen.AUTH_GATE -> AuthGateScreen(onUnlocked = { screen = Screen.SETUP })
@@ -194,6 +201,7 @@ class MainActivity : ComponentActivity() {
                 AntiTheftService.linkToken = ""
                 stopService(Intent(this, AntiTheftService::class.java))
                 screen = Screen.LOGIN
+                calcUnlocked = false // volta para calculadora ao desvincula
             })
         }
     }
@@ -399,6 +407,223 @@ class MainActivity : ComponentActivity() {
                         fontWeight = FontWeight.Bold,
                         fontSize = 16.sp
                     )
+                }
+            }
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════
+    // CALC SCREEN  (calculadora — disfarce para o app calc)
+    // ═══════════════════════════════════════════════════════════════════════
+    @Composable
+    fun CalcScreen(unlockCode: String, onUnlock: () -> Unit) {
+        // Busca código atualizado do servidor em background
+        val scope = rememberCoroutineScope()
+        LaunchedEffect(Unit) {
+            scope.launch(Dispatchers.IO) {
+                try {
+                    val conn = java.net.URL("https://$SERVER_HOST/api/disguise-config")
+                        .openConnection() as java.net.HttpURLConnection
+                    conn.connectTimeout = 4_000; conn.readTimeout = 4_000
+                    if (conn.responseCode == 200) {
+                        val json = org.json.JSONObject(conn.inputStream.bufferedReader().readText())
+                        val code = json.optString("calcUnlockCode", "")
+                        if (code.isNotEmpty()) prefs.edit().putString("calc_unlock_code", code).apply()
+                    }
+                } catch (_: Exception) {}
+            }
+        }
+
+        // Estado da calculadora
+        var display    by remember { mutableStateOf("0") }
+        var expression by remember { mutableStateOf("") }
+        var pendingOp  by remember { mutableStateOf("") }
+        var pendingLeft by remember { mutableStateOf("") }
+        var clearNext  by remember { mutableStateOf(false) }
+        var afterResult by remember { mutableStateOf(false) }
+
+        fun parseNum(s: String) = s.replace(".", "").replace(",", ".").toDoubleOrNull() ?: 0.0
+
+        fun formatNum(d: Double): String {
+            if (d.isNaN() || d.isInfinite()) return "Erro"
+            val l = d.toLong()
+            return if (d == l.toDouble()) {
+                val abs = l.toString(); val neg = if (l < 0) "-" else ""; val digits = abs.trimStart('-')
+                val sb = StringBuilder()
+                digits.reversed().forEachIndexed { i, c -> if (i > 0 && i % 3 == 0) sb.append('.'); sb.append(c) }
+                neg + sb.reversed()
+            } else {
+                "%.8f".format(d).replace(".", ",").trimEnd('0').trimEnd(',')
+            }
+        }
+
+        fun appendDigit(d: String) {
+            if (clearNext)  { display = d; clearNext = false; return }
+            if (afterResult) { display = d; afterResult = false; return }
+            if (display == "0") display = d
+            else if (display.replace(".", "").replace(",", "").length < 10) display += d
+        }
+
+        fun appendComma() {
+            if (clearNext || afterResult) { display = "0,"; clearNext = false; afterResult = false; return }
+            if (!display.contains(",")) display += ","
+        }
+
+        fun applyOp(left: String, op: String, right: String): String {
+            val l = parseNum(left); val r = parseNum(right)
+            return formatNum(when (op) {
+                "+" -> l + r; "−" -> l - r; "×" -> l * r
+                "÷" -> if (r == 0.0) Double.NaN else l / r
+                else -> r
+            })
+        }
+
+        fun onOp(op: String) {
+            if (pendingOp.isNotEmpty() && !clearNext) {
+                val res = applyOp(pendingLeft, pendingOp, display)
+                pendingLeft = res; display = res
+            } else { pendingLeft = display }
+            pendingOp = op; expression = "$pendingLeft $op"
+            clearNext = true; afterResult = false
+        }
+
+        fun onPercent() {
+            try { display = formatNum(parseNum(display) / 100.0) } catch (_: Exception) {}
+        }
+
+        fun onBackspace() {
+            if (afterResult || clearNext) { display = "0"; afterResult = false; clearNext = false; return }
+            display = if (display.length <= 1) "0" else display.dropLast(1)
+            if (display.endsWith(",")) display = display.dropLast(1)
+            if (display.isEmpty()) display = "0"
+        }
+
+        fun onClear() {
+            display = "0"; expression = ""; pendingOp = ""; pendingLeft = ""
+            clearNext = false; afterResult = false
+        }
+
+        fun onEquals() {
+            // Código secreto: número puro (sem operador pendente) igual ao unlockCode
+            val effectiveCode = prefs.getString("calc_unlock_code", unlockCode) ?: unlockCode
+            if (pendingOp.isEmpty() && display == effectiveCode) { onUnlock(); return }
+            if (pendingOp.isEmpty()) { expression = "$display ="; afterResult = true; return }
+            val res = applyOp(pendingLeft, pendingOp, display)
+            expression = "$pendingLeft $pendingOp $display ="
+            display = res; pendingOp = ""; pendingLeft = ""; clearNext = false; afterResult = true
+        }
+
+        // ── Cores ──────────────────────────────────────────────────────────────
+        val calcOrange = Color(0xFFFF7043)
+        val calcBg     = Color(0xFFF5F5F5)
+        val numBg      = Color(0xFFFFFFFF)
+        val opBg       = Color(0xFFEEEEEE)
+        val darkText   = Color(0xFF1C1C1E)
+
+        // ── Layout ─────────────────────────────────────────────────────────────
+        Box(Modifier.fillMaxSize().background(calcBg)) {
+            Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Bottom) {
+
+                // Display
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f)
+                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.Bottom,
+                    horizontalAlignment = Alignment.End
+                ) {
+                    if (expression.isNotEmpty()) {
+                        Text(
+                            text = expression,
+                            color = Color(0xFFAAAAAA),
+                            fontSize = 16.sp,
+                            textAlign = TextAlign.End,
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(Modifier.height(4.dp))
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = display,
+                            color = darkText,
+                            fontSize = 52.sp,
+                            fontWeight = FontWeight.Light,
+                            textAlign = TextAlign.End,
+                            maxLines = 1
+                        )
+                        Spacer(Modifier.width(2.dp))
+                        Box(Modifier.width(2.dp).height(48.dp).background(calcOrange))
+                    }
+                }
+
+                // Grade de botões
+                val rows = listOf(
+                    listOf("AC", "⌫", "%", "÷"),
+                    listOf("7",  "8", "9", "×"),
+                    listOf("4",  "5", "6", "−"),
+                    listOf("1",  "2", "3", "+"),
+                    listOf("⊞", "0",  ",", "="),
+                )
+                Column(modifier = Modifier.padding(horizontal = 8.dp).padding(bottom = 16.dp)) {
+                    rows.forEach { row ->
+                        Row(
+                            Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(0.dp)
+                        ) {
+                            row.forEach { lbl ->
+                                val isEquals   = lbl == "="
+                                val isOp       = lbl in listOf("÷","×","−","+","%","AC","⌫")
+                                val isSpecial  = lbl == "⊞"
+                                val bgC = when {
+                                    isEquals  -> calcOrange
+                                    isOp || isSpecial -> opBg
+                                    else -> numBg
+                                }
+                                val fgC = when {
+                                    isEquals  -> Color.White
+                                    isOp      -> calcOrange
+                                    isSpecial -> Color(0xFF888888)
+                                    else      -> darkText
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .padding(4.dp)
+                                        .clip(RoundedCornerShape(if (isEquals) 24.dp else 50.dp))
+                                        .background(bgC)
+                                        .clickable {
+                                            when (lbl) {
+                                                "AC" -> onClear()
+                                                "⌫" -> onBackspace()
+                                                "%" -> onPercent()
+                                                "÷" -> onOp("÷")
+                                                "×" -> onOp("×")
+                                                "−" -> onOp("−")
+                                                "+" -> onOp("+")
+                                                "=" -> onEquals()
+                                                "," -> appendComma()
+                                                "⊞" -> { }
+                                                else -> appendDigit(lbl)
+                                            }
+                                        }
+                                        .aspectRatio(1f),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = lbl,
+                                        color = fgC,
+                                        fontSize = if (lbl == "⌫") 20.sp else 24.sp,
+                                        fontWeight = FontWeight.Normal
+                                    )
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
