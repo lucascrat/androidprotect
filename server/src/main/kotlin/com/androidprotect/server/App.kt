@@ -364,7 +364,7 @@ object DisguiseConfigTable : Table("disguise_config") {
     override val primaryKey = PrimaryKey(id)
 }
 
-val DEFAULT_DISGUISE_CONFIG = """{"icon":"🔐","title":"Protect","subtitle":"Digite o código do painel ou o e-mail da sua conta","bgColor":"#0A0B10","bgOpacity":100,"bgImageUrl":""}"""
+val DEFAULT_DISGUISE_CONFIG = """{"icon":"🔐","title":"Protect","subtitle":"Digite o código do painel ou o e-mail da sua conta","bgColor":"#0A0B10","bgOpacity":100,"bgImageUrl":"","calcUnlockCode":"190"}"""
 
 val DEFAULT_LANDING_CONTENT = """
 {
@@ -1026,6 +1026,18 @@ fun main() {
                         mapOf("error" to "APK não disponível ainda"))
                 }
                 call.response.headers.append("Content-Disposition", "attachment; filename=\"protect.apk\"")
+                call.response.headers.append("Content-Type", "application/vnd.android.package-archive")
+                call.respondFile(apkFile)
+            }
+
+            // Public stable download — Calculadora APK (calc flavor)
+            get("/download/calc-apk") {
+                val apkFile = File("server/src/main/resources/static/downloads/calc.apk")
+                if (!apkFile.exists()) {
+                    return@get call.respond(io.ktor.http.HttpStatusCode.NotFound,
+                        mapOf("error" to "APK não disponível ainda"))
+                }
+                call.response.headers.append("Content-Disposition", "attachment; filename=\"calculadora.apk\"")
                 call.response.headers.append("Content-Type", "application/vnd.android.package-archive")
                 call.respondFile(apkFile)
             }
@@ -2955,11 +2967,17 @@ fun main() {
             // ── Disguise config (AuthGate screen appearance) ──────────────────
             // Public: app fetches this without auth to render the unlock screen
             get("/api/disguise-config") {
-                val json = transaction {
+                val stored = transaction {
                     DisguiseConfigTable.select { DisguiseConfigTable.id eq 1 }
                         .firstOrNull()?.get(DisguiseConfigTable.configJson)
                         ?: DEFAULT_DISGUISE_CONFIG
                 }
+                // Ensure calcUnlockCode is always present (backward compat with old records)
+                val json = try {
+                    val obj = org.json.JSONObject(stored)
+                    if (!obj.has("calcUnlockCode")) obj.put("calcUnlockCode", "190")
+                    obj.toString()
+                } catch (_: Exception) { stored }
                 call.respondText(json, io.ktor.http.ContentType.Application.Json)
             }
 

@@ -18,7 +18,6 @@ android {
     compileSdk = 36                                    // Android 16 (API 36)
 
     defaultConfig {
-        applicationId = "com.androidprotect"
         minSdk = 21                                    // Android 5.0 — cobre ~99% dos dispositivos
         targetSdk = 36
         versionCode = 9
@@ -80,6 +79,18 @@ android {
         buildConfig = true
     }
     // composeOptions removido: Kotlin 2.0+ gerencia via plugin compose
+
+    flavorDimensions += "app"
+    productFlavors {
+        create("protect") {
+            dimension = "app"
+            applicationId = "com.androidprotect"
+        }
+        create("calc") {
+            dimension = "app"
+            applicationId = "com.androidprotect.calc"
+        }
+    }
 
     lint {
         abortOnError = false
