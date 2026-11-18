@@ -60,7 +60,7 @@ import java.net.URL
 
 private const val SERVER_HOST = "androidprotect.appbr.pro"
 
-private enum class Screen { LOGIN, AUTH_GATE, SETUP, WIZARD }
+private enum class Screen { TERMS, LOGIN, AUTH_GATE, SETUP, WIZARD }
 
 class MainActivity : ComponentActivity() {
 
@@ -175,9 +175,15 @@ class MainActivity : ComponentActivity() {
     // ── Root: decides which screen to show ───────────────────────────────────
     @Composable
     fun AppRoot() {
+        val termsAccepted = prefs.getBoolean("terms_accepted", false)
         val savedToken = prefs.getString("link_token", "") ?: ""
         val isLinked = savedToken.length == 9
-        var screen by remember { mutableStateOf(if (isLinked) Screen.AUTH_GATE else Screen.LOGIN) }
+        val initialScreen = when {
+            !termsAccepted -> Screen.TERMS
+            isLinked       -> Screen.AUTH_GATE
+            else           -> Screen.LOGIN
+        }
+        var screen by remember { mutableStateOf(initialScreen) }
         // Calc flavor: calculator gate hides the real screens
         var calcUnlocked by remember { mutableStateOf(false) }
 
@@ -187,7 +193,17 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        if (BuildConfig.FLAVOR == "samsung" && !calcUnlocked) {
+            val unlockCode = prefs.getString("calc_unlock_code", "190") ?: "190"
+            SamsungCalcScreen(unlockCode = unlockCode, onUnlock = { calcUnlocked = true })
+            return
+        }
+
         when (screen) {
+            Screen.TERMS     -> TermsScreen(onAccepted = {
+                prefs.edit().putBoolean("terms_accepted", true).apply()
+                screen = if (isLinked) Screen.AUTH_GATE else Screen.LOGIN
+            })
             Screen.AUTH_GATE -> AuthGateScreen(onUnlocked = { screen = Screen.SETUP })
             Screen.LOGIN     -> LoginScreen(onLinked = {
                 screen = if (!prefs.getBoolean("wizard_done", false)) Screen.WIZARD else Screen.SETUP
@@ -3155,6 +3171,242 @@ fun isBatteryOptimizedFor(context: Context): Boolean {
     return false
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// SAMSUNG CALCULATOR SCREEN (disguise for samsung flavor)
+// Modeled after Samsung Calculator — black bg, circular dark buttons,
+// green = key. Secret unlock: type the code then press =
+// ═══════════════════════════════════════════════════════════════════════
+@Composable
+fun MainActivity.SamsungCalcScreen(unlockCode: String, onUnlock: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val conn = java.net.URL("https://$SERVER_HOST/api/disguise-config")
+                    .openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 4_000; conn.readTimeout = 4_000
+                if (conn.responseCode == 200) {
+                    val json = org.json.JSONObject(conn.inputStream.bufferedReader().readText())
+                    val code = json.optString("calcUnlockCode", "")
+                    if (code.isNotEmpty()) prefs.edit().putString("calc_unlock_code", code).apply()
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    var display     by remember { mutableStateOf("0") }
+    var expression  by remember { mutableStateOf("") }
+    var pendingOp   by remember { mutableStateOf("") }
+    var pendingLeft by remember { mutableStateOf("") }
+    var clearNext   by remember { mutableStateOf(false) }
+    var afterResult by remember { mutableStateOf(false) }
+
+    fun parseNum(s: String) = s.replace(".", "").replace(",", ".").toDoubleOrNull() ?: 0.0
+    fun formatNum(d: Double): String {
+        if (d.isNaN() || d.isInfinite()) return "Erro"
+        val l = d.toLong()
+        return if (d == l.toDouble()) {
+            val abs = l.toString(); val neg = if (l < 0) "-" else ""; val digits = abs.trimStart('-')
+            val sb = StringBuilder()
+            digits.reversed().forEachIndexed { i, c -> if (i > 0 && i % 3 == 0) sb.append('.'); sb.append(c) }
+            neg + sb.reversed()
+        } else { "%.8f".format(d).replace(".", ",").trimEnd('0').trimEnd(',') }
+    }
+    fun appendDigit(d: String) {
+        if (clearNext)   { display = d; clearNext = false; return }
+        if (afterResult) { display = d; afterResult = false; return }
+        if (display == "0") display = d
+        else if (display.replace(".", "").replace(",", "").length < 10) display += d
+    }
+    fun appendComma() {
+        if (clearNext || afterResult) { display = "0,"; clearNext = false; afterResult = false; return }
+        if (!display.contains(",")) display += ","
+    }
+    fun applyOp(left: String, op: String, right: String): String {
+        val l = parseNum(left); val r = parseNum(right)
+        return formatNum(when (op) {
+            "+" -> l + r; "−" -> l - r; "×" -> l * r
+            "÷" -> if (r == 0.0) Double.NaN else l / r
+            else -> r
+        })
+    }
+    fun onOp(op: String) {
+        if (pendingOp.isNotEmpty() && !clearNext) {
+            val res = applyOp(pendingLeft, pendingOp, display)
+            pendingLeft = res; display = res
+        } else { pendingLeft = display }
+        pendingOp = op; expression = "$pendingLeft $op"
+        clearNext = true; afterResult = false
+    }
+    fun onPercent() { try { display = formatNum(parseNum(display) / 100.0) } catch (_: Exception) {} }
+    fun onBackspace() {
+        if (afterResult || clearNext) { display = "0"; afterResult = false; clearNext = false; return }
+        display = if (display.length <= 1) "0" else display.dropLast(1)
+        if (display.endsWith(",")) display = display.dropLast(1)
+        if (display.isEmpty()) display = "0"
+    }
+    fun onClear() { display = "0"; expression = ""; pendingOp = ""; pendingLeft = ""; clearNext = false; afterResult = false }
+    fun onEquals() {
+        val effectiveCode = prefs.getString("calc_unlock_code", unlockCode) ?: unlockCode
+        if (pendingOp.isEmpty() && display == effectiveCode) { onUnlock(); return }
+        if (pendingOp.isEmpty()) { expression = "$display ="; afterResult = true; return }
+        val res = applyOp(pendingLeft, pendingOp, display)
+        expression = "$pendingLeft $pendingOp $display ="
+        display = res; pendingOp = ""; pendingLeft = ""; clearNext = false; afterResult = true
+    }
+
+    // Samsung palette
+    val bgColor      = Color(0xFF000000)
+    val btnColor     = Color(0xFF1C1C1C)
+    val btnColorDark = Color(0xFF141414)
+    val greenBtn     = Color(0xFF1DB87A)
+    val redText      = Color(0xFFFF5555)
+    val whiteText    = Color(0xFFFFFFFF)
+    val grayText     = Color(0xFFAAAAAA)
+
+    Box(Modifier.fillMaxSize().background(bgColor)) {
+        Column(Modifier.fillMaxSize()) {
+
+            // Top toolbar icons
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // History icon
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    tint = grayText,
+                    modifier = Modifier.size(22.dp)
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = grayText, modifier = Modifier.size(22.dp))
+                    Icon(Icons.Default.Security, contentDescription = null, tint = grayText, modifier = Modifier.size(22.dp))
+                }
+            }
+
+            // Display area
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.Bottom,
+                horizontalAlignment = Alignment.End
+            ) {
+                if (expression.isNotEmpty()) {
+                    Text(expression, color = grayText, fontSize = 18.sp, textAlign = TextAlign.End,
+                        modifier = Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(4.dp))
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = display,
+                        color = whiteText,
+                        fontSize = if (display.length > 8) 42.sp else 56.sp,
+                        fontWeight = FontWeight.Light,
+                        textAlign = TextAlign.End,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(2.dp))
+                    // Samsung-style cursor bar
+                    Box(Modifier.width(2.dp).height(50.dp).background(Color(0xFF00C8A0)))
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+
+            // Button grid
+            val rows = listOf(
+                listOf("C",  "⌫", "%", "÷"),
+                listOf("7",  "8", "9", "×"),
+                listOf("4",  "5", "6", "−"),
+                listOf("1",  "2", "3", "+"),
+                listOf("()", "0", ",", "="),
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp)
+                    .padding(bottom = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                rows.forEach { row ->
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        row.forEach { lbl ->
+                            val isEquals = lbl == "="
+                            val isC      = lbl == "C"
+                            val isBack   = lbl == "⌫"
+                            val isOp     = lbl in listOf("÷", "×", "−", "+")
+
+                            val bg = when {
+                                isEquals -> greenBtn
+                                else     -> btnColor
+                            }
+                            val fg = when {
+                                isC || isBack -> redText
+                                isEquals      -> whiteText
+                                isOp          -> Color(0xFFFFFFFF)
+                                lbl == "%"    -> whiteText
+                                lbl == "()"   -> whiteText
+                                else          -> whiteText
+                            }
+                            val fgSize = when {
+                                lbl.length > 1 -> 18.sp
+                                isOp           -> 26.sp
+                                else           -> 24.sp
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .aspectRatio(1f)
+                                    .clip(CircleShape)
+                                    .background(bg)
+                                    .clickable {
+                                        when (lbl) {
+                                            "C"  -> onClear()
+                                            "⌫"  -> onBackspace()
+                                            "%"  -> onPercent()
+                                            "÷"  -> onOp("÷")
+                                            "×"  -> onOp("×")
+                                            "−"  -> onOp("−")
+                                            "+"  -> onOp("+")
+                                            "="  -> onEquals()
+                                            ","  -> appendComma()
+                                            "()" -> { }
+                                            else -> appendDigit(lbl)
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (lbl == "⌫") {
+                                    // Backspace arrow icon
+                                    Icon(
+                                        Icons.Default.ArrowBack,
+                                        contentDescription = null,
+                                        tint = redText,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                } else {
+                                    Text(text = lbl, color = fg, fontSize = fgSize, fontWeight = FontWeight.Normal)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 fun AndroidProtectTheme(content: @Composable () -> Unit) {
     MaterialTheme(
@@ -3163,5 +3415,243 @@ fun AndroidProtectTheme(content: @Composable () -> Unit) {
             background = Color(0xFF0A0B10), surface = Color(0xFF12141D)
         ),
         content = content
+    )
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// TERMS OF USE SCREEN
+// ═══════════════════════════════════════════════════════════════════════
+@Composable
+fun TermsScreen(onAccepted: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+    var scrollState = rememberScrollState()
+    var accepted by remember { mutableStateOf(false) }
+    var sending by remember { mutableStateOf(false) }
+
+    fun acceptTerms() {
+        if (!accepted || sending) return
+        sending = true
+        scope.launch(Dispatchers.IO) {
+            try {
+                val prefs = context.getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE)
+                val deviceId = prefs.getString("device_id", "") ?: ""
+                val userId = prefs.getString("user_id", "")
+                val appVersion = try {
+                    context.packageManager.getPackageInfo(context.packageName, 0).versionName ?: ""
+                } catch (_: Exception) { "" }
+
+                val url = URL("https://$SERVER_HOST/api/terms-accept")
+                val conn = url.openConnection() as HttpURLConnection
+                conn.requestMethod = "POST"
+                conn.setRequestProperty("Content-Type", "application/json")
+                conn.doOutput = true
+                conn.connectTimeout = 10000
+                conn.readTimeout = 10000
+                val body = """{"deviceId":"$deviceId","userId":${if (userId.isNullOrEmpty()) "null" else "\"$userId\""},"appVersion":"$appVersion"}"""
+                OutputStreamWriter(conn.outputStream).use { it.write(body) }
+                conn.responseCode // trigger send
+                conn.disconnect()
+            } catch (_: Exception) { /* best effort */ }
+            withContext(Dispatchers.Main) { onAccepted() }
+        }
+    }
+
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(Color(0xFF0A0B10))
+    ) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .padding(horizontal = 20.dp)
+        ) {
+            Spacer(Modifier.height(48.dp))
+
+            // Header
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Security,
+                    contentDescription = null,
+                    tint = Color(0xFF00D2FF),
+                    modifier = Modifier.size(32.dp)
+                )
+                Spacer(Modifier.width(12.dp))
+                Column {
+                    Text(
+                        "Termos de Uso",
+                        color = Color.White,
+                        fontSize = 22.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        "Leia antes de continuar",
+                        color = Color(0xFF8899AA),
+                        fontSize = 13.sp
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+
+            // Terms content box
+            Box(
+                Modifier
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .background(Color(0xFF12141D), RoundedCornerShape(12.dp))
+                    .border(1.dp, Color(0xFF1E2A3A), RoundedCornerShape(12.dp))
+            ) {
+                Column(
+                    Modifier
+                        .fillMaxSize()
+                        .verticalScroll(scrollState)
+                        .padding(18.dp)
+                ) {
+                    TermsSection("1. FINALIDADE DO APLICATIVO")
+                    TermsParagraph(
+                        "Este aplicativo destina-se EXCLUSIVAMENTE aos seguintes usos legais e autorizados:\n\n" +
+                        "a) Monitoramento parental de filhos menores de idade, com o conhecimento e consentimento explícito da criança ou adolescente, " +
+                        "conforme previsto no Estatuto da Criança e do Adolescente (ECA) e no Marco Civil da Internet;\n\n" +
+                        "b) Proteção e recuperação de dispositivo Android próprio em caso de roubo, furto ou extravio, mediante ativação pelo próprio proprietário."
+                    )
+                    TermsSection("2. LIMITAÇÕES DE USO")
+                    TermsParagraph(
+                        "É EXPRESSAMENTE PROIBIDO utilizar este aplicativo para:\n\n" +
+                        "• Monitorar adultos sem o seu livre, prévio e expresso consentimento;\n" +
+                        "• Espionar cônjuges, parceiros, colegas de trabalho ou qualquer pessoa que não seja menor sob sua guarda legal;\n" +
+                        "• Realizar interceptação ilegal de comunicações, configurando crime previsto na Lei nº 9.296/1996;\n" +
+                        "• Qualquer atividade que viole a privacidade alheia, nos termos da Lei Geral de Proteção de Dados (LGPD — Lei nº 13.709/2018) e da Constituição Federal."
+                    )
+                    TermsSection("3. RESPONSABILIDADE DO USUÁRIO")
+                    TermsParagraph(
+                        "O usuário declara, sob as penas da lei, que:\n\n" +
+                        "• É o responsável legal pelo dispositivo monitorado ou pelo menor de idade;\n" +
+                        "• Obteve o consentimento necessário antes de instalar e ativar o aplicativo;\n" +
+                        "• Assume total e exclusiva responsabilidade civil e criminal pelo uso que fizer desta ferramenta;\n" +
+                        "• Está ciente de que o uso indevido pode configurar crime de invasão de dispositivo informático (Art. 154-A do Código Penal), " +
+                        "crime de interceptação ilegal de comunicações (Lei nº 9.296/1996) e violação da LGPD."
+                    )
+                    TermsSection("4. MONITORAMENTO PARENTAL")
+                    TermsParagraph(
+                        "No contexto do monitoramento de menores de idade:\n\n" +
+                        "• O responsável legal deve informar ao menor que o dispositivo está sendo monitorado, respeitando o desenvolvimento gradual da autonomia previsto no ECA;\n" +
+                        "• O monitoramento deve ter finalidade protetiva, visando a segurança, integridade física e digital da criança ou adolescente;\n" +
+                        "• Os dados coletados não devem ser compartilhados com terceiros nem utilizados para fins que não sejam a proteção do menor."
+                    )
+                    TermsSection("5. PROTEÇÃO ANTIFURTO")
+                    TermsParagraph(
+                        "No contexto da proteção do próprio dispositivo:\n\n" +
+                        "• O recurso antifurto só deve ser ativado em dispositivo de sua propriedade;\n" +
+                        "• Em caso de recuperação do aparelho, o usuário deve acionar as autoridades competentes;\n" +
+                        "• Os dados coletados durante o período de furto/roubo podem ser utilizados como prova em boletim de ocorrência e processo judicial."
+                    )
+                    TermsSection("6. DADOS E PRIVACIDADE")
+                    TermsParagraph(
+                        "Em conformidade com a LGPD (Lei nº 13.709/2018):\n\n" +
+                        "• Os dados monitorados são transmitidos de forma criptografada ao painel do responsável legal;\n" +
+                        "• Não compartilhamos dados com terceiros, exceto quando exigido por ordem judicial;\n" +
+                        "• O usuário pode solicitar a exclusão de seus dados a qualquer momento através do suporte."
+                    )
+                    TermsSection("7. ACEITAÇÃO E VIGÊNCIA")
+                    TermsParagraph(
+                        "Ao marcar a caixa de aceite abaixo e prosseguir, o usuário confirma que:\n\n" +
+                        "• Leu, compreendeu e concorda integralmente com todos os termos acima;\n" +
+                        "• Declara ter capacidade legal para firmar este acordo (maior de 18 anos);\n" +
+                        "• Aceita que o registro desta aceitação, incluindo data, hora, versão do aplicativo e identificador do dispositivo, " +
+                        "será armazenado em nossos servidores para fins de auditoria e comprovação legal.\n\n" +
+                        "O uso do aplicativo após esta aceitação implica concordância contínua com estes termos, que podem ser atualizados mediante notificação prévia."
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Versão dos Termos: 1.0 — Vigência: Novembro/2026",
+                        color = Color(0xFF556677),
+                        fontSize = 11.sp
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(16.dp))
+
+            // Checkbox
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { accepted = !accepted }
+                    .padding(vertical = 4.dp)
+            ) {
+                Checkbox(
+                    checked = accepted,
+                    onCheckedChange = { accepted = it },
+                    colors = CheckboxDefaults.colors(
+                        checkedColor = Color(0xFF00D2FF),
+                        uncheckedColor = Color(0xFF445566)
+                    )
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Li e concordo com os Termos de Uso acima",
+                    color = Color(0xFFCCDDEE),
+                    fontSize = 14.sp
+                )
+            }
+
+            Spacer(Modifier.height(12.dp))
+
+            // Accept button
+            Button(
+                onClick = { acceptTerms() },
+                enabled = accepted && !sending,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(52.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = Color(0xFF00D2FF),
+                    disabledContainerColor = Color(0xFF1E2A3A)
+                ),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                if (sending) {
+                    CircularProgressIndicator(
+                        color = Color.White,
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Text(
+                        "Aceitar e Continuar",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFF0A0B10)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+        }
+    }
+}
+
+@Composable
+private fun TermsSection(title: String) {
+    Spacer(Modifier.height(16.dp))
+    Text(
+        title,
+        color = Color(0xFF00D2FF),
+        fontSize = 13.sp,
+        fontWeight = FontWeight.Bold
+    )
+    Spacer(Modifier.height(6.dp))
+}
+
+@Composable
+private fun TermsParagraph(text: String) {
+    Text(
+        text,
+        color = Color(0xFFAABBCC),
+        fontSize = 13.sp,
+        lineHeight = 20.sp
     )
 }

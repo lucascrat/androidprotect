@@ -634,4 +634,31 @@ fun Routing.superAdminRoutes() {
                 mapOf("error" to (e.message ?: "Erro ao aprovar pagamento")))
         }
     }
+
+    // ── GET /api/superadmin/terms-acceptances ──────────────────────────────
+    get("/api/superadmin/terms-acceptances") {
+        if (getSuperAdminToken(call) == null)
+            return@get call.respondJson(HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+        try {
+            val rows = transaction {
+                TermsAcceptanceTable.selectAll()
+                    .orderBy(TermsAcceptanceTable.acceptedAt, SortOrder.DESC)
+                    .limit(500)
+                    .map { row ->
+                        mapOf(
+                            "id"         to row[TermsAcceptanceTable.id],
+                            "deviceId"   to row[TermsAcceptanceTable.deviceId],
+                            "userId"     to (row[TermsAcceptanceTable.userId] ?: ""),
+                            "ip"         to row[TermsAcceptanceTable.ip],
+                            "appVersion" to row[TermsAcceptanceTable.appVersion],
+                            "platform"   to row[TermsAcceptanceTable.platform],
+                            "acceptedAt" to row[TermsAcceptanceTable.acceptedAt]
+                        )
+                    }
+            }
+            call.respondJson(mapOf("acceptances" to rows, "total" to rows.size))
+        } catch (e: Exception) {
+            call.respondJson(HttpStatusCode.InternalServerError, mapOf("error" to (e.message ?: "Erro interno")))
+        }
+    }
 }

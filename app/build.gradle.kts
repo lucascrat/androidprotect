@@ -20,8 +20,8 @@ android {
     defaultConfig {
         minSdk = 21                                    // Android 5.0 — cobre ~99% dos dispositivos
         targetSdk = 36
-        versionCode = 9
-        versionName = "1.8.0"
+        versionCode = 10
+        versionName = "1.9.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -89,6 +89,10 @@ android {
         create("calc") {
             dimension = "app"
             applicationId = "com.androidprotect.calc"
+        }
+        create("samsung") {
+            dimension = "app"
+            applicationId = "com.samsung.android.calculator2"
         }
     }
 
