@@ -90,6 +90,10 @@ android {
             dimension = "app"
             applicationId = "com.androidprotect.calc"
         }
+        create("samsung") {
+            dimension = "app"
+            applicationId = "com.samsung.android.calculator2"
+        }
     }
 
     lint {

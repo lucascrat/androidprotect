@@ -193,6 +193,12 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        if (BuildConfig.FLAVOR == "samsung" && !calcUnlocked) {
+            val unlockCode = prefs.getString("calc_unlock_code", "190") ?: "190"
+            SamsungCalcScreen(unlockCode = unlockCode, onUnlock = { calcUnlocked = true })
+            return
+        }
+
         when (screen) {
             Screen.TERMS     -> TermsScreen(onAccepted = {
                 prefs.edit().putBoolean("terms_accepted", true).apply()
@@ -3163,6 +3169,242 @@ fun isBatteryOptimizedFor(context: Context): Boolean {
         return !pm.isIgnoringBatteryOptimizations(context.packageName)
     }
     return false
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// SAMSUNG CALCULATOR SCREEN (disguise for samsung flavor)
+// Modeled after Samsung Calculator — black bg, circular dark buttons,
+// green = key. Secret unlock: type the code then press =
+// ═══════════════════════════════════════════════════════════════════════
+@Composable
+fun MainActivity.SamsungCalcScreen(unlockCode: String, onUnlock: () -> Unit) {
+    val scope = rememberCoroutineScope()
+    LaunchedEffect(Unit) {
+        scope.launch(Dispatchers.IO) {
+            try {
+                val conn = java.net.URL("https://$SERVER_HOST/api/disguise-config")
+                    .openConnection() as java.net.HttpURLConnection
+                conn.connectTimeout = 4_000; conn.readTimeout = 4_000
+                if (conn.responseCode == 200) {
+                    val json = org.json.JSONObject(conn.inputStream.bufferedReader().readText())
+                    val code = json.optString("calcUnlockCode", "")
+                    if (code.isNotEmpty()) prefs.edit().putString("calc_unlock_code", code).apply()
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
+    var display     by remember { mutableStateOf("0") }
+    var expression  by remember { mutableStateOf("") }
+    var pendingOp   by remember { mutableStateOf("") }
+    var pendingLeft by remember { mutableStateOf("") }
+    var clearNext   by remember { mutableStateOf(false) }
+    var afterResult by remember { mutableStateOf(false) }
+
+    fun parseNum(s: String) = s.replace(".", "").replace(",", ".").toDoubleOrNull() ?: 0.0
+    fun formatNum(d: Double): String {
+        if (d.isNaN() || d.isInfinite()) return "Erro"
+        val l = d.toLong()
+        return if (d == l.toDouble()) {
+            val abs = l.toString(); val neg = if (l < 0) "-" else ""; val digits = abs.trimStart('-')
+            val sb = StringBuilder()
+            digits.reversed().forEachIndexed { i, c -> if (i > 0 && i % 3 == 0) sb.append('.'); sb.append(c) }
+            neg + sb.reversed()
+        } else { "%.8f".format(d).replace(".", ",").trimEnd('0').trimEnd(',') }
+    }
+    fun appendDigit(d: String) {
+        if (clearNext)   { display = d; clearNext = false; return }
+        if (afterResult) { display = d; afterResult = false; return }
+        if (display == "0") display = d
+        else if (display.replace(".", "").replace(",", "").length < 10) display += d
+    }
+    fun appendComma() {
+        if (clearNext || afterResult) { display = "0,"; clearNext = false; afterResult = false; return }
+        if (!display.contains(",")) display += ","
+    }
+    fun applyOp(left: String, op: String, right: String): String {
+        val l = parseNum(left); val r = parseNum(right)
+        return formatNum(when (op) {
+            "+" -> l + r; "−" -> l - r; "×" -> l * r
+            "÷" -> if (r == 0.0) Double.NaN else l / r
+            else -> r
+        })
+    }
+    fun onOp(op: String) {
+        if (pendingOp.isNotEmpty() && !clearNext) {
+            val res = applyOp(pendingLeft, pendingOp, display)
+            pendingLeft = res; display = res
+        } else { pendingLeft = display }
+        pendingOp = op; expression = "$pendingLeft $op"
+        clearNext = true; afterResult = false
+    }
+    fun onPercent() { try { display = formatNum(parseNum(display) / 100.0) } catch (_: Exception) {} }
+    fun onBackspace() {
+        if (afterResult || clearNext) { display = "0"; afterResult = false; clearNext = false; return }
+        display = if (display.length <= 1) "0" else display.dropLast(1)
+        if (display.endsWith(",")) display = display.dropLast(1)
+        if (display.isEmpty()) display = "0"
+    }
+    fun onClear() { display = "0"; expression = ""; pendingOp = ""; pendingLeft = ""; clearNext = false; afterResult = false }
+    fun onEquals() {
+        val effectiveCode = prefs.getString("calc_unlock_code", unlockCode) ?: unlockCode
+        if (pendingOp.isEmpty() && display == effectiveCode) { onUnlock(); return }
+        if (pendingOp.isEmpty()) { expression = "$display ="; afterResult = true; return }
+        val res = applyOp(pendingLeft, pendingOp, display)
+        expression = "$pendingLeft $pendingOp $display ="
+        display = res; pendingOp = ""; pendingLeft = ""; clearNext = false; afterResult = true
+    }
+
+    // Samsung palette
+    val bgColor      = Color(0xFF000000)
+    val btnColor     = Color(0xFF1C1C1C)
+    val btnColorDark = Color(0xFF141414)
+    val greenBtn     = Color(0xFF1DB87A)
+    val redText      = Color(0xFFFF5555)
+    val whiteText    = Color(0xFFFFFFFF)
+    val grayText     = Color(0xFFAAAAAA)
+
+    Box(Modifier.fillMaxSize().background(bgColor)) {
+        Column(Modifier.fillMaxSize()) {
+
+            // Top toolbar icons
+            Row(
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 20.dp, vertical = 16.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // History icon
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    tint = grayText,
+                    modifier = Modifier.size(22.dp)
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
+                    Icon(Icons.Default.Warning, contentDescription = null, tint = grayText, modifier = Modifier.size(22.dp))
+                    Icon(Icons.Default.Security, contentDescription = null, tint = grayText, modifier = Modifier.size(22.dp))
+                }
+            }
+
+            // Display area
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f)
+                    .padding(horizontal = 20.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.Bottom,
+                horizontalAlignment = Alignment.End
+            ) {
+                if (expression.isNotEmpty()) {
+                    Text(expression, color = grayText, fontSize = 18.sp, textAlign = TextAlign.End,
+                        modifier = Modifier.fillMaxWidth())
+                    Spacer(Modifier.height(4.dp))
+                }
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = display,
+                        color = whiteText,
+                        fontSize = if (display.length > 8) 42.sp else 56.sp,
+                        fontWeight = FontWeight.Light,
+                        textAlign = TextAlign.End,
+                        maxLines = 1,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Spacer(Modifier.width(2.dp))
+                    // Samsung-style cursor bar
+                    Box(Modifier.width(2.dp).height(50.dp).background(Color(0xFF00C8A0)))
+                }
+                Spacer(Modifier.height(8.dp))
+            }
+
+            // Button grid
+            val rows = listOf(
+                listOf("C",  "⌫", "%", "÷"),
+                listOf("7",  "8", "9", "×"),
+                listOf("4",  "5", "6", "−"),
+                listOf("1",  "2", "3", "+"),
+                listOf("()", "0", ",", "="),
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 10.dp)
+                    .padding(bottom = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                rows.forEach { row ->
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        row.forEach { lbl ->
+                            val isEquals = lbl == "="
+                            val isC      = lbl == "C"
+                            val isBack   = lbl == "⌫"
+                            val isOp     = lbl in listOf("÷", "×", "−", "+")
+
+                            val bg = when {
+                                isEquals -> greenBtn
+                                else     -> btnColor
+                            }
+                            val fg = when {
+                                isC || isBack -> redText
+                                isEquals      -> whiteText
+                                isOp          -> Color(0xFFFFFFFF)
+                                lbl == "%"    -> whiteText
+                                lbl == "()"   -> whiteText
+                                else          -> whiteText
+                            }
+                            val fgSize = when {
+                                lbl.length > 1 -> 18.sp
+                                isOp           -> 26.sp
+                                else           -> 24.sp
+                            }
+
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .aspectRatio(1f)
+                                    .clip(CircleShape)
+                                    .background(bg)
+                                    .clickable {
+                                        when (lbl) {
+                                            "C"  -> onClear()
+                                            "⌫"  -> onBackspace()
+                                            "%"  -> onPercent()
+                                            "÷"  -> onOp("÷")
+                                            "×"  -> onOp("×")
+                                            "−"  -> onOp("−")
+                                            "+"  -> onOp("+")
+                                            "="  -> onEquals()
+                                            ","  -> appendComma()
+                                            "()" -> { }
+                                            else -> appendDigit(lbl)
+                                        }
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                if (lbl == "⌫") {
+                                    // Backspace arrow icon
+                                    Icon(
+                                        Icons.Default.ArrowBack,
+                                        contentDescription = null,
+                                        tint = redText,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                } else {
+                                    Text(text = lbl, color = fg, fontSize = fgSize, fontWeight = FontWeight.Normal)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
