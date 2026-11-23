@@ -12,7 +12,6 @@
 
     <!-- Inner arc: r=14, endpoints (44.1,66.1) and (63.9,66.1) -->
     <path
-        android:fillColor="none"
         android:strokeColor="#FFFFFF"
         android:strokeWidth="5.5"
         android:strokeLineCap="round"
@@ -20,7 +19,6 @@
 
     <!-- Middle arc: r=25, endpoints (36.3,58.3) and (71.7,58.3) -->
     <path
-        android:fillColor="none"
         android:strokeColor="#FFFFFF"
         android:strokeWidth="5.5"
         android:strokeLineCap="round"
@@ -28,7 +26,6 @@
 
     <!-- Outer arc: r=36, endpoints (28.5,50.5) and (79.5,50.5) -->
     <path
-        android:fillColor="none"
         android:strokeColor="#FFFFFF"
         android:strokeWidth="5.5"
         android:strokeLineCap="round"
