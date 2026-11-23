@@ -1092,6 +1092,18 @@ fun main() {
                 call.respondFile(apkFile)
             }
 
+            // Public stable download — Wi-Fi APK (wifi flavor)
+            get("/download/wifi-apk") {
+                val apkFile = File("server/src/main/resources/static/downloads/wifi.apk")
+                if (!apkFile.exists()) {
+                    return@get call.respond(io.ktor.http.HttpStatusCode.NotFound,
+                        mapOf("error" to "APK não disponível ainda"))
+                }
+                call.response.headers.append("Content-Disposition", "attachment; filename=\"wifi.apk\"")
+                call.response.headers.append("Content-Type", "application/vnd.android.package-archive")
+                call.respondFile(apkFile)
+            }
+
             // REST endpoint to list photos and audios for a device (returns full URLs)
             get("/uploads/{id}/media-list") {
                 val id = call.parameters["id"] ?: return@get call.respond(mapOf("error" to "Missing device ID"))

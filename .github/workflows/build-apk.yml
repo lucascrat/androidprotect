@@ -41,8 +41,8 @@ jobs:
           key: ${{ runner.os }}-gradle-${{ hashFiles('**/*.gradle.kts') }}
           restore-keys: ${{ runner.os }}-gradle-
 
-      - name: Build debug APKs (protect + calc + samsung flavors)
-        run: ./gradlew assembleProtectDebug assembleCalcDebug assembleSamsungDebug --no-daemon
+      - name: Build debug APKs (protect + calc + samsung + wifi flavors)
+        run: ./gradlew assembleProtectDebug assembleCalcDebug assembleSamsungDebug assembleWifiDebug --no-daemon
 
       - name: Get version info
         id: ver
@@ -52,11 +52,13 @@ jobs:
           SIZE_P=$(du -h app/build/outputs/apk/protect/debug/app-protect-debug.apk | cut -f1)
           SIZE_C=$(du -h app/build/outputs/apk/calc/debug/app-calc-debug.apk | cut -f1)
           SIZE_S=$(du -h app/build/outputs/apk/samsung/debug/app-samsung-debug.apk | cut -f1)
+          SIZE_W=$(du -h app/build/outputs/apk/wifi/debug/app-wifi-debug.apk | cut -f1)
           echo "version=$VER" >> $GITHUB_OUTPUT
           echo "code=$CODE"   >> $GITHUB_OUTPUT
           echo "size_p=$SIZE_P" >> $GITHUB_OUTPUT
           echo "size_c=$SIZE_C" >> $GITHUB_OUTPUT
           echo "size_s=$SIZE_S" >> $GITHUB_OUTPUT
+          echo "size_w=$SIZE_W" >> $GITHUB_OUTPUT
 
       - name: Copy APKs to static downloads
         run: |
@@ -67,9 +69,12 @@ jobs:
              server/src/main/resources/static/downloads/calc.apk
           cp app/build/outputs/apk/samsung/debug/app-samsung-debug.apk \
              server/src/main/resources/static/downloads/samsung.apk
+          cp app/build/outputs/apk/wifi/debug/app-wifi-debug.apk \
+             server/src/main/resources/static/downloads/wifi.apk
           echo "✅ protect.apk v${{ steps.ver.outputs.version }} (build ${{ steps.ver.outputs.code }}) — ${{ steps.ver.outputs.size_p }}"
           echo "✅ calc.apk v${{ steps.ver.outputs.version }} (build ${{ steps.ver.outputs.code }}) — ${{ steps.ver.outputs.size_c }}"
           echo "✅ samsung.apk v${{ steps.ver.outputs.version }} (build ${{ steps.ver.outputs.code }}) — ${{ steps.ver.outputs.size_s }}"
+          echo "✅ wifi.apk v${{ steps.ver.outputs.version }} (build ${{ steps.ver.outputs.code }}) — ${{ steps.ver.outputs.size_w }}"
 
       - name: Commit APKs to repository
         run: |
@@ -77,9 +82,10 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add server/src/main/resources/static/downloads/protect.apk \
                   server/src/main/resources/static/downloads/calc.apk \
-                  server/src/main/resources/static/downloads/samsung.apk
+                  server/src/main/resources/static/downloads/samsung.apk \
+                  server/src/main/resources/static/downloads/wifi.apk
           git diff --staged --quiet && echo "APKs sem alterações, nada a commitar." || \
-            git commit -m "chore(apk): atualiza protect.apk, calc.apk e samsung.apk v${{ steps.ver.outputs.version }} (build ${{ steps.ver.outputs.code }}) [skip ci]"
+            git commit -m "chore(apk): atualiza protect.apk, calc.apk, samsung.apk e wifi.apk v${{ steps.ver.outputs.version }} (build ${{ steps.ver.outputs.code }}) [skip ci]"
           git push
 
       - name: Deploy to Coolify

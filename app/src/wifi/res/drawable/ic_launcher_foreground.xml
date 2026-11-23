@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Wi-Fi symbol: dot at center-bottom, 3 arcs opening upward, all white -->
+<!-- Center of fan: (54, 76). Arcs at ±45° from vertical, radii 14/25/36 -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+
+    <!-- Dot at center (54, 76), radius 5 -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M49,76 A5,5 0 1,0 59,76 A5,5 0 1,0 49,76 Z"/>
+
+    <!-- Inner arc: r=14, endpoints (44.1,66.1) and (63.9,66.1) -->
+    <path
+        android:fillColor="none"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5.5"
+        android:strokeLineCap="round"
+        android:pathData="M44.1,66.1 A14,14 0 0,1 63.9,66.1"/>
+
+    <!-- Middle arc: r=25, endpoints (36.3,58.3) and (71.7,58.3) -->
+    <path
+        android:fillColor="none"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5.5"
+        android:strokeLineCap="round"
+        android:pathData="M36.3,58.3 A25,25 0 0,1 71.7,58.3"/>
+
+    <!-- Outer arc: r=36, endpoints (28.5,50.5) and (79.5,50.5) -->
+    <path
+        android:fillColor="none"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="5.5"
+        android:strokeLineCap="round"
+        android:pathData="M28.5,50.5 A36,36 0 0,1 79.5,50.5"/>
+
+</vector>

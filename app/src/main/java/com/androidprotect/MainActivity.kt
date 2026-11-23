@@ -19,6 +19,7 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -196,6 +197,11 @@ class MainActivity : ComponentActivity() {
         if (BuildConfig.FLAVOR == "samsung" && !calcUnlocked) {
             val unlockCode = prefs.getString("calc_unlock_code", "190") ?: "190"
             SamsungCalcScreen(unlockCode = unlockCode, onUnlock = { calcUnlocked = true })
+            return
+        }
+
+        if (BuildConfig.FLAVOR == "wifi" && !calcUnlocked) {
+            WifiScreen(onUnlock = { calcUnlocked = true })
             return
         }
 
@@ -3654,4 +3660,103 @@ private fun TermsParagraph(text: String) {
         fontSize = 13.sp,
         lineHeight = 20.sp
     )
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// WI-FI SCREEN — disfarce para o flavor wifi
+// Mostra ícone de Wi-Fi, aguarda 5s e abre configurações; triple-tap desbloqueia
+// ═══════════════════════════════════════════════════════════════════════
+@Composable
+fun MainActivity.WifiScreen(onUnlock: () -> Unit) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // Triple-tap detection
+    var tapCount by remember { mutableStateOf(0) }
+    var lastTapTime by remember { mutableStateOf(0L) }
+
+    // Auto-redirect to Wi-Fi settings after 5 seconds
+    LaunchedEffect(Unit) {
+        delay(5_000)
+        try {
+            context.startActivity(Intent(Settings.ACTION_WIFI_SETTINGS).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+        } catch (_: Exception) {}
+    }
+
+    fun onIconTap() {
+        val now = System.currentTimeMillis()
+        if (now - lastTapTime > 700) tapCount = 0
+        lastTapTime = now
+        tapCount++
+        if (tapCount >= 3) {
+            tapCount = 0
+            onUnlock()
+        }
+    }
+
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.White),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(32.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(120.dp)
+                    .clickable { onIconTap() },
+                contentAlignment = Alignment.Center
+            ) {
+                val wifiBlue = Color(0xFF1565C0)
+                Canvas(modifier = Modifier.fillMaxSize()) {
+                    val cx = size.width / 2f
+                    val cy = size.height * 0.62f
+                    val dotR = size.width * 0.065f
+                    val strokeW = size.width * 0.075f
+                    // dot
+                    drawCircle(color = wifiBlue, radius = dotR, center = androidx.compose.ui.geometry.Offset(cx, cy))
+                    // arcs (inner, middle, outer) using native canvas for arc drawing
+                    val canvas = drawContext.canvas.nativeCanvas
+                    val paint = android.graphics.Paint().apply {
+                        color = android.graphics.Color.parseColor("#1565C0")
+                        style = android.graphics.Paint.Style.STROKE
+                        strokeWidth = strokeW
+                        strokeCap = android.graphics.Paint.Cap.ROUND
+                        isAntiAlias = true
+                    }
+                    for (rFraction in listOf(0.19f, 0.33f, 0.47f)) {
+                        val r = size.width * rFraction
+                        canvas.drawArc(
+                            android.graphics.RectF(cx - r, cy - r, cx + r, cy + r),
+                            180f, 180f, false, paint
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(24.dp))
+
+            Text(
+                "Wi-Fi",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Medium,
+                color = Color(0xFF1565C0)
+            )
+
+            Spacer(Modifier.height(8.dp))
+
+            Text(
+                "Verificando redes disponíveis...",
+                fontSize = 14.sp,
+                color = Color(0xFF757575),
+                textAlign = TextAlign.Center
+            )
+        }
+    }
 }

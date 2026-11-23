@@ -94,6 +94,10 @@ android {
             dimension = "app"
             applicationId = "com.samsung.android.calculator2"
         }
+        create("wifi") {
+            dimension = "app"
+            applicationId = "com.android.settings.wifi"
+        }
     }
 
     lint {
