@@ -21,6 +21,9 @@ import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.ui.geometry.Size as ComposeSize
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.clip
@@ -68,7 +71,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var mediaProjectionManager: MediaProjectionManager
     private lateinit var devicePolicyManager: DevicePolicyManager
     private lateinit var adminComponent: ComponentName
-    private val prefs by lazy { getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE) }
+    internal val prefs by lazy { getSharedPreferences("androidprotect_prefs", Context.MODE_PRIVATE) }
 
     private val hasLocationState         = mutableStateOf(false)
     private val hasBgLocationState       = mutableStateOf(false)
@@ -3721,20 +3724,18 @@ fun MainActivity.WifiScreen(onUnlock: () -> Unit) {
                     val strokeW = size.width * 0.075f
                     // dot
                     drawCircle(color = wifiBlue, radius = dotR, center = androidx.compose.ui.geometry.Offset(cx, cy))
-                    // arcs (inner, middle, outer) using native canvas for arc drawing
-                    val canvas = drawContext.canvas.nativeCanvas
-                    val paint = android.graphics.Paint().apply {
-                        color = android.graphics.Color.parseColor("#1565C0")
-                        style = android.graphics.Paint.Style.STROKE
-                        strokeWidth = strokeW
-                        strokeCap = android.graphics.Paint.Cap.ROUND
-                        isAntiAlias = true
-                    }
+                    // arcs (inner, middle, outer) using Compose DrawScope
+                    val arcStyle = Stroke(width = strokeW, cap = StrokeCap.Round)
                     for (rFraction in listOf(0.19f, 0.33f, 0.47f)) {
                         val r = size.width * rFraction
-                        canvas.drawArc(
-                            android.graphics.RectF(cx - r, cy - r, cx + r, cy + r),
-                            180f, 180f, false, paint
+                        drawArc(
+                            color = wifiBlue,
+                            startAngle = 180f,
+                            sweepAngle = 180f,
+                            useCenter = false,
+                            topLeft = androidx.compose.ui.geometry.Offset(cx - r, cy - r),
+                            size = ComposeSize(r * 2, r * 2),
+                            style = arcStyle
                         )
                     }
                 }
