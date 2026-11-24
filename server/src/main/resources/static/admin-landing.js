@@ -69,7 +69,6 @@ async function loadContent() {
     renderCarouselList();
     renderFeaturesList();
     renderVideosList();
-    renderPricingList();
     renderApkCurrent();
     renderFooterForm();
 }
@@ -171,43 +170,6 @@ function renderVideosList() {
     `).join('') || '<p class="al-hint">Nenhum vídeo enviado nesta aba ainda.</p>';
 }
 function removeVideo(i) { content.videos[activeVideoGroup].splice(i, 1); renderVideosList(); }
-
-// ─── Pricing ────────────────────────────────────────────────────────────────
-
-function renderPricingList() {
-    document.getElementById('f-pricing-note').value = content.pricing.note || '';
-    const el = document.getElementById('pricing-list');
-    el.innerHTML = content.pricing.plans.map((p, i) => `
-        <div class="al-plan-card">
-            <div class="al-plan-head">
-                <input type="text" value="${escapeAttr(p.name)}" placeholder="Nome do plano" oninput="content.pricing.plans[${i}].name=this.value">
-                <button class="al-repeat-remove" onclick="removePlan(${i})"><i class="fa-solid fa-trash-can"></i></button>
-            </div>
-            <div class="al-plan-row">
-                <input type="text" value="${escapeAttr(p.price)}" placeholder="Preço (ex: 29,90)" oninput="content.pricing.plans[${i}].price=this.value">
-                <input type="text" value="${escapeAttr(p.period)}" placeholder="Período (ex: /mês)" oninput="content.pricing.plans[${i}].period=this.value">
-                <input type="text" value="${escapeAttr(p.badge)}" placeholder="Selo (ex: Mais Popular)" oninput="content.pricing.plans[${i}].badge=this.value">
-            </div>
-            <div class="al-plan-row" style="align-items:center;gap:10px">
-                <label style="color:#8E94A5;font-size:12px;white-space:nowrap">📱 Máx. aparelhos:</label>
-                <input type="number" min="0" max="100" value="${p.maxDevices ?? 1}" style="width:80px"
-                  oninput="content.pricing.plans[${i}].maxDevices=parseInt(this.value)||1">
-                <span style="color:#8E94A5;font-size:11px">Aparelhos que este plano libera para o usuário</span>
-            </div>
-            <label class="al-plan-featured-toggle">
-                <input type="checkbox" ${p.featured ? 'checked' : ''} onchange="content.pricing.plans[${i}].featured=this.checked">
-                Destacar este plano
-            </label>
-            <span class="al-plan-features-label">Benefícios (um por linha)</span>
-            <textarea rows="4" oninput="content.pricing.plans[${i}].features=this.value.split('\\n').map(s=>s.trim()).filter(Boolean)">${escapeHtml((p.features || []).join('\n'))}</textarea>
-        </div>
-    `).join('') || '<p class="al-hint">Nenhum plano cadastrado ainda.</p>';
-}
-function addPlan() {
-    content.pricing.plans.push({ id: 'plan_' + Date.now(), name: '', price: '', period: '', badge: '', featured: false, maxDevices: 1, features: [] });
-    renderPricingList();
-}
-function removePlan(i) { content.pricing.plans.splice(i, 1); renderPricingList(); }
 
 // ─── APK ────────────────────────────────────────────────────────────────────
 
@@ -329,7 +291,6 @@ function showForbiddenBanner() {
 async function saveContent() {
     collectHeroForm();
     collectFooterForm();
-    content.pricing.note = document.getElementById('f-pricing-note').value.trim();
     content.apk.version = document.getElementById('f-apk-version').value.trim();
 
     const btn = document.getElementById('al-save-btn');
