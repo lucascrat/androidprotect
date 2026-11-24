@@ -24,10 +24,8 @@ async function loadContent() {
         LANDING_CONTENT = await contentRes.json();
         const config = await configRes.json();
         if (config.trialDays) trialDays = config.trialDays;
-        if (config.plans && config.plans.length) {
-            LANDING_CONTENT.pricing = LANDING_CONTENT.pricing || {};
-            LANDING_CONTENT.pricing.plans = config.plans;
-        }
+        LANDING_CONTENT.pricing = LANDING_CONTENT.pricing || {};
+        LANDING_CONTENT.pricing.plans = config.plans || [];
     } catch (e) {
         console.warn('Failed to load landing content, using minimal fallback', e);
         LANDING_CONTENT = { hero: {}, stats: [], carousel: [], videos: { demo: [], install: [] }, features: [], pricing: { plans: [] }, apk: {}, footer: {} };
