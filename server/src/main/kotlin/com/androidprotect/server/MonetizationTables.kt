@@ -222,7 +222,13 @@ fun initMonetizationData() {
             AppSettingsTable.insert { it[key] = k; it[value] = v }
         }
     }
-    seedSetting("trial_days", "30")
+    seedSetting("trial_days", "15")
+    // Migrate old default of 30 → 15 so existing deployments update automatically
+    transaction {
+        AppSettingsTable.update({
+            (AppSettingsTable.key eq "trial_days") and (AppSettingsTable.value eq "30")
+        }) { it[AppSettingsTable.value] = "15" }
+    }
 
     // Default plans (match landing page content)
     if (transaction { PlansTable.selectAll().count() } == 0L) {
