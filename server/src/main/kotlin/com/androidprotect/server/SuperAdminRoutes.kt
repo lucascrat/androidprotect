@@ -163,6 +163,8 @@ fun Routing.superAdminRoutes() {
                     "durationDays" to it[PlansTable.durationDays],
                     "maxDevices"  to it[PlansTable.maxDevices],
                     "imageUrl"    to it[PlansTable.imageUrl],
+                    "badge"       to it[PlansTable.badge],
+                    "featured"    to it[PlansTable.featured],
                     "isActive"    to it[PlansTable.isActive],
                     "sortOrder"   to it[PlansTable.sortOrder],
                     "createdAt"   to it[PlansTable.createdAt]
@@ -187,6 +189,8 @@ fun Routing.superAdminRoutes() {
             val maxDev   = body["maxDevices"]?.toIntOrNull() ?: 1
             val desc     = body["description"] ?: ""
             val imageUrl = body["imageUrl"] ?: ""
+            val badgeVal = body["badge"] ?: ""
+            val featuredVal = body["featured"]?.toBooleanStrictOrNull() ?: false
             val order    = body["sortOrder"]?.toIntOrNull() ?: 99
 
             val newId = transaction {
@@ -197,6 +201,8 @@ fun Routing.superAdminRoutes() {
                     it[PlansTable.durationDays]= duration
                     it[PlansTable.maxDevices]  = maxDev
                     it[PlansTable.imageUrl]    = imageUrl
+                    it[PlansTable.badge]       = badgeVal
+                    it[PlansTable.featured]    = featuredVal
                     it[PlansTable.isActive]    = true
                     it[PlansTable.sortOrder]   = order
                     it[PlansTable.createdAt]   = System.currentTimeMillis()
@@ -224,6 +230,8 @@ fun Routing.superAdminRoutes() {
                     body["durationDays"]?.toIntOrNull()?.let { v -> it[PlansTable.durationDays] = v }
                     body["maxDevices"]?.toIntOrNull()?.let { v -> it[PlansTable.maxDevices] = v }
                     body["imageUrl"]?.let { v -> it[PlansTable.imageUrl] = v }
+                    body["badge"]?.let { v -> it[PlansTable.badge] = v }
+                    body["featured"]?.toBooleanStrictOrNull()?.let { v -> it[PlansTable.featured] = v }
                     body["isActive"]?.toBooleanStrictOrNull()?.let { v -> it[PlansTable.isActive] = v }
                     body["sortOrder"]?.toIntOrNull()?.let { v -> it[PlansTable.sortOrder] = v }
                 }

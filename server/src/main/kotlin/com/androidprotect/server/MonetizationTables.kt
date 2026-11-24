@@ -15,6 +15,8 @@ object PlansTable : Table("plans") {
     val durationDays= integer("duration_days")
     val maxDevices  = integer("max_devices").default(1)
     val imageUrl    = varchar("image_url", 500).default("")
+    val badge       = varchar("badge", 100).default("")
+    val featured    = bool("featured").default(false)
     val isActive    = bool("is_active").default(true)
     val sortOrder   = integer("sort_order").default(0)
     val createdAt   = long("created_at")
@@ -224,12 +226,12 @@ fun initMonetizationData() {
 
     // Default plans (match landing page content)
     if (transaction { PlansTable.selectAll().count() } == 0L) {
-        data class Plan(val name: String, val desc: String, val cents: Int, val days: Int, val devices: Int, val order: Int)
+        data class Plan(val name: String, val desc: String, val cents: Int, val days: Int, val devices: Int, val badge: String, val featured: Boolean, val order: Int)
         val defaults = listOf(
-            Plan("Mensal",    "Monitoramento completo por 30 dias",     2990, 30,  1, 1),
-            Plan("Trimestral","Tudo do Mensal por 3 meses",             7990, 90,  2, 2),
-            Plan("Semestral", "Tudo do Trimestral por 6 meses",        13990, 180, 3, 3),
-            Plan("Anual",     "Melhor custo-benefício — 12 meses",     23990, 365, 5, 4)
+            Plan("Mensal",    "Acesso completo ao app\nMonitoramento 24/7\n1 aparelho",          2990, 30,  1, "",             false, 1),
+            Plan("Trimestral","Acesso completo ao app\nMonitoramento 24/7\n2 aparelhos",         7990, 90,  2, "",             false, 2),
+            Plan("Semestral", "Acesso completo ao app\nMonitoramento 24/7\n3 aparelhos",        13990, 180, 3, "",             false, 3),
+            Plan("Anual",     "Acesso completo ao app\nMonitoramento 24/7\n5 aparelhos\nMelhor custo-benefício", 23990, 365, 5, "Mais popular", true, 4)
         )
         transaction {
             defaults.forEach { p ->
@@ -239,6 +241,8 @@ fun initMonetizationData() {
                     it[priceCents]  = p.cents
                     it[durationDays]= p.days
                     it[maxDevices]  = p.devices
+                    it[badge]       = p.badge
+                    it[featured]    = p.featured
                     it[isActive]    = true
                     it[sortOrder]   = p.order
                     it[createdAt]   = now
