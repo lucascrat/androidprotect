@@ -53,7 +53,7 @@ fun Routing.subscriptionRoutes() {
     // ── GET /api/public/config — landing config (public) ──────────────────
     get("/api/public/config") {
         val trialDays = getTrialDays()
-        val plans = transaction {
+        val paidPlans = transaction {
             PlansTable.select { PlansTable.isActive eq true }
                 .orderBy(PlansTable.sortOrder to SortOrder.ASC)
                 .map {
@@ -78,6 +78,22 @@ fun Routing.subscriptionRoutes() {
                     )
                 }
         }
+        val freePlan = mapOf(
+            "id"         to 0,
+            "name"       to "Grátis",
+            "price"      to "0",
+            "period"     to "/$trialDays dias de teste",
+            "badge"      to "Comece Grátis",
+            "featured"   to false,
+            "maxDevices" to 2,
+            "features"   to listOf(
+                "Acesso completo ao app",
+                "Monitoramento 24/7",
+                "2 aparelhos monitorados",
+                "Sem cartão de crédito"
+            )
+        )
+        val plans = listOf(freePlan) + paidPlans
         call.respondJson2(mapOf("trialDays" to trialDays, "plans" to plans))
     }
 

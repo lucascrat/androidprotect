@@ -258,35 +258,31 @@ function renderPricing(pricing) {
 
     const whatsapp = (LANDING_CONTENT.footer || {}).whatsapp;
 
-    grid.innerHTML = plans.map(p => `
+    grid.innerHTML = plans.map(p => {
+        const isFree = p.price === '0' || p.price === '0,00' || p.price === '0.00';
+        const priceHtml = isFree
+            ? `<div class="price-value"><span class="price-amount" style="font-size:2.2rem;letter-spacing:-.5px">Grátis</span></div>`
+            : `<div class="price-value"><span class="price-currency">R$</span><span class="price-amount">${escapeHtml(p.price)}</span></div>`;
+        const ctaText = isFree ? 'Começar Grátis' : 'Quero Este Plano';
+        const ctaIcon = isFree ? 'fa-solid fa-user-plus' : 'fa-solid fa-arrow-right';
+        return `
         <div class="price-card${p.featured ? ' featured' : ''} reveal">
             ${p.badge ? `<div class="price-badge">${escapeHtml(p.badge)}</div>` : ''}
             <div class="price-name">${escapeHtml(p.name)}</div>
-            <div class="price-value">
-                <span class="price-currency">R$</span>
-                <span class="price-amount">${escapeHtml(p.price)}</span>
-            </div>
+            ${priceHtml}
             <div class="price-period">${escapeHtml(p.period || '')}</div>
             ${p.maxDevices ? `<div class="price-devices"><i class="fa-solid fa-mobile-screen"></i> Até ${p.maxDevices} aparelho${p.maxDevices > 1 ? 's' : ''}</div>` : ''}
             <ul class="price-features">
                 ${(p.features || []).map(f => `<li><i class="fa-solid fa-circle-check"></i><span>${escapeHtml(f)}</span></li>`).join('')}
             </ul>
-            <a class="btn price-cta" href="${planCtaHref(whatsapp, p.name)}" target="${whatsapp ? '_blank' : '_self'}" rel="noopener">
-                <span>Quero Este Plano</span>
-                <i class="fa-solid fa-arrow-right"></i>
+            <a class="btn price-cta" href="/login.html?tab=register">
+                <span>${ctaText}</span>
+                <i class="${ctaIcon}"></i>
             </a>
-        </div>
-    `).join('');
+        </div>`;
+    }).join('');
 }
 
-function planCtaHref(whatsapp, planName) {
-    if (whatsapp) {
-        const digits = whatsapp.replace(/\D/g, '');
-        const msg = encodeURIComponent(`Olá! Quero assinar o plano ${planName} do AndroidProtect.`);
-        return `https://wa.me/${digits}?text=${msg}`;
-    }
-    return '#baixar';
-}
 
 // ─── APK download ────────────────────────────────────────────────────────────────────────────
 
