@@ -471,6 +471,19 @@ input:checked+.slider:before{transform:translateX(17px)}
     </div>
     <div class="form-row">
       <div class="form-group">
+        <label>Badge <span style="font-weight:400;color:var(--sub)">(ex: Mais popular)</span></label>
+        <input id="planBadge" placeholder="Deixe vazio para não exibir">
+      </div>
+      <div class="form-group">
+        <label>Destaque</label>
+        <div class="toggle-switch" style="margin-top:10px">
+          <label class="switch"><input type="checkbox" id="planFeatured"><span class="slider"></span></label>
+          <span style="color:var(--sub);font-size:.82rem">Destacar no site</span>
+        </div>
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
         <label>Ordem</label>
         <input id="planOrder" type="number" value="99">
       </div>
@@ -764,10 +777,11 @@ function openPlanModal() {
   document.getElementById('planModal').classList.add('open');
   document.getElementById('editPlanId').value = '';
   document.getElementById('modalTitle').textContent = 'Novo Plano';
-  ['planName','planPrice','planDuration','planDesc','planImage'].forEach(id => document.getElementById(id).value = '');
+  ['planName','planPrice','planDuration','planDesc','planImage','planBadge'].forEach(id => document.getElementById(id).value = '');
   document.getElementById('planDevices').value = 1;
   document.getElementById('planOrder').value = 99;
   document.getElementById('planActive').checked = true;
+  document.getElementById('planFeatured').checked = false;
 }
 
 async function editPlan(id) {
@@ -783,6 +797,8 @@ async function editPlan(id) {
   document.getElementById('planDevices').value = p.maxDevices || 1;
   document.getElementById('planDesc').value = p.description || '';
   document.getElementById('planImage').value = p.imageUrl || '';
+  document.getElementById('planBadge').value = p.badge || '';
+  document.getElementById('planFeatured').checked = !!p.featured;
   document.getElementById('planOrder').value = p.sortOrder ?? 99;
   document.getElementById('planActive').checked = !!p.isActive;
 }
@@ -798,6 +814,8 @@ async function savePlan() {
     maxDevices:   document.getElementById('planDevices').value,
     description:  document.getElementById('planDesc').value,
     imageUrl:     document.getElementById('planImage').value.trim(),
+    badge:        document.getElementById('planBadge').value.trim(),
+    featured:     document.getElementById('planFeatured').checked ? 'true' : 'false',
     sortOrder:    document.getElementById('planOrder').value,
     isActive:     document.getElementById('planActive').checked ? 'true' : 'false'
   };

@@ -50,6 +50,37 @@ fun Routing.subscriptionRoutes() {
         call.respondJson2(plans)
     }
 
+    // ── GET /api/public/config — landing config (public) ──────────────────
+    get("/api/public/config") {
+        val trialDays = getTrialDays()
+        val plans = transaction {
+            PlansTable.select { PlansTable.isActive eq true }
+                .orderBy(PlansTable.sortOrder to SortOrder.ASC)
+                .map {
+                    val days = it[PlansTable.durationDays]
+                    val period = when (days) {
+                        30   -> "/mês"
+                        90   -> "/3 meses"
+                        180  -> "/6 meses"
+                        365  -> "/ano"
+                        else -> "/$days dias"
+                    }
+                    val features = it[PlansTable.description].split("\n").filter { f -> f.isNotBlank() }
+                    mapOf(
+                        "id"         to it[PlansTable.id],
+                        "name"       to it[PlansTable.name],
+                        "price"      to centsToBrl(it[PlansTable.priceCents]),
+                        "period"     to period,
+                        "badge"      to it[PlansTable.badge],
+                        "featured"   to it[PlansTable.featured],
+                        "maxDevices" to it[PlansTable.maxDevices],
+                        "features"   to features
+                    )
+                }
+        }
+        call.respondJson2(mapOf("trialDays" to trialDays, "plans" to plans))
+    }
+
     // ── GET /api/subscription/status ──────────────────────────────────────
     get("/api/subscription/status") {
         val userId = getSessionUserId(call)

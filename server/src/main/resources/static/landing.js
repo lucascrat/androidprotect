@@ -15,14 +15,25 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 async function loadContent() {
+    let trialDays = 30;
     try {
-        const res = await fetch('/api/landing/content', { cache: 'no-store' });
-        LANDING_CONTENT = await res.json();
+        const [contentRes, configRes] = await Promise.all([
+            fetch('/api/landing/content', { cache: 'no-store' }),
+            fetch('/api/public/config', { cache: 'no-store' })
+        ]);
+        LANDING_CONTENT = await contentRes.json();
+        const config = await configRes.json();
+        if (config.trialDays) trialDays = config.trialDays;
+        if (config.plans && config.plans.length) {
+            LANDING_CONTENT.pricing = LANDING_CONTENT.pricing || {};
+            LANDING_CONTENT.pricing.plans = config.plans;
+        }
     } catch (e) {
         console.warn('Failed to load landing content, using minimal fallback', e);
         LANDING_CONTENT = { hero: {}, stats: [], carousel: [], videos: { demo: [], install: [] }, features: [], pricing: { plans: [] }, apk: {}, footer: {} };
     }
     renderHero(LANDING_CONTENT.hero || {});
+    renderTrialDays(trialDays);
     renderStats(LANDING_CONTENT.stats || []);
     renderCarousel(LANDING_CONTENT.carousel || []);
     renderFeatures(LANDING_CONTENT.features || []);
@@ -30,6 +41,11 @@ async function loadContent() {
     renderPricing(LANDING_CONTENT.pricing || { plans: [] });
     renderApk(LANDING_CONTENT.apk || {});
     renderFooter(LANDING_CONTENT.footer || {});
+}
+
+function renderTrialDays(days) {
+    const el = document.getElementById('hero-trial-days');
+    if (el) el.innerHTML = `<i class="fa-solid fa-check"></i> ${days} dias grátis`;
 }
 
 function escapeHtml(str) {
