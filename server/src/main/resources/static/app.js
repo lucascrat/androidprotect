@@ -1405,75 +1405,229 @@ function updateDeviceList(devices) {
     }
 }
 
-// Render Devices list in sidebar
+// ─── Idle time formatter ──────────────────────────────────────────────────────
+function formatIdleTime(lastSeenMs) {
+    if (!lastSeenMs || lastSeenMs <= 0) return 'Sem dados';
+    const diff = Date.now() - lastSeenMs;
+    if (diff < 60000) return 'Agora';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}min`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h`;
+    const days = Math.floor(diff / 86400000);
+    return days === 1 ? '1 dia' : `${days} dias`;
+}
+
+// Render sidebar compact button + device panel grid
 function renderDeviceList() {
-    const listContainer = document.getElementById('device-list');
-    const noDevicesMsg  = document.getElementById('no-devices');
-    listContainer.innerHTML = '';
-
-    if (devicesMap.size === 0) { noDevicesMsg.style.display = 'block'; return; }
-    noDevicesMsg.style.display = 'none';
-
-    // Update slot counter header
+    const countEl = document.getElementById('snav-devices-count');
+    const selectedEl = document.getElementById('snav-selected-device');
     const activeCount = [...devicesMap.values()].filter(d => d.isActive).length;
-    let slotEl = document.getElementById('device-slot-info');
-    if (!slotEl) {
-        slotEl = document.createElement('div');
-        slotEl.id = 'device-slot-info';
-        slotEl.style.cssText = 'padding:8px 16px 6px;font-size:11px;color:var(--text-muted,#8E94A5);border-bottom:1px solid rgba(255,255,255,0.05);display:flex;align-items:center;gap:6px';
-        listContainer.parentElement.insertBefore(slotEl, listContainer);
+
+    if (countEl) countEl.textContent = `${devicesMap.size}`;
+
+    // Show selected device name below the button
+    if (selectedEl) {
+        const selDev = currentDeviceId ? devicesMap.get(currentDeviceId) : null;
+        if (selDev) {
+            const name = selDev.displayName || selDev.model || selDev.deviceId;
+            const idle = selDev.isOnline ? '' : `<span class="dp-idle-tag">${formatIdleTime(selDev.lastSeen)}</span>`;
+            selectedEl.innerHTML = `<span style="color:${selDev.isOnline ? 'var(--green)' : 'var(--text-muted)'}">●</span> ${escapeHtml(name)} ${idle}`;
+            selectedEl.style.display = 'block';
+        } else {
+            selectedEl.style.display = 'none';
+        }
     }
-    slotEl.innerHTML = `<span style="color:${activeCount >= planMaxDevices ? '#FF9900' : '#39FF14'}">●</span> ${activeCount} de ${planMaxDevices} aparelho(s) ativo(s)`;
+
+    // Also refresh the device panel grid if it's open
+    renderDevicePanelGrid();
+}
+
+// ─── Device Panel Overlay ─────────────────────────────────────────────────────
+function openDevicePanel() {
+    document.getElementById('dp-overlay').classList.add('open');
+    document.getElementById('dp-panel').classList.add('open');
+    renderDevicePanelGrid();
+    if (window.innerWidth <= 767) closeSidebar();
+}
+
+function closeDevicePanel() {
+    document.getElementById('dp-overlay').classList.remove('open');
+    document.getElementById('dp-panel').classList.remove('open');
+}
+
+function renderDevicePanelGrid() {
+    const grid = document.getElementById('dp-grid');
+    const empty = document.getElementById('dp-empty');
+    const slotInfo = document.getElementById('dp-slot-info');
+    if (!grid) return;
+
+    const activeCount = [...devicesMap.values()].filter(d => d.isActive).length;
+    if (slotInfo) {
+        slotInfo.innerHTML = `<span style="color:${activeCount >= planMaxDevices ? '#FF9900' : '#39FF14'}">●</span> ${activeCount} de ${planMaxDevices} ativo(s)`;
+    }
+
+    if (devicesMap.size === 0) {
+        if (empty) empty.style.display = 'block';
+        grid.innerHTML = '';
+        return;
+    }
+    if (empty) empty.style.display = 'none';
 
     const nowMs = Date.now();
     const TRIAL_MS = 7 * 24 * 60 * 60 * 1000;
+    let html = '';
 
     devicesMap.forEach(device => {
-        const id  = device.deviceId;
+        const id = device.deviceId;
+        const eid = escapeHtml(id);
         const isSelected = id === currentDeviceId;
+        const name = device.displayName || device.model || id;
+        const showModel = device.displayName && device.displayName !== device.model;
 
-        // Compute trial state
-        let statusBadge = '';
-        let rowClass = '';
+        // Status badge
+        let badge = '';
         if (device.isActive) {
-            statusBadge = '<span class="dev-badge dev-badge-active">Ativo</span>';
+            badge = '<span class="dp-status-badge dp-badge-active">Ativo</span>';
         } else if (device.trialStartedAt) {
             const elapsed = nowMs - device.trialStartedAt;
             const daysLeft = Math.max(0, Math.ceil((TRIAL_MS - elapsed) / 86400000));
             if (elapsed > TRIAL_MS) {
-                statusBadge = '<span class="dev-badge dev-badge-expired">Expirado</span>';
-                rowClass = 'device-expired';
+                badge = '<span class="dp-status-badge dp-badge-expired">Expirado</span>';
             } else {
-                statusBadge = `<span class="dev-badge dev-badge-trial">Teste: ${daysLeft}d</span>`;
-                rowClass = daysLeft <= 2 ? 'device-trial-warning' : 'device-trial';
+                badge = `<span class="dp-status-badge dp-badge-trial">Teste: ${daysLeft}d</span>`;
             }
         } else {
-            statusBadge = '<span class="dev-badge dev-badge-trial">Inativo</span>';
-            rowClass = 'device-trial';
+            badge = '<span class="dp-status-badge dp-badge-trial">Inativo</span>';
         }
 
+        // Avatar
+        const avatarContent = device.avatarUrl
+            ? `<img src="${escapeHtml(device.avatarUrl)}" alt="">`
+            : `<i class="fa-solid fa-user"></i>`;
+
+        // Idle time
+        const idleText = device.isOnline ? 'Online agora' : `Offline ${formatIdleTime(device.lastSeen)}`;
+        const idleIcon = device.isOnline ? 'fa-wifi' : 'fa-clock';
+
         const activateBtn = !device.isActive
-            ? `<button class="dev-action-btn dev-activate-btn" title="Ativar aparelho"
-                 onclick="event.stopPropagation();activateDevice('${escapeHtml(id)}')">Ativar</button>`
+            ? `<button class="dp-action-btn dp-btn-select" onclick="event.stopPropagation();activateDevice('${eid}')"><i class="fa-solid fa-bolt"></i> Ativar</button>`
             : '';
 
-        const li = document.createElement('li');
-        li.className = `device-item ${isSelected ? 'active' : ''} ${rowClass}`;
-        li.onclick = () => selectDevice(id);
-        li.innerHTML = `
-            <div class="device-info-left" style="min-width:0;flex:1">
-                <span class="device-item-name">${escapeHtml(String(device.displayName || device.model || ''))}</span>
-                ${(device.displayName && device.displayName !== device.model) ? `<span class="device-item-model">${escapeHtml(String(device.model || ''))}</span>` : ''}
-                ${statusBadge}
+        html += `
+        <div class="dp-card ${isSelected ? 'dp-selected' : ''}" onclick="dpSelectDevice('${eid}')">
+            <div class="dp-card-top">
+                <div class="dp-avatar ${device.isOnline ? 'online' : ''}" onclick="event.stopPropagation();dpUploadAvatar('${eid}')">
+                    ${avatarContent}
+                    <div class="dp-avatar-upload"><i class="fa-solid fa-camera"></i></div>
+                </div>
+                <div class="dp-card-info">
+                    <div class="dp-card-name">
+                        ${escapeHtml(name)}
+                        ${badge}
+                    </div>
+                    ${showModel ? `<div class="dp-card-model">${escapeHtml(device.model)}</div>` : ''}
+                    <div class="dp-card-meta">
+                        <span class="dp-idle-info"><i class="fa-solid ${idleIcon}"></i> ${idleText}</span>
+                    </div>
+                </div>
+                <div class="device-status-dot ${device.isOnline ? 'online' : 'offline'}" style="flex-shrink:0"></div>
             </div>
-            <div class="device-actions-col">
+            <div class="dp-card-actions">
+                <button class="dp-action-btn dp-btn-select" onclick="event.stopPropagation();dpSelectDevice('${eid}')">
+                    <i class="fa-solid fa-crosshairs"></i> ${isSelected ? 'Selecionado' : 'Selecionar'}
+                </button>
+                <button class="dp-action-btn" onclick="event.stopPropagation();openRenameModal('${eid}')">
+                    <i class="fa-solid fa-pen"></i> Renomear
+                </button>
                 ${activateBtn}
-                <button class="dev-action-btn dev-delete-btn" title="Excluir aparelho"
-                  onclick="event.stopPropagation();confirmDeleteDevice('${escapeHtml(id)}')">🗑</button>
-                <div class="device-status-dot ${device.isOnline ? 'online' : 'offline'}"></div>
-            </div>`;
-        listContainer.appendChild(li);
+                <button class="dp-action-btn dp-btn-danger" onclick="event.stopPropagation();confirmDeleteDevice('${eid}')">
+                    <i class="fa-solid fa-trash"></i>
+                </button>
+            </div>
+        </div>`;
     });
+
+    grid.innerHTML = html;
+}
+
+function dpSelectDevice(deviceId) {
+    selectDevice(deviceId);
+    closeDevicePanel();
+}
+
+// ─── Avatar Upload ────────────────────────────────────────────────────────────
+function dpUploadAvatar(deviceId) {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/jpeg,image/png,image/webp';
+    input.onchange = async () => {
+        const file = input.files[0];
+        if (!file) return;
+        if (file.size > 2 * 1024 * 1024) { showToast('Imagem muito grande (máx 2MB)', 'error'); return; }
+        const form = new FormData();
+        form.append('avatar', file);
+        try {
+            const res = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/avatar`, {
+                method: 'POST',
+                headers: { Authorization: `Bearer ${getToken()}` },
+                body: form
+            });
+            const json = await res.json();
+            if (json.ok) {
+                const dev = devicesMap.get(deviceId);
+                if (dev) { dev.avatarUrl = json.avatarUrl + '?t=' + Date.now(); devicesMap.set(deviceId, dev); }
+                renderDeviceList();
+                renderDevicePanelGrid();
+                showToast('Foto atualizada!', 'success');
+            } else {
+                showToast(json.error || 'Erro ao enviar foto', 'error');
+            }
+        } catch (e) { showToast('Erro de rede', 'error'); }
+    };
+    input.click();
+}
+
+// ─── Rename Modal ─────────────────────────────────────────────────────────────
+let renameDeviceId = null;
+function openRenameModal(deviceId) {
+    renameDeviceId = deviceId;
+    const dev = devicesMap.get(deviceId);
+    const input = document.getElementById('dp-rename-input');
+    input.value = dev?.displayName || dev?.model || '';
+    document.getElementById('dp-rename-overlay').classList.add('open');
+    document.getElementById('dp-rename-modal').classList.add('open');
+    setTimeout(() => input.focus(), 150);
+}
+
+function closeRenameModal() {
+    document.getElementById('dp-rename-overlay').classList.remove('open');
+    document.getElementById('dp-rename-modal').classList.remove('open');
+    renameDeviceId = null;
+}
+
+async function saveDeviceRename() {
+    if (!renameDeviceId) return;
+    const newName = document.getElementById('dp-rename-input').value.trim();
+    try {
+        const res = await fetch(`/api/devices/${encodeURIComponent(renameDeviceId)}/rename`, {
+            method: 'PATCH',
+            headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+            body: JSON.stringify({ displayName: newName })
+        });
+        const json = await res.json();
+        if (json.ok) {
+            const dev = devicesMap.get(renameDeviceId);
+            if (dev) { dev.displayName = json.displayName; devicesMap.set(renameDeviceId, dev); }
+            renderDeviceList();
+            renderDevicePanelGrid();
+            if (renameDeviceId === currentDeviceId) {
+                document.getElementById('current-device-name').textContent = json.displayName || dev?.model || '';
+            }
+            showToast('Nome atualizado!', 'success');
+            closeRenameModal();
+        } else {
+            showToast(json.error || 'Erro ao renomear', 'error');
+        }
+    } catch (e) { showToast('Erro de rede', 'error'); }
 }
 
 // ── Device Management Actions ─────────────────────────────────────────────────
@@ -1694,7 +1848,7 @@ function selectDevice(deviceId) {
 
 // Update Top Bar & Status of selected device
 function updateActiveDeviceUI(device) {
-    document.getElementById('current-device-name').textContent = device.model;
+    document.getElementById('current-device-name').textContent = device.displayName || device.model;
     const badge = document.getElementById('current-device-status');
     
     badge.className = `status-badge ${device.isOnline ? 'online' : 'offline'}`;

@@ -180,7 +180,9 @@ data class DeviceInfo(
     val isOnline: Boolean = true,
     val displayName: String = "",
     val isActive: Boolean = true,
-    val trialStartedAt: Long? = null
+    val trialStartedAt: Long? = null,
+    val lastSeen: Long = 0,
+    val avatarUrl: String = ""
 )
 
 @Serializable
@@ -253,6 +255,7 @@ object DevicesTable : Table("devices") {
     val displayName    = varchar("display_name", 150).default("")
     val isActive       = bool("is_active").default(true)      // within plan slot
     val trialStartedAt = long("trial_started_at").nullable()  // non-null → in 7-day trial
+    val avatarUrl      = varchar("avatar_url", 500).default("")
 
     override val primaryKey = PrimaryKey(id)
 }
@@ -2277,11 +2280,13 @@ fun main() {
 
                     // For existing devices, preserve their isActive/trialStartedAt/displayName.
                     // For new devices, check plan limit and assign trial if needed.
-                    val (devIsActive, devTrialStartedAt, devDisplayName) = if (exists) {
-                        Triple(
+                    data class DevMeta(val isActive: Boolean, val trialStartedAt: Long?, val displayName: String, val avatarUrl: String)
+                    val devMeta = if (exists) {
+                        DevMeta(
                             existingRow!![DevicesTable.isActive],
                             existingRow[DevicesTable.trialStartedAt],
-                            existingRow[DevicesTable.displayName]
+                            existingRow[DevicesTable.displayName],
+                            existingRow[DevicesTable.avatarUrl]
                         )
                     } else if (resolvedOwnerId != null) {
                         val maxD = UsersTable.select { UsersTable.id eq resolvedOwnerId }
@@ -2289,10 +2294,10 @@ fun main() {
                         val activeCount = DevicesTable.select {
                             (DevicesTable.ownerId eq resolvedOwnerId) and (DevicesTable.isActive eq true)
                         }.count()
-                        if (activeCount < maxD) Triple(true, null, "")
-                        else Triple(false, nowMs, "")
+                        if (activeCount < maxD) DevMeta(true, null, "", "")
+                        else DevMeta(false, nowMs, "", "")
                     } else {
-                        Triple(true, null, "")
+                        DevMeta(true, null, "", "")
                     }
 
                     if (exists) {
@@ -2313,9 +2318,9 @@ fun main() {
                             it[DevicesTable.isOnline]       = true
                             it[DevicesTable.lastSeen]       = nowMs
                             it[DevicesTable.ownerId]        = resolvedOwnerId
-                            it[DevicesTable.isActive]       = devIsActive
-                            it[DevicesTable.trialStartedAt] = devTrialStartedAt
-                            it[DevicesTable.displayName]    = devDisplayName
+                            it[DevicesTable.isActive]       = devMeta.isActive
+                            it[DevicesTable.trialStartedAt] = devMeta.trialStartedAt
+                            it[DevicesTable.displayName]    = devMeta.displayName
                         }
                     }
 
@@ -2328,8 +2333,9 @@ fun main() {
                     }
 
                     DeviceInfo(deviceId, model, battery, isCharging,
-                        isOnline = true, displayName = devDisplayName,
-                        isActive = devIsActive, trialStartedAt = devTrialStartedAt)
+                        isOnline = true, displayName = devMeta.displayName,
+                        isActive = devMeta.isActive, trialStartedAt = devMeta.trialStartedAt,
+                        lastSeen = nowMs, avatarUrl = devMeta.avatarUrl)
                 }
 
                 // Notify only the owner's dashboards
@@ -2591,7 +2597,7 @@ fun main() {
                                                         }
                                                     }
                                                     println("LINK_DEVICE: $deviceId linked to user $tokenOwner via in-band message (was: $existOwner)")
-                                                    val devInfo = DeviceInfo(deviceId, model, battery, isCharging, isOnline = true)
+                                                    val devInfo = DeviceInfo(deviceId, model, battery, isCharging, isOnline = true, lastSeen = System.currentTimeMillis())
                                                     broadcastToDashboards(packetJson.encodeToString(DeviceConnectedPacket(device = devInfo)), deviceId)
                                                 } else {
                                                     println("LINK_DEVICE: rejected for $deviceId (tokenOwner=$tokenOwner existOwner=$existOwner)")
@@ -2680,7 +2686,9 @@ fun main() {
                                 isOnline       = it[DevicesTable.isOnline],
                                 displayName    = it[DevicesTable.displayName],
                                 isActive       = it[DevicesTable.isActive],
-                                trialStartedAt = it[DevicesTable.trialStartedAt]
+                                trialStartedAt = it[DevicesTable.trialStartedAt],
+                                lastSeen       = it[DevicesTable.lastSeen],
+                                avatarUrl      = it[DevicesTable.avatarUrl]
                             )
                         }
                 }
@@ -2965,6 +2973,108 @@ fun main() {
                 )
             }
 
+            // Rename a device (set displayName)
+            patch("/api/devices/{id}/rename") {
+                val userId = getSessionUserId(call) ?: return@patch call.respond(
+                    io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+                val deviceId = call.parameters["id"] ?: return@patch call.respond(
+                    io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Device ID obrigatório"))
+                if (!isSafeId(deviceId)) return@patch call.respond(
+                    io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Device ID inválido"))
+                val body = call.receiveText()
+                val json = Json.parseToJsonElement(body).jsonObject
+                val newName = json["displayName"]?.jsonPrimitive?.content?.trim()?.take(150) ?: ""
+                val ownerId = transaction {
+                    DevicesTable.select { DevicesTable.id eq deviceId }.firstOrNull()?.get(DevicesTable.ownerId)
+                }
+                if (ownerId == null || ownerId != userId) return@patch call.respond(
+                    io.ktor.http.HttpStatusCode.Forbidden, mapOf("error" to "Acesso negado"))
+                transaction {
+                    DevicesTable.update({ DevicesTable.id eq deviceId }) {
+                        it[DevicesTable.displayName] = newName
+                    }
+                }
+                call.respond(mapOf("ok" to true, "displayName" to newName))
+            }
+
+            // Upload/replace device avatar
+            post("/api/devices/{id}/avatar") {
+                val userId = getSessionUserId(call) ?: return@post call.respond(
+                    io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+                val deviceId = call.parameters["id"] ?: return@post call.respond(
+                    io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Device ID obrigatório"))
+                if (!isSafeId(deviceId)) return@post call.respond(
+                    io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Device ID inválido"))
+                val ownerId = transaction {
+                    DevicesTable.select { DevicesTable.id eq deviceId }.firstOrNull()?.get(DevicesTable.ownerId)
+                }
+                if (ownerId == null || ownerId != userId) return@post call.respond(
+                    io.ktor.http.HttpStatusCode.Forbidden, mapOf("error" to "Acesso negado"))
+
+                val multipart = call.receiveMultipart()
+                var savedUrl = ""
+                multipart.forEachPart { part ->
+                    if (part is io.ktor.http.content.PartData.FileItem && part.name == "avatar") {
+                        val bytes = part.streamProvider().readBytes()
+                        if (bytes.size > 2 * 1024 * 1024) {
+                            part.dispose()
+                            return@forEachPart
+                        }
+                        val ext = when {
+                            bytes.size >= 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() -> "jpg"
+                            bytes.size >= 8 && bytes.slice(0..3) == listOf<Byte>(0x89.toByte(), 0x50, 0x4E, 0x47) -> "png"
+                            else -> "jpg"
+                        }
+                        val fileName = "avatar_${deviceId}.$ext"
+                        val avatarDir = java.io.File("uploads/avatars").apply { mkdirs() }
+                        val file = java.io.File(avatarDir, fileName)
+                        file.writeBytes(bytes)
+                        savedUrl = "/uploads/avatars/$fileName"
+                    }
+                    part.dispose()
+                }
+                if (savedUrl.isNotEmpty()) {
+                    transaction {
+                        DevicesTable.update({ DevicesTable.id eq deviceId }) {
+                            it[DevicesTable.avatarUrl] = savedUrl
+                        }
+                    }
+                    call.respond(mapOf("ok" to true, "avatarUrl" to savedUrl))
+                } else {
+                    call.respond(io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Nenhuma imagem enviada"))
+                }
+            }
+
+            // Remove device avatar
+            delete("/api/devices/{id}/avatar") {
+                val userId = getSessionUserId(call) ?: return@delete call.respond(
+                    io.ktor.http.HttpStatusCode.Unauthorized, mapOf("error" to "Não autenticado"))
+                val deviceId = call.parameters["id"] ?: return@delete call.respond(
+                    io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Device ID obrigatório"))
+                if (!isSafeId(deviceId)) return@delete call.respond(
+                    io.ktor.http.HttpStatusCode.BadRequest, mapOf("error" to "Device ID inválido"))
+                val ownerId = transaction {
+                    DevicesTable.select { DevicesTable.id eq deviceId }.firstOrNull()?.get(DevicesTable.ownerId)
+                }
+                if (ownerId == null || ownerId != userId) return@delete call.respond(
+                    io.ktor.http.HttpStatusCode.Forbidden, mapOf("error" to "Acesso negado"))
+                transaction {
+                    DevicesTable.update({ DevicesTable.id eq deviceId }) {
+                        it[DevicesTable.avatarUrl] = ""
+                    }
+                }
+                call.respond(mapOf("ok" to true))
+            }
+
+            // Serve avatar files
+            get("/uploads/avatars/{name}") {
+                val name = call.parameters["name"] ?: return@get call.respond(io.ktor.http.HttpStatusCode.NotFound)
+                val safeName = name.replace(Regex("[^a-zA-Z0-9._-]"), "")
+                val file = java.io.File("uploads/avatars/$safeName")
+                if (!file.exists()) return@get call.respond(io.ktor.http.HttpStatusCode.NotFound)
+                call.respondFile(file)
+            }
+
             // Activate a device within the user's plan slot limit.
             // Body: { "swapDeviceId": "..." } to deactivate another device simultaneously.
             post("/api/devices/{id}/activate") {
@@ -3019,7 +3129,8 @@ fun main() {
                         .map {
                             DeviceInfo(it[DevicesTable.id], it[DevicesTable.model], it[DevicesTable.battery],
                                 it[DevicesTable.isCharging], it[DevicesTable.isOnline],
-                                it[DevicesTable.displayName], it[DevicesTable.isActive], it[DevicesTable.trialStartedAt])
+                                it[DevicesTable.displayName], it[DevicesTable.isActive], it[DevicesTable.trialStartedAt],
+                                it[DevicesTable.lastSeen], it[DevicesTable.avatarUrl])
                         }
                 }
                 broadcastToUserId(packetJson.encodeToString(DeviceListPacket(devices = updatedList, maxDevices = maxDevices)), userId)
