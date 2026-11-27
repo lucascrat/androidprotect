@@ -249,19 +249,20 @@
 
             <div class="sidebar-body">
 
-                <!-- Devices collapsible section -->
+                <!-- Devices compact button — opens device panel overlay -->
                 <div class="snav-group">
-                    <div class="snav-group-header" onclick="toggleSidebarDevices()" title="Recolher/Expandir">
-                        <span><i class="fa-solid fa-mobile-screen"></i>&nbsp; DISPOSITIVOS</span>
-                        <i class="fa-solid fa-chevron-down snav-chevron" id="snav-devices-chevron"></i>
-                    </div>
-                    <div id="sidebar-devices-panel" class="snav-devices-panel">
-                        <div id="no-devices" class="no-devices-msg">
-                            <i class="fa-solid fa-spinner fa-spin"></i>
-                            <p>Aguardando conexão de dispositivos...</p>
-                        </div>
-                        <ul id="device-list" class="device-list"></ul>
-                    </div>
+                    <button class="snav-item snav-devices-btn" id="btn-open-devices" onclick="openDevicePanel()">
+                        <i class="fa-solid fa-mobile-screen"></i>&nbsp; Aparelhos
+                        <span class="snav-devices-count" id="snav-devices-count"></span>
+                        <i class="fa-solid fa-chevron-right" style="margin-left:auto;font-size:.6rem;opacity:.5"></i>
+                    </button>
+                    <div class="snav-selected-device" id="snav-selected-device" onclick="openDevicePanel()"></div>
+                </div>
+
+                <!-- Hidden containers kept for compatibility -->
+                <div style="display:none">
+                    <div id="no-devices"></div>
+                    <ul id="device-list"></ul>
                 </div>
 
                 <!-- Navigation -->
@@ -1793,5 +1794,34 @@
   // (the dashboard-grid cards that were hidden should be shown again)
 })();
 </script>
+
+<!-- ══════════ Device Panel Overlay ══════════ -->
+<div class="dp-overlay" id="dp-overlay" onclick="closeDevicePanel()"></div>
+<div class="dp-panel" id="dp-panel">
+    <div class="dp-header">
+        <h3><i class="fa-solid fa-mobile-screen"></i> Aparelhos</h3>
+        <span class="dp-slot-info" id="dp-slot-info"></span>
+        <button class="dp-close" onclick="closeDevicePanel()"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div class="dp-body" id="dp-body">
+        <div class="dp-empty" id="dp-empty">
+            <i class="fa-solid fa-spinner fa-spin"></i>
+            <p>Aguardando dispositivos...</p>
+        </div>
+        <div class="dp-grid" id="dp-grid"></div>
+    </div>
+</div>
+
+<!-- Device rename modal -->
+<div class="dp-modal-overlay" id="dp-rename-overlay" onclick="closeRenameModal()"></div>
+<div class="dp-modal" id="dp-rename-modal">
+    <h4><i class="fa-solid fa-pen"></i> Renomear Aparelho</h4>
+    <input type="text" id="dp-rename-input" class="dp-rename-input" maxlength="150" placeholder="Nome do aparelho" onkeydown="if(event.key==='Enter') saveDeviceRename()">
+    <div class="dp-modal-actions">
+        <button class="dp-modal-btn dp-modal-cancel" onclick="closeRenameModal()">Cancelar</button>
+        <button class="dp-modal-btn dp-modal-save" onclick="saveDeviceRename()">Salvar</button>
+    </div>
+</div>
+
 </body>
 </html>
