@@ -1467,7 +1467,8 @@ function renderDevicePanelGrid() {
 
     const activeCount = [...devicesMap.values()].filter(d => d.isActive).length;
     if (slotInfo) {
-        slotInfo.innerHTML = `<span style="color:${activeCount >= planMaxDevices ? '#FF9900' : '#39FF14'}">●</span> ${activeCount} de ${planMaxDevices} ativo(s)`;
+        const color = activeCount >= planMaxDevices ? '#FF9900' : '#39FF14';
+        slotInfo.innerHTML = `<span style="color:${color}">●</span> ${activeCount} de ${planMaxDevices} ativo(s)`;
     }
 
     if (devicesMap.size === 0) {
@@ -1478,30 +1479,74 @@ function renderDevicePanelGrid() {
     if (empty) empty.style.display = 'none';
 
     const nowMs = Date.now();
-    const TRIAL_MS = 7 * 24 * 60 * 60 * 1000;
+    const TRIAL_MS  = 7  * 24 * 60 * 60 * 1000;
+    const WAIT_MS   = 48 * 60 * 60 * 1000;
     let html = '';
 
-    devicesMap.forEach(device => {
+    // Sort: active first, then trial (by days left), then waiting, then expired
+    const devices = [...devicesMap.values()].sort((a, b) => {
+        const rank = d => {
+            if (d.isActive) return 0;
+            if (d.trialStartedAt && (nowMs - d.trialStartedAt) < TRIAL_MS) return 1;
+            if (d.waitStartedAt  && (nowMs - d.waitStartedAt)  < WAIT_MS)  return 2;
+            return 3;
+        };
+        return rank(a) - rank(b);
+    });
+
+    devices.forEach(device => {
         const id = device.deviceId;
-        const eid = escapeHtml(id);
+        const eid = CSS.escape ? CSS.escape(id) : id.replace(/'/g, "\\'");
+        const eidAttr = id.replace(/'/g, "\\'");
         const isSelected = id === currentDeviceId;
         const name = device.displayName || device.model || id;
         const showModel = device.displayName && device.displayName !== device.model;
 
-        // Status badge
+        // --- Status badge & bottom info bar ---
         let badge = '';
+        let trialBar = '';
+        let actionBtn = '';
+
         if (device.isActive) {
             badge = '<span class="dp-status-badge dp-badge-active">Ativo</span>';
+            actionBtn = `<button class="dp-action-btn dp-btn-select" onclick="event.stopPropagation();dpSelectDevice('${eidAttr}')">
+                <i class="fa-solid fa-crosshairs"></i> ${isSelected ? 'Selecionado' : 'Selecionar'}
+            </button>`;
+        } else if (device.waitStartedAt) {
+            const elapsed  = nowMs - device.waitStartedAt;
+            const msLeft   = Math.max(0, WAIT_MS - elapsed);
+            const hrsLeft  = Math.ceil(msLeft / 3600000);
+            const pct      = Math.max(0, Math.min(100, 100 - (elapsed / WAIT_MS) * 100));
+            if (elapsed >= WAIT_MS) {
+                badge = '<span class="dp-status-badge dp-badge-expired">Será removido</span>';
+            } else {
+                badge = `<span class="dp-status-badge dp-badge-wait">Aguardando ${hrsLeft}h</span>`;
+                trialBar = `<div class="dp-trial-bar"><div class="dp-trial-fill dp-fill-wait" style="width:${pct}%"></div></div>
+                    <div class="dp-trial-label"><i class="fa-solid fa-hourglass-half"></i> ${hrsLeft}h para ser removido &mdash; ative-o para manter</div>`;
+            }
+            actionBtn = `<button class="dp-action-btn dp-btn-activate" onclick="event.stopPropagation();activateDevice('${eidAttr}')">
+                <i class="fa-solid fa-bolt"></i> Restaurar
+            </button>`;
         } else if (device.trialStartedAt) {
-            const elapsed = nowMs - device.trialStartedAt;
-            const daysLeft = Math.max(0, Math.ceil((TRIAL_MS - elapsed) / 86400000));
-            if (elapsed > TRIAL_MS) {
-                badge = '<span class="dp-status-badge dp-badge-expired">Expirado</span>';
+            const elapsed  = nowMs - device.trialStartedAt;
+            const msLeft   = Math.max(0, TRIAL_MS - elapsed);
+            const daysLeft = Math.ceil(msLeft / 86400000);
+            const pct      = Math.max(0, Math.min(100, 100 - (elapsed / TRIAL_MS) * 100));
+            if (elapsed >= TRIAL_MS) {
+                badge = '<span class="dp-status-badge dp-badge-expired">Será removido</span>';
             } else {
                 badge = `<span class="dp-status-badge dp-badge-trial">Teste: ${daysLeft}d</span>`;
+                trialBar = `<div class="dp-trial-bar"><div class="dp-trial-fill" style="width:${pct}%"></div></div>
+                    <div class="dp-trial-label"><i class="fa-solid fa-clock"></i> ${daysLeft} dia(s) restante(s) no período de teste</div>`;
             }
+            actionBtn = `<button class="dp-action-btn dp-btn-activate" onclick="event.stopPropagation();activateDevice('${eidAttr}')">
+                <i class="fa-solid fa-bolt"></i> Ativar
+            </button>`;
         } else {
-            badge = '<span class="dp-status-badge dp-badge-trial">Inativo</span>';
+            badge = '<span class="dp-status-badge dp-badge-inactive">Inativo</span>';
+            actionBtn = `<button class="dp-action-btn dp-btn-activate" onclick="event.stopPropagation();activateDevice('${eidAttr}')">
+                <i class="fa-solid fa-bolt"></i> Ativar
+            </button>`;
         }
 
         // Avatar
@@ -1509,26 +1554,19 @@ function renderDevicePanelGrid() {
             ? `<img src="${escapeHtml(device.avatarUrl)}" alt="">`
             : `<i class="fa-solid fa-user"></i>`;
 
-        // Idle time
+        // Idle / online info
         const idleText = device.isOnline ? 'Online agora' : `Offline ${formatIdleTime(device.lastSeen)}`;
         const idleIcon = device.isOnline ? 'fa-wifi' : 'fa-clock';
 
-        const activateBtn = !device.isActive
-            ? `<button class="dp-action-btn dp-btn-select" onclick="event.stopPropagation();activateDevice('${eid}')"><i class="fa-solid fa-bolt"></i> Ativar</button>`
-            : '';
-
         html += `
-        <div class="dp-card ${isSelected ? 'dp-selected' : ''}" onclick="dpSelectDevice('${eid}')">
+        <div class="dp-card ${isSelected ? 'dp-selected' : ''} ${!device.isActive ? 'dp-card-inactive' : ''}" onclick="${device.isActive ? `dpSelectDevice('${eidAttr}')` : ''}">
             <div class="dp-card-top">
-                <div class="dp-avatar ${device.isOnline ? 'online' : ''}" onclick="event.stopPropagation();dpUploadAvatar('${eid}')">
+                <div class="dp-avatar ${device.isOnline ? 'online' : ''}" onclick="event.stopPropagation();dpUploadAvatar('${eidAttr}')">
                     ${avatarContent}
                     <div class="dp-avatar-upload"><i class="fa-solid fa-camera"></i></div>
                 </div>
                 <div class="dp-card-info">
-                    <div class="dp-card-name">
-                        ${escapeHtml(name)}
-                        ${badge}
-                    </div>
+                    <div class="dp-card-name">${escapeHtml(name)} ${badge}</div>
                     ${showModel ? `<div class="dp-card-model">${escapeHtml(device.model)}</div>` : ''}
                     <div class="dp-card-meta">
                         <span class="dp-idle-info"><i class="fa-solid ${idleIcon}"></i> ${idleText}</span>
@@ -1536,15 +1574,13 @@ function renderDevicePanelGrid() {
                 </div>
                 <div class="device-status-dot ${device.isOnline ? 'online' : 'offline'}" style="flex-shrink:0"></div>
             </div>
+            ${trialBar}
             <div class="dp-card-actions">
-                <button class="dp-action-btn dp-btn-select" onclick="event.stopPropagation();dpSelectDevice('${eid}')">
-                    <i class="fa-solid fa-crosshairs"></i> ${isSelected ? 'Selecionado' : 'Selecionar'}
-                </button>
-                <button class="dp-action-btn" onclick="event.stopPropagation();openRenameModal('${eid}')">
+                ${actionBtn}
+                <button class="dp-action-btn" onclick="event.stopPropagation();openRenameModal('${eidAttr}')">
                     <i class="fa-solid fa-pen"></i> Renomear
                 </button>
-                ${activateBtn}
-                <button class="dp-action-btn dp-btn-danger" onclick="event.stopPropagation();confirmDeleteDevice('${eid}')">
+                <button class="dp-action-btn dp-btn-danger" onclick="event.stopPropagation();confirmDeleteDevice('${eidAttr}')">
                     <i class="fa-solid fa-trash"></i>
                 </button>
             </div>
@@ -1669,23 +1705,52 @@ async function deleteDevice(deviceId) {
 async function activateDevice(deviceId) {
     const activeCount = [...devicesMap.values()].filter(d => d.isActive).length;
     if (activeCount >= planMaxDevices) {
-        // Need to swap — show selection dialog
-        const activeDevices = [...devicesMap.values()].filter(d => d.isActive && d.deviceId !== deviceId);
-        if (activeDevices.length === 0) { alert('Nenhum aparelho ativo para trocar.'); return; }
-
-        const options = activeDevices.map(d =>
-            `${escapeHtml(String(d.displayName || d.model || d.deviceId))} (${d.isOnline ? '🟢 online' : '🔴 offline'})`
-        ).join('\n');
-        const choice = prompt(
-            `Limite de ${planMaxDevices} aparelho(s) atingido.\n\nEscolha o número do aparelho a DESATIVAR:\n\n` +
-            activeDevices.map((d, i) => `${i + 1}. ${d.displayName || d.model || d.deviceId}`).join('\n')
-        );
-        const idx = parseInt(choice) - 1;
-        if (isNaN(idx) || idx < 0 || idx >= activeDevices.length) return;
-        await doActivate(deviceId, activeDevices[idx].deviceId);
+        // Need to swap — pick the most idle active device automatically
+        const activeDevices = [...devicesMap.values()]
+            .filter(d => d.isActive && d.deviceId !== deviceId)
+            .sort((a, b) => a.lastSeen - b.lastSeen); // most idle first
+        if (activeDevices.length === 0) { showToast('Nenhum aparelho ativo disponível para troca.', 'error'); return; }
+        const swap = activeDevices[0];
+        const swapName = escapeHtml(swap.displayName || swap.model || swap.deviceId);
+        const targetName = escapeHtml(devicesMap.get(deviceId)?.displayName || devicesMap.get(deviceId)?.model || deviceId);
+        openActivateConfirmModal(deviceId, swap.deviceId, targetName, swapName);
     } else {
         await doActivate(deviceId, null);
     }
+}
+
+function openActivateConfirmModal(deviceId, swapId, targetName, swapName) {
+    let modal = document.getElementById('dp-activate-modal-overlay');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'dp-activate-modal-overlay';
+        modal.className = 'dp-modal-overlay';
+        modal.innerHTML = `
+        <div class="dp-modal dp-activate-modal">
+            <h4 id="dp-activate-title"><i class="fa-solid fa-bolt"></i> Ativar aparelho</h4>
+            <p id="dp-activate-msg"></p>
+            <div class="dp-swap-info" id="dp-swap-info"></div>
+            <div class="dp-modal-actions">
+                <button class="dp-modal-btn dp-modal-cancel" onclick="closeActivateModal()">Cancelar</button>
+                <button class="dp-modal-btn dp-modal-save" id="dp-activate-confirm-btn">Confirmar</button>
+            </div>
+        </div>`;
+        document.body.appendChild(modal);
+    }
+    document.getElementById('dp-activate-msg').innerHTML =
+        `Para ativar <strong>${targetName}</strong>, o aparelho com menos atividade recente será colocado em espera de 48h:`;
+    document.getElementById('dp-swap-info').innerHTML =
+        `<i class="fa-solid fa-hourglass-half" style="color:#FF9900"></i> <strong>${swapName}</strong> → aguardando 48h`;
+    document.getElementById('dp-activate-confirm-btn').onclick = async () => {
+        closeActivateModal();
+        await doActivate(deviceId, swapId);
+    };
+    requestAnimationFrame(() => { modal.classList.add('open'); });
+}
+
+function closeActivateModal() {
+    const m = document.getElementById('dp-activate-modal-overlay');
+    if (m) m.classList.remove('open');
 }
 
 async function doActivate(deviceId, swapDeviceId) {

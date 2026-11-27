@@ -2414,7 +2414,7 @@ audio::-webkit-media-controls-panel { background:var(--bg-input); }
 
 /* Panel overlay */
 .dp-overlay {
-  position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:9000;
+  position:fixed; inset:0; background:rgba(0,0,0,.82); z-index:9000;
   opacity:0; pointer-events:none; transition:opacity .2s;
 }
 .dp-overlay.open { opacity:1; pointer-events:auto; }
@@ -2511,9 +2511,40 @@ audio::-webkit-media-controls-panel { background:var(--bg-input); }
 
 /* Badge styles within card */
 .dp-badge { display:inline-block; }
-.dp-badge-active  { background:rgba(57,255,20,.15);  color:#39FF14; }
-.dp-badge-trial   { background:rgba(255,153,0,.15);  color:#FF9900; }
-.dp-badge-expired { background:rgba(255,56,56,.15);  color:#FF3838; }
+.dp-badge-active   { background:rgba(57,255,20,.15);   color:#39FF14; }
+.dp-badge-trial    { background:rgba(255,153,0,.18);   color:#FF9900; }
+.dp-badge-wait     { background:rgba(255,200,0,.18);   color:#FFD700; }
+.dp-badge-expired  { background:rgba(255,56,56,.15);   color:#FF3838; }
+.dp-badge-inactive { background:rgba(100,116,139,.15); color:#94a3b8; }
+
+/* Activate button */
+.dp-action-btn.dp-btn-activate { color:#FF9900; border-color:rgba(255,153,0,.35); }
+.dp-action-btn.dp-btn-activate:hover { background:rgba(255,153,0,.12); }
+
+/* Trial / wait progress bar */
+.dp-trial-bar {
+  height:3px; background:rgba(255,255,255,.07); border-radius:2px;
+  margin:8px 0 4px; overflow:hidden;
+}
+.dp-trial-fill { height:100%; background:#FF9900; border-radius:2px; transition:width .3s; }
+.dp-trial-fill.dp-fill-wait { background:#FFD700; }
+.dp-trial-label {
+  font-size:.7rem; color:var(--text-muted); margin-bottom:8px;
+  display:flex; align-items:center; gap:5px;
+}
+
+/* Inactive card dimming */
+.dp-card-inactive { opacity:.85; }
+
+/* Activate confirm modal */
+.dp-activate-modal { max-width:360px; }
+.dp-activate-modal h4 { font-size:.95rem; font-weight:600; margin:0 0 10px; }
+.dp-activate-modal p  { font-size:.82rem; color:var(--text-secondary); margin:0 0 10px; }
+.dp-swap-info {
+  background:rgba(255,153,0,.1); border:1px solid rgba(255,153,0,.25);
+  border-radius:8px; padding:10px 14px; font-size:.82rem;
+  color:#FF9900; margin-bottom:16px;
+}
 
 /* Rename modal */
 .dp-modal-overlay {
