@@ -2548,4 +2548,6 @@ audio::-webkit-media-controls-panel { background:var(--bg-input); }
 
 @media (max-width:767px) {
   .dp-panel { width:100vw; right:-100vw; }
+  .dp-panel.open { right:0!important; }
+  .dp-overlay.open { z-index:9000!important; }
 }
