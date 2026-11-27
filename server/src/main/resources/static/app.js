@@ -1443,17 +1443,20 @@ function renderDeviceList() {
 
 // ─── Device Panel Overlay ─────────────────────────────────────────────────────
 function openDevicePanel() {
-    if (window.innerWidth <= 767) closeSidebar();
     renderDevicePanelGrid();
-    requestAnimationFrame(() => {
-        document.getElementById('dp-overlay').classList.add('open');
-        document.getElementById('dp-panel').classList.add('open');
-    });
+    const overlay = document.getElementById('dp-overlay');
+    const panel   = document.getElementById('dp-panel');
+    if (!overlay || !panel) return;
+    overlay.classList.add('open');
+    // force reflow so the transition fires even if display was none
+    panel.getBoundingClientRect();
+    panel.classList.add('open');
 }
 
 function closeDevicePanel() {
     document.getElementById('dp-overlay').classList.remove('open');
     document.getElementById('dp-panel').classList.remove('open');
+    closeSidebar();
 }
 
 function renderDevicePanelGrid() {

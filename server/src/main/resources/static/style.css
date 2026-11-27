@@ -2546,8 +2546,10 @@ audio::-webkit-media-controls-panel { background:var(--bg-input); }
 .dp-modal-save { background:var(--accent); color:#000; }
 .dp-modal-save:hover { opacity:.85; }
 
-@media (max-width:767px) {
-  .dp-panel { width:100vw; right:-100vw; }
-  .dp-panel.open { right:0!important; }
-  .dp-overlay.open { z-index:9000!important; }
+@media (max-width:900px) {
+  .dp-panel { width:100vw!important; right:-110vw!important; }
+  .dp-panel.open { right:0!important; transform:none!important; }
+  .dp-overlay { z-index:10000!important; }
+  .dp-overlay.open { opacity:1!important; pointer-events:auto!important; }
+  .dp-panel.open { z-index:10001!important; }
 }
