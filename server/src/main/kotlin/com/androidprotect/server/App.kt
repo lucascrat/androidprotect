@@ -641,17 +641,24 @@ fun startDeviceCleanupJob() {
             val waitLimit  = nowMs - 48L * 60 * 60 * 1000        // 48 hours
             transaction {
                 // Delete expired trial devices (7 days exceeded, still inactive)
-                DevicesTable.deleteWhere {
-                    (DevicesTable.isActive eq false) and
-                    DevicesTable.trialStartedAt.isNotNull() and
-                    (DevicesTable.trialStartedAt less trialLimit)
-                }
+                val expiredTrialIds = DevicesTable
+                    .select { DevicesTable.isActive eq false }
+                    .mapNotNull { row ->
+                        val ts = row[DevicesTable.trialStartedAt]
+                        if (ts != null && ts < trialLimit) row[DevicesTable.id] else null
+                    }
+                if (expiredTrialIds.isNotEmpty())
+                    DevicesTable.deleteWhere { DevicesTable.id inList expiredTrialIds }
+
                 // Delete expired waiting devices (48h exceeded, still inactive)
-                DevicesTable.deleteWhere {
-                    (DevicesTable.isActive eq false) and
-                    DevicesTable.waitStartedAt.isNotNull() and
-                    (DevicesTable.waitStartedAt less waitLimit)
-                }
+                val expiredWaitIds = DevicesTable
+                    .select { DevicesTable.isActive eq false }
+                    .mapNotNull { row ->
+                        val ws = row[DevicesTable.waitStartedAt]
+                        if (ws != null && ws < waitLimit) row[DevicesTable.id] else null
+                    }
+                if (expiredWaitIds.isNotEmpty())
+                    DevicesTable.deleteWhere { DevicesTable.id inList expiredWaitIds }
             }
         }
     }
