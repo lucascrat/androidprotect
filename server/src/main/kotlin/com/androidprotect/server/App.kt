@@ -182,7 +182,8 @@ data class DeviceInfo(
     val isActive: Boolean = true,
     val trialStartedAt: Long? = null,
     val lastSeen: Long = 0,
-    val avatarUrl: String = ""
+    val avatarUrl: String = "",
+    val waitStartedAt: Long? = null
 )
 
 @Serializable
@@ -256,6 +257,7 @@ object DevicesTable : Table("devices") {
     val isActive       = bool("is_active").default(true)      // within plan slot
     val trialStartedAt = long("trial_started_at").nullable()  // non-null → in 7-day trial
     val avatarUrl      = varchar("avatar_url", 500).default("")
+    val waitStartedAt  = long("wait_started_at").nullable()   // non-null → 48h wait after swap
 
     override val primaryKey = PrimaryKey(id)
 }
@@ -629,9 +631,36 @@ fun initDatabase() {
     initMonetizationData()
 }
 
+fun startDeviceCleanupJob() {
+    val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    scope.launch {
+        while (true) {
+            kotlinx.coroutines.delay(3_600_000L) // run every hour
+            val nowMs = System.currentTimeMillis()
+            val trialLimit = nowMs - 7L * 24 * 60 * 60 * 1000   // 7 days
+            val waitLimit  = nowMs - 48L * 60 * 60 * 1000        // 48 hours
+            transaction {
+                // Delete expired trial devices (7 days exceeded, still inactive)
+                DevicesTable.deleteWhere {
+                    (DevicesTable.isActive eq false) and
+                    DevicesTable.trialStartedAt.isNotNull() and
+                    (DevicesTable.trialStartedAt less trialLimit)
+                }
+                // Delete expired waiting devices (48h exceeded, still inactive)
+                DevicesTable.deleteWhere {
+                    (DevicesTable.isActive eq false) and
+                    DevicesTable.waitStartedAt.isNotNull() and
+                    (DevicesTable.waitStartedAt less waitLimit)
+                }
+            }
+        }
+    }
+}
+
 fun main() {
     // Initialize Database
     initDatabase()
+    startDeviceCleanupJob()
 
     embeddedServer(Netty, port = 8080, host = "0.0.0.0", configure = {
         responseWriteTimeoutSeconds = 300  // 5 min — allows large R2 uploads (APK, video) to complete
@@ -2280,13 +2309,14 @@ fun main() {
 
                     // For existing devices, preserve their isActive/trialStartedAt/displayName.
                     // For new devices, check plan limit and assign trial if needed.
-                    data class DevMeta(val isActive: Boolean, val trialStartedAt: Long?, val displayName: String, val avatarUrl: String)
+                    data class DevMeta(val isActive: Boolean, val trialStartedAt: Long?, val displayName: String, val avatarUrl: String, val waitStartedAt: Long?)
                     val devMeta = if (exists) {
                         DevMeta(
                             existingRow!![DevicesTable.isActive],
                             existingRow[DevicesTable.trialStartedAt],
                             existingRow[DevicesTable.displayName],
-                            existingRow[DevicesTable.avatarUrl]
+                            existingRow[DevicesTable.avatarUrl],
+                            existingRow[DevicesTable.waitStartedAt]
                         )
                     } else if (resolvedOwnerId != null) {
                         val maxD = UsersTable.select { UsersTable.id eq resolvedOwnerId }
@@ -2294,10 +2324,10 @@ fun main() {
                         val activeCount = DevicesTable.select {
                             (DevicesTable.ownerId eq resolvedOwnerId) and (DevicesTable.isActive eq true)
                         }.count()
-                        if (activeCount < maxD) DevMeta(true, null, "", "")
-                        else DevMeta(false, nowMs, "", "")
+                        if (activeCount < maxD) DevMeta(true, null, "", "", null)
+                        else DevMeta(false, nowMs, "", "", null)
                     } else {
-                        DevMeta(true, null, "", "")
+                        DevMeta(true, null, "", "", null)
                     }
 
                     if (exists) {
@@ -2321,6 +2351,7 @@ fun main() {
                             it[DevicesTable.isActive]       = devMeta.isActive
                             it[DevicesTable.trialStartedAt] = devMeta.trialStartedAt
                             it[DevicesTable.displayName]    = devMeta.displayName
+                            it[DevicesTable.waitStartedAt]  = devMeta.waitStartedAt
                         }
                     }
 
@@ -2335,7 +2366,7 @@ fun main() {
                     DeviceInfo(deviceId, model, battery, isCharging,
                         isOnline = true, displayName = devMeta.displayName,
                         isActive = devMeta.isActive, trialStartedAt = devMeta.trialStartedAt,
-                        lastSeen = nowMs, avatarUrl = devMeta.avatarUrl)
+                        lastSeen = nowMs, avatarUrl = devMeta.avatarUrl, waitStartedAt = devMeta.waitStartedAt)
                 }
 
                 // Notify only the owner's dashboards
@@ -2688,7 +2719,8 @@ fun main() {
                                 isActive       = it[DevicesTable.isActive],
                                 trialStartedAt = it[DevicesTable.trialStartedAt],
                                 lastSeen       = it[DevicesTable.lastSeen],
-                                avatarUrl      = it[DevicesTable.avatarUrl]
+                                avatarUrl      = it[DevicesTable.avatarUrl],
+                                waitStartedAt  = it[DevicesTable.waitStartedAt]
                             )
                         }
                 }
@@ -3112,14 +3144,17 @@ fun main() {
                 val nowMs = System.currentTimeMillis()
                 transaction {
                     if (swapId != null) {
+                        // Deactivated device enters 48h waiting period (not trial)
                         DevicesTable.update({ (DevicesTable.id eq swapId) and (DevicesTable.ownerId eq userId) }) {
-                            it[DevicesTable.isActive] = false
-                            it[DevicesTable.trialStartedAt] = nowMs
+                            it[DevicesTable.isActive]      = false
+                            it[DevicesTable.trialStartedAt] = null
+                            it[DevicesTable.waitStartedAt]  = nowMs
                         }
                     }
                     DevicesTable.update({ (DevicesTable.id eq deviceId) and (DevicesTable.ownerId eq userId) }) {
-                        it[DevicesTable.isActive] = true
+                        it[DevicesTable.isActive]      = true
                         it[DevicesTable.trialStartedAt] = null
+                        it[DevicesTable.waitStartedAt]  = null
                     }
                 }
 
@@ -3130,7 +3165,7 @@ fun main() {
                             DeviceInfo(it[DevicesTable.id], it[DevicesTable.model], it[DevicesTable.battery],
                                 it[DevicesTable.isCharging], it[DevicesTable.isOnline],
                                 it[DevicesTable.displayName], it[DevicesTable.isActive], it[DevicesTable.trialStartedAt],
-                                it[DevicesTable.lastSeen], it[DevicesTable.avatarUrl])
+                                it[DevicesTable.lastSeen], it[DevicesTable.avatarUrl], it[DevicesTable.waitStartedAt])
                         }
                 }
                 broadcastToUserId(packetJson.encodeToString(DeviceListPacket(devices = updatedList, maxDevices = maxDevices)), userId)
